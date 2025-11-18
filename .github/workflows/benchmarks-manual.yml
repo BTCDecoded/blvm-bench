@@ -170,4 +170,3 @@ EOF
             results/benchmark-results-consolidated-*.json
             docs/data/benchmark-results-consolidated-latest.json
 
-# Trigger workflow re-index
