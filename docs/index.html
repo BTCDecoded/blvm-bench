@@ -137,17 +137,27 @@
             border-collapse: collapse;
             margin: 20px 0;
             background: white;
+            table-layout: fixed; /* Fixed layout for consistent column widths */
         }
         th, td {
-            padding: 12px;
+            padding: 12px 15px;
             text-align: left;
             border-bottom: 1px solid #ddd;
+            vertical-align: top;
         }
         th {
             background: #f7931a;
             color: white;
             font-weight: 600;
+            position: sticky;
+            top: 0;
         }
+        /* Consistent column widths */
+        th:nth-child(1), td:nth-child(1) { width: 25%; } /* Benchmark name */
+        th:nth-child(2), td:nth-child(2) { width: 20%; text-align: right; } /* Core time */
+        th:nth-child(3), td:nth-child(3) { width: 20%; text-align: right; } /* Commons time */
+        th:nth-child(4), td:nth-child(4) { width: 15%; text-align: center; } /* Winner */
+        th:nth-child(5), td:nth-child(5) { width: 20%; text-align: right; } /* Speed difference */
         tr:hover {
             background: #f9f9f9;
         }
@@ -365,28 +375,44 @@
         }
 
         function extractTime(data) {
-            if (!data) return '—';
+            if (!data || typeof data !== 'object') return '—';
             
             // Try various time fields (direct)
-            let time = data.time_ms || data.time_ns || data.time || 0;
+            let time = data.time_ms || data.time_ns || data.time || data.median || data.mean || 0;
             
             // If no direct time, look in nested structures
             if (!time || time === 0) {
                 // Check benchmarks array
                 if (data.benchmarks && Array.isArray(data.benchmarks) && data.benchmarks.length > 0) {
                     const firstBench = data.benchmarks[0];
-                    time = firstBench.time_ms || firstBench.time_ns || firstBench.time || 0;
+                    time = firstBench.time_ms || firstBench.time_ns || firstBench.time || 
+                           firstBench.median || firstBench.mean ||
+                           (firstBench.statistics && (firstBench.statistics.median?.point_estimate || firstBench.statistics.mean?.point_estimate)) || 0;
+                }
+                
+                // Check statistics object
+                if ((!time || time === 0) && data.statistics) {
+                    time = data.statistics.median?.point_estimate || 
+                           data.statistics.mean?.point_estimate || 0;
                 }
                 
                 // Check nested objects (e.g., bitcoin_core_block_validation.primary_comparison.time_per_block_ms)
                 if (!time || time === 0) {
-                    const findNestedTime = (obj) => {
+                    const findNestedTime = (obj, depth = 0) => {
+                        if (depth > 5) return 0; // Prevent infinite recursion
                         for (const key in obj) {
                             if (key.includes('time') && typeof obj[key] === 'number' && obj[key] > 0) {
                                 return obj[key];
                             }
-                            if (typeof obj[key] === 'object' && obj[key] !== null) {
-                                const found = findNestedTime(obj[key]);
+                            if (key === 'median' || key === 'mean') {
+                                const val = obj[key];
+                                if (typeof val === 'number' && val > 0) return val;
+                                if (val && typeof val === 'object' && val.point_estimate && val.point_estimate > 0) {
+                                    return val.point_estimate;
+                                }
+                            }
+                            if (typeof obj[key] === 'object' && obj[key] !== null && !Array.isArray(obj[key])) {
+                                const found = findNestedTime(obj[key], depth + 1);
                                 if (found) return found;
                             }
                         }
