@@ -15,7 +15,7 @@ on:
 
 jobs:
   run-benchmarks:
-    runs-on: self-hosted  # Self-hosted runner required
+    runs-on: [self-hosted, linux]  # Self-hosted runner required
     
     steps:
       - name: Checkout repository
@@ -126,7 +126,7 @@ jobs:
             ${{ steps.find_json.outputs.json_file }}
             docs/data/benchmark-results-consolidated-latest.json
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.REPO_ACCESS_TOKEN }}
 
       - name: Upload benchmark artifacts
         uses: actions/upload-artifact@v3

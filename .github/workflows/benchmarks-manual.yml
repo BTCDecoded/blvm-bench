@@ -17,7 +17,7 @@ on:
 
 jobs:
   run-benchmarks:
-    runs-on: self-hosted
+    runs-on: [self-hosted, linux]
     
     steps:
       - name: Checkout repository
