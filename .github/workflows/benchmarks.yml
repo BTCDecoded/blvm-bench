@@ -109,6 +109,29 @@ jobs:
             }
           fi
           
+          # Setup Commons protocol (needed for bllvm-bench Cargo.toml)
+          PROTOCOL_DIR="$HOME/bllvm-protocol"
+          RELATIVE_PROTOCOL_DIR="$BENCH_ROOT/../bllvm-protocol"
+          
+          if [ ! -d "$PROTOCOL_DIR" ]; then
+            echo "Cloning Bitcoin Commons (bllvm-protocol) to $PROTOCOL_DIR..."
+            git clone --depth 1 https://github.com/BTCDecoded/bllvm-protocol.git "$PROTOCOL_DIR" || {
+              echo "⚠️  Failed to clone bllvm-protocol (may not be needed)"
+            }
+          else
+            echo "✅ bllvm-protocol already exists at $PROTOCOL_DIR"
+          fi
+          
+          # Also create symlink for Cargo.toml path dependency
+          if [ ! -d "$RELATIVE_PROTOCOL_DIR" ] && [ -d "$PROTOCOL_DIR" ]; then
+            echo "Creating symlink for bllvm-protocol Cargo.toml path dependency..."
+            mkdir -p "$(dirname "$RELATIVE_PROTOCOL_DIR")"
+            ln -s "$PROTOCOL_DIR" "$RELATIVE_PROTOCOL_DIR" || {
+              echo "⚠️  Symlink failed, trying copy..."
+              cp -r "$PROTOCOL_DIR" "$RELATIVE_PROTOCOL_DIR" || echo "⚠️  Copy also failed"
+            }
+          fi
+          
           # Verify directories exist
           if [ ! -d "$CORE_DIR" ]; then
             echo "❌ Core directory does not exist: $CORE_DIR"
@@ -159,6 +182,50 @@ jobs:
           echo "  COMMONS_CONSENSUS_PATH: $CONSENSUS_DIR"
           echo "  COMMONS_NODE_PATH: $NODE_DIR"
 
+      - name: Build Bitcoin Core (bench_bitcoin)
+        run: |
+          CORE_PATH="${{ steps.setup.outputs.core_path }}"
+          echo "Building Bitcoin Core with benchmarks enabled..."
+          echo "CORE_PATH: $CORE_PATH"
+          
+          if [ ! -d "$CORE_PATH" ]; then
+            echo "❌ CORE_PATH does not exist: $CORE_PATH"
+            exit 1
+          fi
+          
+          cd "$CORE_PATH"
+          
+          # Build with CMake (modern Core)
+          echo "Configuring with CMake..."
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_BENCH=ON -DENABLE_WALLET=OFF -DBUILD_GUI=OFF || {
+            echo "⚠️  CMake configure failed, trying autotools..."
+            ./autogen.sh || echo "⚠️  autogen.sh failed"
+            ./configure --enable-bench --disable-wallet --disable-gui || {
+              echo "❌ Configure failed"
+              exit 1
+            }
+            make -j$(nproc) bench_bitcoin || {
+              echo "❌ Build failed"
+              exit 1
+            }
+            exit 0
+          }
+          
+          echo "Building bench_bitcoin..."
+          cmake --build build -t bench_bitcoin -j$(nproc) || {
+            echo "❌ Failed to build bench_bitcoin"
+            exit 1
+          }
+          
+          # Verify bench_bitcoin exists
+          if [ -f "build/bin/bench_bitcoin" ]; then
+            echo "✅ bench_bitcoin built successfully at build/bin/bench_bitcoin"
+          else
+            echo "❌ bench_bitcoin not found after build"
+            ls -la build/bin/ 2>/dev/null || echo "build/bin/ does not exist"
+            exit 1
+          fi
+
       - name: Verify paths and set environment
         run: |
           # Get paths from previous step
@@ -179,6 +246,13 @@ jobs:
           if [ ! -d "$COMMONS_NODE_PATH" ]; then
             echo "❌ COMMONS_NODE_PATH does not exist: $COMMONS_NODE_PATH"
             exit 1
+          fi
+          
+          # Verify bench_bitcoin exists
+          if [ -f "$CORE_PATH/build/bin/bench_bitcoin" ]; then
+            echo "✅ bench_bitcoin found at $CORE_PATH/build/bin/bench_bitcoin"
+          else
+            echo "⚠️  bench_bitcoin not found - Core benchmarks will fail"
           fi
           
           # Test path discovery
