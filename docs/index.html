@@ -268,10 +268,31 @@
                     console.log('✅ Loaded from main branch');
                 }
 
-                if (!jsonData || !jsonData.benchmarks) {
-                    throw new Error('Invalid benchmark data format: missing "benchmarks" array');
+                if (!jsonData) {
+                    throw new Error('No JSON data loaded');
                 }
 
+                // Check if benchmarks exist (could be empty object)
+                if (!jsonData.benchmarks) {
+                    console.warn('No benchmarks object in JSON. JSON keys:', Object.keys(jsonData));
+                    // Show message that no benchmarks are available yet
+                    contentEl.innerHTML = '<div class="info-box"><p><strong>No benchmark data available yet.</strong></p><p>The benchmarks object is empty. Run benchmarks to populate data.</p><p>JSON structure: ' + JSON.stringify(Object.keys(jsonData)) + '</p></div>';
+                    loadingEl.style.display = 'none';
+                    contentEl.style.display = 'block';
+                    return;
+                }
+
+                // Check if benchmarks object has any entries
+                const benchmarkCount = Object.keys(jsonData.benchmarks).length;
+                if (benchmarkCount === 0) {
+                    console.warn('Benchmarks object is empty');
+                    contentEl.innerHTML = '<div class="info-box"><p><strong>No benchmark data available yet.</strong></p><p>The benchmarks have been run but no data was generated. Check the benchmark scripts.</p></div>';
+                    loadingEl.style.display = 'none';
+                    contentEl.style.display = 'block';
+                    return;
+                }
+
+                console.log(`Rendering ${benchmarkCount} benchmarks`);
                 renderBenchmarks(jsonData);
                 loadingEl.style.display = 'none';
                 contentEl.style.display = 'block';
