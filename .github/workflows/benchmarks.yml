@@ -179,13 +179,35 @@ EOF
           COMMONS_CONSENSUS_PATH: ${{ steps.setup.outputs.commons_consensus_path }}
           COMMONS_NODE_PATH: ${{ steps.setup.outputs.commons_node_path }}
         run: |
+          # Explicitly export paths BEFORE running any scripts
           export CORE_PATH="$CORE_PATH"
           export COMMONS_CONSENSUS_PATH="$COMMONS_CONSENSUS_PATH"
           export COMMONS_NODE_PATH="$COMMONS_NODE_PATH"
+          export BLLVM_BENCH_CONFIG="$(pwd)/config/config.toml"
+          
           echo "Running benchmarks with paths:"
           echo "  CORE_PATH: $CORE_PATH"
           echo "  COMMONS_CONSENSUS_PATH: $COMMONS_CONSENSUS_PATH"
           echo "  COMMONS_NODE_PATH: $COMMONS_NODE_PATH"
+          echo "  Config file: $BLLVM_BENCH_CONFIG"
+          
+          # Verify paths exist
+          if [ ! -d "$COMMONS_CONSENSUS_PATH" ]; then
+            echo "❌ COMMONS_CONSENSUS_PATH does not exist: $COMMONS_CONSENSUS_PATH"
+            exit 1
+          fi
+          if [ ! -d "$COMMONS_NODE_PATH" ]; then
+            echo "❌ COMMONS_NODE_PATH does not exist: $COMMONS_NODE_PATH"
+            exit 1
+          fi
+          
+          # Verify config file exists
+          if [ ! -f "$BLLVM_BENCH_CONFIG" ]; then
+            echo "❌ Config file does not exist: $BLLVM_BENCH_CONFIG"
+            exit 1
+          fi
+          
+          echo "✅ All paths verified, running benchmarks..."
           make bench
 
       - name: Generate consolidated JSON

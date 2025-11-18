@@ -47,11 +47,15 @@ if [ -z "$COMMONS_CONSENSUS_PATH" ]; then
     echo "❌ Error: Commons consensus path not discovered" >&2
     echo "   BLLVM_BENCH_ROOT: ${BLLVM_BENCH_ROOT:-NOT SET}" >&2
     echo "   Current directory: $(pwd)" >&2
+    echo "   CORE_PATH: ${CORE_PATH:-NOT SET}" >&2
+    echo "   COMMONS_CONSENSUS_PATH: ${COMMONS_CONSENSUS_PATH:-NOT SET}" >&2
+    echo "   COMMONS_NODE_PATH: ${COMMONS_NODE_PATH:-NOT SET}" >&2
+    echo "   BLLVM_BENCH_CONFIG: ${BLLVM_BENCH_CONFIG:-NOT SET}" >&2
     echo "   Please set paths in config/config.toml or ensure Commons are in standard locations" >&2
     echo "" >&2
     echo "   Trying manual discovery..." >&2
     # Last resort: try to find it from common locations
-    for path in "../bllvm-consensus" "../../bllvm-consensus" "$HOME/src/bllvm-consensus" "$(dirname "$BLLVM_BENCH_ROOT")/bllvm-consensus" "$(dirname "$(dirname "$BLLVM_BENCH_ROOT")")/commons/bllvm-consensus"; do
+    for path in "../bllvm-consensus" "../../bllvm-consensus" "$HOME/src/bllvm-consensus" "$HOME/bllvm-consensus" "$(dirname "$BLLVM_BENCH_ROOT")/bllvm-consensus" "$(dirname "$(dirname "$BLLVM_BENCH_ROOT")")/commons/bllvm-consensus"; do
         if [ -d "$path" ] && [ -f "$path/Cargo.toml" ] && grep -q "bllvm-consensus" "$path/Cargo.toml" 2>/dev/null; then
             abs_path=$(cd "$path" 2>/dev/null && pwd || echo "")
             if [ -n "$abs_path" ]; then
@@ -59,7 +63,7 @@ if [ -z "$COMMONS_CONSENSUS_PATH" ]; then
                 export COMMONS_CONSENSUS_PATH
                 echo "   ✅ Found: $COMMONS_CONSENSUS_PATH" >&2
                 # Also try to find bllvm-node
-                for node_path in "$(dirname "$abs_path")/bllvm-node" "$abs_path/../bllvm-node"; do
+                for node_path in "$(dirname "$abs_path")/bllvm-node" "$abs_path/../bllvm-node" "$HOME/bllvm-node"; do
                     if [ -d "$node_path" ] && [ -f "$node_path/Cargo.toml" ] && grep -q "bllvm-node" "$node_path/Cargo.toml" 2>/dev/null; then
                         abs_node_path=$(cd "$node_path" 2>/dev/null && pwd || echo "")
                         if [ -n "$abs_node_path" ]; then
@@ -76,6 +80,7 @@ if [ -z "$COMMONS_CONSENSUS_PATH" ]; then
     done
     
     if [ -z "$COMMONS_CONSENSUS_PATH" ]; then
+        echo "   ❌ Failed to find bllvm-consensus in any standard location" >&2
         exit 1
     fi
 fi
