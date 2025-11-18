@@ -201,6 +201,20 @@ case "$SUITE" in
     "all")
         echo "Running all available benchmarks for maximum coverage..."
         
+        # Run special combined benchmarks first (RPC, Concurrent, Memory, Parallel)
+        if [ -d "$BLLVM_BENCH_ROOT/scripts/shared/benchmarks" ]; then
+            echo ""
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "Running Special Combined Benchmarks"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            for bench_script in "$BLLVM_BENCH_ROOT/scripts/shared/benchmarks"/*.sh; do
+                if [ -f "$bench_script" ]; then
+                    bench_name=$(basename "$bench_script" .sh)
+                    run_benchmark "${bench_name}" "$bench_script" 600
+                fi
+            done
+        fi
+        
         # Run all Core benchmarks
         if [ -n "$CORE_PATH" ]; then
             echo ""

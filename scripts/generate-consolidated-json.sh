@@ -85,6 +85,59 @@ while IFS= read -r json_file; do
     
     BENCH_NAME=$(basename "$json_file" .json | sed 's/-[0-9]\{8\}-[0-9]\{6\}$//')
     
+    # Handle special combined benchmarks (RPC, Concurrent, Memory, Parallel)
+    if echo "$BENCH_NAME" | grep -qE "^(performance-rpc-http|concurrent-operations-fair|memory-efficiency-fair|parallel-block-validation-bench)$"; then
+        # These benchmarks contain both Core and Commons data in one file
+        BENCH_KEY=$(echo "$BENCH_NAME" | sed 's/-fair$//' | sed 's/performance-rpc-http/rpc-performance/' | sed 's/parallel-block-validation-bench/parallel-block-validation/')
+        BENCH_COUNT=$((BENCH_COUNT + 1))
+        
+        # Read JSON file - it should have both core and commons data
+        DATA_CONTENT=$(cat "$json_file" 2>/dev/null || echo "{}")
+        
+        # Try to extract core and commons data from the combined file
+        CORE_DATA=$(echo "$DATA_CONTENT" | jq '.core // .bitcoin_core // {}' 2>/dev/null || echo "{}")
+        COMMONS_DATA=$(echo "$DATA_CONTENT" | jq '.commons // .bitcoin_commons // {}' 2>/dev/null || echo "{}")
+        
+        # If the file structure is different, use the whole file for both
+        if [ "$CORE_DATA" = "{}" ] && [ "$COMMONS_DATA" = "{}" ]; then
+            # File might have a different structure - use it as-is and let comparison logic handle it
+            jq --arg key "$BENCH_KEY" --argjson data "$DATA_CONTENT" \
+               '.benchmarks[$key] = (.benchmarks[$key] // {}) | 
+                .benchmarks[$key].name = $key |
+                .benchmarks[$key].combined = $data' \
+               "$OUTPUT_FILE" > "$OUTPUT_FILE.tmp" && mv "$OUTPUT_FILE.tmp" "$OUTPUT_FILE"
+            
+            # Try to split if possible
+            if echo "$DATA_CONTENT" | jq -e '.core' >/dev/null 2>&1; then
+                CORE_COUNT=$((CORE_COUNT + 1))
+                jq --arg key "$BENCH_KEY" --argjson data "$CORE_DATA" \
+                   '.benchmarks[$key].core = $data' \
+                   "$OUTPUT_FILE" > "$OUTPUT_FILE.tmp" && mv "$OUTPUT_FILE.tmp" "$OUTPUT_FILE"
+            fi
+            if echo "$DATA_CONTENT" | jq -e '.commons' >/dev/null 2>&1; then
+                COMMONS_COUNT=$((COMMONS_COUNT + 1))
+                jq --arg key "$BENCH_KEY" --argjson data "$COMMONS_DATA" \
+                   '.benchmarks[$key].commons = $data' \
+                   "$OUTPUT_FILE" > "$OUTPUT_FILE.tmp" && mv "$OUTPUT_FILE.tmp" "$OUTPUT_FILE"
+            fi
+        else
+            # File has separate core and commons data
+            jq --arg key "$BENCH_KEY" --argjson core_data "$CORE_DATA" --argjson commons_data "$COMMONS_DATA" \
+               '.benchmarks[$key] = (.benchmarks[$key] // {}) | 
+                .benchmarks[$key].name = $key |
+                .benchmarks[$key].core = $core_data |
+                .benchmarks[$key].commons = $commons_data' \
+               "$OUTPUT_FILE" > "$OUTPUT_FILE.tmp" && mv "$OUTPUT_FILE.tmp" "$OUTPUT_FILE"
+            
+            CORE_COUNT=$((CORE_COUNT + 1))
+            COMMONS_COUNT=$((COMMONS_COUNT + 1))
+            if [ "$CORE_DATA" != "{}" ] && [ "$COMMONS_DATA" != "{}" ]; then
+                COMPARISON_COUNT=$((COMPARISON_COUNT + 1))
+            fi
+        fi
+        continue
+    fi
+    
     # Extract benchmark data
     if echo "$BENCH_NAME" | grep -q "^core-"; then
         CORE_COUNT=$((CORE_COUNT + 1))
