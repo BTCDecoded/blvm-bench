@@ -10,16 +10,25 @@ fn create_simple_script() -> Vec<u8> {
 }
 
 /// Create a complex script with many operations
+/// Matches Core's VerifyNestedIfScript complexity: 100 nested operations + 1000 operations inside
+/// Since Commons doesn't have OP_IF yet, we use OP_DUP/OP_HASH160/OP_EQUALVERIFY pattern
+/// to achieve similar operation count: 100 * 4 ops = 400 ops + 1000 ops = 1400 total ops
 fn create_complex_script() -> Vec<u8> {
-    // Create a script with many operations (similar complexity to Core's VerifyNestedIfScript)
+    // Create a script with many operations (matches Core's VerifyNestedIfScript operation count)
     let mut script = Vec::new();
-    // Add many OP_DUP, OP_HASH160, OP_EQUALVERIFY operations
-    for _ in 0..50 {
+    // Core: 100 nested IF + 1000 OP_1 + 100 ENDIF = ~1200 operations
+    // We use: 100 * (OP_DUP + OP_HASH160 + push + OP_EQUALVERIFY) = 400 ops
+    // Plus 1000 OP_1 operations = 1400 total (slightly more to account for no IF overhead)
+    for _ in 0..100 {
         script.push(0x76); // OP_DUP
         script.push(0xa9); // OP_HASH160
         script.push(0x14); // Push 20 bytes
         script.extend_from_slice(&[0x42; 20]);
         script.push(0x88); // OP_EQUALVERIFY
+    }
+    // Add 1000 OP_1 operations (matches Core's inner loop)
+    for _ in 0..1000 {
+        script.push(0x51); // OP_1
     }
     script.push(0xac); // OP_CHECKSIG
     script

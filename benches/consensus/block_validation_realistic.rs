@@ -7,7 +7,7 @@
 //! 3. Forces full script verification (no assume-valid optimization)
 //! 4. Matches Core's ConnectBlock benchmark methodology
 
-use bllvm_consensus::block::connect_block;
+use bllvm_consensus::block::{connect_block, calculate_tx_id};
 use bllvm_consensus::segwit::Witness;
 use bllvm_consensus::{
     tx_inputs, tx_outputs, Block, BlockHeader, OutPoint, Transaction, TransactionInput, TransactionOutput, UTXO, UtxoSet,
@@ -85,12 +85,12 @@ fn create_realistic_test_block_with_signatures(num_txs: usize) -> (Block, UtxoSe
     
     // Create UTXO set and transactions
     // Strategy: Create a chain where each transaction spends the first output of the previous transaction
+    // Calculate coinbase transaction hash BEFORE moving it into vector
+    let coinbase_tx_id = calculate_tx_id(&coinbase);
     let mut utxo_set = UtxoSet::new();
     let mut transactions = vec![coinbase];
-    
-    // Create first UTXO from coinbase (will be spent by first transaction)
     let coinbase_outpoint = OutPoint {
-        hash: [0; 32], // Coinbase hash (simplified)
+        hash: coinbase_tx_id,
         index: 0,
     };
     let coinbase_utxo = UTXO {
@@ -126,17 +126,19 @@ fn create_realistic_test_block_with_signatures(num_txs: usize) -> (Block, UtxoSe
             lock_time: 0,
         };
         
+        // Calculate actual transaction hash (needed for next transaction's outpoint)
+        let tx_id = calculate_tx_id(&tx);
         transactions.push(tx);
         
-        // Update for next iteration
+        // Update for next iteration - use ACTUAL transaction hash
         prev_output_value = prev_output_value / 2;
         let next_script_pubkey = create_p2wpkh_script_pubkey(&public_keys[i % public_keys.len()]);
         prev_outpoint = OutPoint {
-            hash: [i as u8 + 1; 32], // Different hash for each
+            hash: tx_id, // Use actual transaction hash, not synthetic
             index: 0,
         };
         
-        // Create UTXO for next transaction to spend
+        // Create UTXO for next transaction to spend (using actual transaction hash)
         let utxo = UTXO {
             value: prev_output_value,
             script_pubkey: next_script_pubkey,

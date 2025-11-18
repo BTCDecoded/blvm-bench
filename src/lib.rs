@@ -6,6 +6,7 @@
 
 /// Benchmark utilities and helpers
 pub mod utils;
+pub mod deep_analysis;
 
 /// Shell benchmark runner
 pub mod shell;

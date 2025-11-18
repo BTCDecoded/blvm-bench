@@ -29,6 +29,9 @@ serde_json = "1.0"
 anyhow = "1.0"
 thiserror = "1.0"
 
+# Deep analysis (low-level metrics)
+# Note: perf integration is done via shell scripts for portability
+
 # Additional dependencies for benchmarks
 rand = "0.8"
 sha2 = "0.10"
@@ -85,6 +88,11 @@ path = "benches/consensus/transaction_validation.rs"
 harness = false
 
 [[bench]]
+name = "check_block"
+path = "benches/consensus/check_block.rs"
+harness = false
+
+[[bench]]
 name = "utxo_commitments"
 path = "benches/consensus/utxo_commitments.rs"
 harness = false
@@ -112,6 +120,21 @@ harness = false
 [[bench]]
 name = "block_assembly"
 path = "benches/consensus/block_assembly.rs"
+harness = false
+
+[[bench]]
+name = "transaction_sighash"
+path = "benches/consensus/transaction_sighash.rs"
+harness = false
+
+[[bench]]
+name = "transaction_id"
+path = "benches/consensus/transaction_id.rs"
+harness = false
+
+[[bench]]
+name = "transaction_serialization"
+path = "benches/consensus/transaction_serialization.rs"
 harness = false
 
 # Benchmark targets - Node layer

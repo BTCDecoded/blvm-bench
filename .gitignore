@@ -1,7 +1,17 @@
-# Rust
+# Rust build artifacts
 /target/
 **/*.rs.bk
 Cargo.lock
+
+# Benchmark results
+/results/
+*.json
+!docs/data/benchmark-results-consolidated-latest.json
+!config.toml.example
+
+# Logs
+*.log
+/tmp/
 
 # IDE
 .idea/
@@ -14,8 +24,12 @@ Cargo.lock
 .DS_Store
 Thumbs.db
 
-# Benchmark results (if stored locally)
-/bench-results/
-*.json
-*.log
+# Config (user-specific)
+config.toml
+!config.toml.example
 
+# Perf output
+/tmp/perf-*.csv
+
+# GitHub Actions
+.github/workflows/.gitkeep

@@ -55,7 +55,18 @@ fn create_complex_transaction(input_count: usize, output_count: usize) -> Transa
 
 fn benchmark_mempool_acceptance(c: &mut Criterion) {
     let tx = create_test_transaction();
-    let utxo_set = UtxoSet::new();
+    // Create UTXO for the transaction input (fair comparison - needs valid UTXO)
+    let mut utxo_set = UtxoSet::new();
+    let outpoint = bllvm_consensus::OutPoint {
+        hash: [1; 32], // Matches tx input
+        index: 0,
+    };
+    let utxo = bllvm_consensus::UTXO {
+        value: 10_000_000_000,
+        script_pubkey: vec![0x51], // Simple script
+        height: 0,
+    };
+    utxo_set.insert(outpoint, utxo);
     let mempool: Mempool = HashSet::new();
     c.bench_function("accept_to_memory_pool_simple", |b| {
         b.iter(|| {
@@ -71,18 +82,45 @@ fn benchmark_mempool_acceptance(c: &mut Criterion) {
 }
 
 fn benchmark_mempool_acceptance_complex(c: &mut Criterion) {
-    let tx = create_complex_transaction(5, 3);
-    let utxo_set = UtxoSet::new();
-    let mempool: Mempool = HashSet::new();
+    // Core's MempoolCheck validates 400 transactions in mempool
+    // We need to match this scale for fair comparison
+    let mut mempool: Mempool = HashSet::new();
+    let mut utxo_set = UtxoSet::new();
+    let mut transactions = Vec::new();
+    
+    // Create 400 transactions (matches Core's MempoolCheck scale)
+    for i in 0..400 {
+        let tx = create_complex_transaction(5, 3);
+        let tx_id = bllvm_consensus::block::calculate_tx_id(&tx);
+        mempool.insert(tx_id);
+        
+        // Create UTXOs for all transaction inputs
+        for input in &tx.inputs {
+            let utxo = bllvm_consensus::UTXO {
+                value: 10_000_000_000,
+                script_pubkey: vec![0x51], // Simple script
+                height: 0,
+            };
+            utxo_set.insert(input.prevout.clone(), utxo);
+        }
+        
+        transactions.push(tx);
+    }
+    
     c.bench_function("accept_to_memory_pool_complex", |b| {
         b.iter(|| {
-            black_box(accept_to_memory_pool(
-                black_box(&tx),
-                black_box(None),
-                black_box(&utxo_set),
-                black_box(&mempool),
-                black_box(0),
-            ))
+            // Simulate Core's MempoolCheck: Validate all 400 transactions using accept_to_memory_pool
+            // Core's MempoolCheck validates transactions already in mempool (pool.check())
+            // This includes: structure check, input validation, script verification, mempool rules
+            for tx in &transactions {
+                black_box(accept_to_memory_pool(
+                    black_box(tx),
+                    black_box(None), // No witnesses for simple transactions
+                    black_box(&utxo_set),
+                    black_box(&mempool),
+                    black_box(0),
+                ));
+            }
         })
     });
 }
@@ -170,52 +208,140 @@ fn benchmark_accept_to_memory_pool_400tx(c: &mut Criterion) {
 }
 
 fn benchmark_is_standard_tx_400tx(c: &mut Criterion) {
-    // Create 400 transactions and check if they're standard (matches Core's scale)
+    // Create 400 transactions and validate them (matches Core's MempoolCheck)
+    // Core's MempoolCheck does full validation including standard checks, not just is_standard_tx
     let mut transactions = Vec::new();
+    let mut utxo_set = UtxoSet::new();
+    
     for i in 0..400 {
         let mut tx = create_test_transaction();
         tx.inputs[0].prevout.hash[0] = (i % 256) as u8;
         transactions.push(tx);
+        
+        // Create UTXO for this transaction
+        let outpoint = bllvm_consensus::OutPoint {
+            hash: {
+                let mut h = [0u8; 32];
+                h[0] = (i % 256) as u8;
+                h
+            },
+            index: 0,
+        };
+        let utxo = bllvm_consensus::UTXO {
+            value: 10_000_000_000,
+            script_pubkey: vec![0x51],
+            height: 0,
+        };
+        utxo_set.insert(outpoint, utxo);
     }
     
     c.bench_function("is_standard_tx_400tx", |b| {
         b.iter(|| {
+            // Simulate Core's MempoolCheck: FULL validation of all 400 transactions
+            // Core's MempoolCheck validates transactions already in mempool (pool.check())
+            // This includes: structure check, input validation, script verification, standard checks
             for tx in &transactions {
+                // Check if standard (part of MempoolCheck)
                 black_box(is_standard_tx(black_box(tx)));
+                // Check transaction structure (part of MempoolCheck)
+                black_box(bllvm_consensus::transaction::check_transaction(black_box(tx)));
+                // Check inputs against UTXO set (part of MempoolCheck)
+                black_box(bllvm_consensus::transaction::check_tx_inputs(
+                    black_box(tx),
+                    black_box(&utxo_set),
+                    black_box(0),
+                ));
+                // Verify scripts (expensive part of MempoolCheck - Core does this)
+                // For simple transactions without witnesses, verify_script does basic checks
+                for input in &tx.inputs {
+                    if let Some(utxo) = utxo_set.get(&input.prevout) {
+                        black_box(bllvm_consensus::script::verify_script(
+                            black_box(&input.script_sig),
+                            black_box(&utxo.script_pubkey),
+                            black_box(None), // No witness for simple transactions
+                            black_box(0), // Standard flags
+                        ));
+                    }
+                }
             }
         })
     });
 }
 
 fn benchmark_replacement_checks_mempool(c: &mut Criterion) {
-    // Create a mempool with 100 existing transactions (realistic mempool size)
+    // Create a mempool with 400 existing transactions (matches Core's MempoolCheck scale)
+    // Core's MempoolCheck validates ALL transactions in mempool, including RBF checks
+    // We need to simulate full mempool validation, not just a single RBF check
     let mut mempool: Mempool = HashSet::new();
-    let utxo_set = UtxoSet::new();
+    let mut utxo_set = UtxoSet::new();
+    let mut mempool_txs = Vec::new();
     
-    // Add 100 transactions to mempool
-    for i in 0..100 {
+    // Create 400 transactions and add them to mempool (matches Core exactly)
+    for i in 0..400 {
         let mut tx = create_test_transaction();
         tx.inputs[0].prevout.hash[0] = (i % 256) as u8;
         tx.inputs[0].sequence = 0xfffffffe; // RBF enabled
         let tx_id = bllvm_consensus::block::calculate_tx_id(&tx);
         mempool.insert(tx_id);
+        mempool_txs.push(tx);
     }
     
-    // Create a new transaction that would replace one of them
-    let mut new_tx = create_test_transaction();
-    new_tx.inputs[0].prevout.hash[0] = 0; // Same as first transaction
-    new_tx.inputs[0].sequence = 0xfffffffe; // RBF
-    
-    let existing_tx = create_test_transaction();
+    // Create UTXOs for all transactions
+    for (i, tx) in mempool_txs.iter().enumerate() {
+        let outpoint = bllvm_consensus::OutPoint {
+            hash: {
+                let mut h = [0u8; 32];
+                h[0] = (i % 256) as u8;
+                h
+            },
+            index: 0,
+        };
+        let utxo = bllvm_consensus::UTXO {
+            value: 10_000_000_000,
+            script_pubkey: vec![0x51],
+            height: 0,
+        };
+        utxo_set.insert(outpoint, utxo);
+    }
     
     c.bench_function("replacement_checks_mempool", |b| {
         b.iter(|| {
+            // Simulate Core's MempoolCheck: FULL validation of all 400 transactions
+            // Core's MempoolCheck validates transactions already in mempool (pool.check())
+            // This includes: structure check, input validation, script verification, RBF checks
+            for tx in &mempool_txs {
+                // Check transaction structure (part of MempoolCheck)
+                black_box(bllvm_consensus::transaction::check_transaction(black_box(tx)));
+                // Check inputs against UTXO set (part of MempoolCheck)
+                black_box(bllvm_consensus::transaction::check_tx_inputs(
+                    black_box(tx),
+                    black_box(&utxo_set),
+                    black_box(0),
+                ));
+                // Check if standard (part of MempoolCheck)
+                black_box(is_standard_tx(black_box(tx)));
+                // Verify scripts (expensive part of MempoolCheck - Core does this)
+                // For simple transactions without witnesses, verify_script does basic checks
+                for input in &tx.inputs {
+                    if let Some(utxo) = utxo_set.get(&input.prevout) {
+                        black_box(bllvm_consensus::script::verify_script(
+                            black_box(&input.script_sig),
+                            black_box(&utxo.script_pubkey),
+                            black_box(None), // No witness for simple transactions
+                            black_box(0), // Standard flags
+                        ));
+                    }
+                }
+            }
+            // Also do RBF checks (part of MempoolCheck validation)
+            let new_tx = &mempool_txs[0];
+            let existing_tx = &mempool_txs[1];
             black_box(replacement_checks(
-                black_box(&new_tx),
-                black_box(&existing_tx),
+                black_box(new_tx),
+                black_box(existing_tx),
                 black_box(&utxo_set),
                 black_box(&mempool),
-            ))
+            ));
         })
     });
 }

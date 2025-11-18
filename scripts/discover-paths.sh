@@ -1,0 +1,110 @@
+#!/bin/bash
+# Path Discovery for bllvm-bench
+# Auto-discovers Bitcoin Core and Bitcoin Commons paths
+# Can be sourced (. discover-paths.sh) or executed (./discover-paths.sh)
+
+# Don't use set -e here as it can cause issues when sourced
+
+# Load config if it exists
+CONFIG_FILE="${BLLVM_BENCH_CONFIG:-./config/config.toml}"
+if [ -f "$CONFIG_FILE" ]; then
+    # Simple TOML parsing (basic key=value extraction)
+    # Extract values, handling both quoted and unquoted strings
+    CORE_PATH=$(grep -E "^core_path\s*=" "$CONFIG_FILE" 2>/dev/null | sed 's/.*=\s*"\([^"]*\)".*/\1/' | sed 's/.*=\s*\([^#]*\).*/\1/' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' || echo "")
+    COMMONS_CONSENSUS_PATH=$(grep -E "^commons_consensus_path\s*=" "$CONFIG_FILE" 2>/dev/null | sed 's/.*=\s*"\([^"]*\)".*/\1/' | sed 's/.*=\s*\([^#]*\).*/\1/' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' || echo "")
+    COMMONS_NODE_PATH=$(grep -E "^commons_node_path\s*=" "$CONFIG_FILE" 2>/dev/null | sed 's/.*=\s*"\([^"]*\)".*/\1/' | sed 's/.*=\s*\([^#]*\).*/\1/' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' || echo "")
+fi
+
+# Get script directory (bllvm-bench root)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BLLVM_BENCH_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# Auto-discover Bitcoin Core
+if [ -z "$CORE_PATH" ]; then
+    # Common locations to search
+    SEARCH_PATHS=(
+        "$HOME/src/bitcoin"
+        "$HOME/src/bitcoin-core"
+        "$HOME/src/core"
+        "../core"
+        "../../core"
+        "/usr/local/src/bitcoin"
+        "/opt/bitcoin"
+    )
+    
+    for path in "${SEARCH_PATHS[@]}"; do
+        if [ -d "$path" ] && [ -f "$path/src/CMakeLists.txt" ] && [ -f "$path/src/bitcoin.cpp" ]; then
+            CORE_PATH="$path"
+            break
+        fi
+    done
+    
+    # Also check if bench_bitcoin is in PATH
+    if [ -z "$CORE_PATH" ] && command -v bench_bitcoin >/dev/null 2>&1; then
+        BENCH_BITCOIN_PATH=$(command -v bench_bitcoin)
+        CORE_PATH=$(dirname "$(dirname "$(dirname "$BENCH_BITCOIN_PATH")")")
+    fi
+fi
+
+# Auto-discover Bitcoin Commons
+if [ -z "$COMMONS_CONSENSUS_PATH" ] || [ -z "$COMMONS_NODE_PATH" ]; then
+    # Common locations to search
+    SEARCH_PATHS=(
+        "$HOME/src/bllvm-consensus"
+        "$HOME/src/bitcoin-commons"
+        "../bllvm-consensus"
+        "../../bllvm-consensus"
+        "$BLLVM_BENCH_ROOT/../bllvm-consensus"
+        "$BLLVM_BENCH_ROOT/../../bllvm-consensus"
+    )
+    
+    for path in "${SEARCH_PATHS[@]}"; do
+        if [ -d "$path" ] && [ -f "$path/Cargo.toml" ] && grep -q "bllvm-consensus" "$path/Cargo.toml" 2>/dev/null; then
+            COMMONS_CONSENSUS_PATH="$path"
+            # Try to find bllvm-node nearby
+            NODE_CANDIDATES=(
+                "$(dirname "$path")/bllvm-node"
+                "$(dirname "$(dirname "$path")")/bllvm-node"
+                "$path/../bllvm-node"
+            )
+            for node_path in "${NODE_CANDIDATES[@]}"; do
+                if [ -d "$node_path" ] && [ -f "$node_path/Cargo.toml" ] && grep -q "bllvm-node" "$node_path/Cargo.toml" 2>/dev/null; then
+                    COMMONS_NODE_PATH="$node_path"
+                    break
+                fi
+            done
+            break
+        fi
+    done
+fi
+
+# Export discovered paths
+export CORE_PATH
+export COMMONS_CONSENSUS_PATH
+export COMMONS_NODE_PATH
+export BLLVM_BENCH_ROOT
+
+# Validate paths
+if [ -n "$CORE_PATH" ] && [ ! -d "$CORE_PATH" ]; then
+    echo "WARNING: CORE_PATH set but directory does not exist: ${CORE_PATH}" >&2
+    CORE_PATH=""
+fi
+
+if [ -n "$COMMONS_CONSENSUS_PATH" ] && [ ! -d "$COMMONS_CONSENSUS_PATH" ]; then
+    echo "WARNING: COMMONS_CONSENSUS_PATH set but directory does not exist: ${COMMONS_CONSENSUS_PATH}" >&2
+    COMMONS_CONSENSUS_PATH=""
+fi
+
+if [ -n "$COMMONS_NODE_PATH" ] && [ ! -d "$COMMONS_NODE_PATH" ]; then
+    echo "WARNING: COMMONS_NODE_PATH set but directory does not exist: ${COMMONS_NODE_PATH}" >&2
+    COMMONS_NODE_PATH=""
+fi
+
+# Output paths (can be sourced by other scripts)
+# Only output if script is executed directly (not sourced)
+if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
+    printf '%s\n' "export CORE_PATH=\"${CORE_PATH}\""
+    printf '%s\n' "export COMMONS_CONSENSUS_PATH=\"${COMMONS_CONSENSUS_PATH}\""
+    printf '%s\n' "export COMMONS_NODE_PATH=\"${COMMONS_NODE_PATH}\""
+    printf '%s\n' "export BLLVM_BENCH_ROOT=\"${BLLVM_BENCH_ROOT}\""
+fi

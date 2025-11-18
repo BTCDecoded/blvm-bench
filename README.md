@@ -1,78 +1,72 @@
 # bllvm-bench
 
-Development-only benchmarking suite for the Bitcoin Commons BLLVM ecosystem.
+Bitcoin Commons benchmarking suite for comparing Bitcoin Core and Bitcoin Commons performance.
 
-## Overview
-
-This crate consolidates all benchmarking code for the BLLVM ecosystem. While it's a development-only crate, it supports testing in production mode to ensure benchmarks reflect real-world performance.
-
-## Features
-
-- **Rust Criterion Benchmarks**: Comprehensive performance benchmarks for all BLLVM components
-- **Production Mode Testing**: Run benchmarks with production optimizations enabled
-- **CLI Tool**: Command-line interface to run both Rust and shell-based benchmarks
-- **Unified Results**: Consistent output format across all benchmark types
-
-## Usage
-
-### Running Rust Benchmarks
+## Quick Start
 
 ```bash
-# Development mode (default)
-cargo bench
+# Clone and setup
+git clone <repo> && cd bllvm-bench
+make all
 
-# Production mode (with optimizations)
-cargo bench --features production
-
-# Specific benchmark
-cargo bench --bench hash_operations
+# Or step by step:
+make setup-auto  # Auto-discover and clone dependencies
+make bench       # Run benchmarks
+make json        # Generate consolidated JSON
+make csv         # Generate CSV report
 ```
 
-### Running Shell-Based Benchmarks
+## What It Does
 
-```bash
-# Using the CLI tool
-cargo run --bin bllvm-bench -- shell --all
+- Runs fair benchmarks comparing Bitcoin Core and Bitcoin Commons
+- Generates JSON reports with statistical analysis
+- Produces CSV files for spreadsheet analysis
+- Automatically discovers Core/Commons installations
 
-# Specific benchmark suite
-cargo run --bin bllvm-bench -- shell --suite rpc
-```
+## Output
 
-### Running All Benchmarks
+- **Individual JSON**: `results/{benchmark}-{timestamp}.json`
+- **Consolidated JSON**: `results/benchmark-results-consolidated-{timestamp}.json`
+- **CSV Report**: `results/benchmark-results-consolidated-{timestamp}.csv`
+- **Suite Summary**: `results/suite-*/summary.json`
+- **GitHub Pages Site**: View at `benchmarks.thebitcoincommons.org` (loads JSON dynamically)
 
-```bash
-# Rust benchmarks in production mode
-cargo bench --features production
+## Automated Benchmarks
 
-# Shell benchmarks
-cargo run --bin bllvm-bench -- shell --all
-```
+Benchmarks run automatically via GitHub Actions on a self-hosted runner:
+- **Scheduled**: Daily at 2 AM UTC
+- **Manual**: Trigger via Actions tab
+- **On Push**: When benchmark code changes
 
-## Structure
+Results are automatically:
+- Generated as consolidated JSON
+- Committed to `docs/data/`
+- Published to GitHub Pages
+- Released (on scheduled runs)
 
-```
-bllvm-bench/
-├── benches/              # Rust Criterion benchmarks
-│   ├── consensus/        # Consensus layer benchmarks
-│   ├── protocol/         # Protocol layer benchmarks
-│   ├── node/             # Node implementation benchmarks
-│   └── integration/      # Cross-component benchmarks
-├── src/
-│   ├── lib.rs            # Library code
-│   ├── bin/
-│   │   └── bllvm-bench.rs # CLI tool
-│   └── shell/            # Shell benchmark runner
-└── Cargo.toml
-```
+See [.github/workflows/README.md](.github/workflows/README.md) for setup instructions.
 
-## Development vs Production Mode
+## Documentation
 
-- **Development Mode** (default): Faster iteration, less aggressive optimizations
-- **Production Mode** (`--features production`): Full optimizations, reflects real-world performance
+- [README_BENCHMARKING.md](README_BENCHMARKING.md) - Full benchmarking guide
+- [TROUBLESHOOTING.md](TROUBLESHOOTING.md) - Common issues and solutions
+- [docs/REGRESSION_DETECTION.md](docs/REGRESSION_DETECTION.md) - Regression detection & historical tracking
+- [docs/](docs/) - Additional documentation
+- [.github/workflows/README.md](.github/workflows/README.md) - GitHub Actions setup
 
-Both modes should be tested to ensure benchmarks are accurate in both scenarios.
+## Make Targets
 
-## License
-
-MIT
-
+- `make help` - Show all available targets
+- `make setup` - Interactive setup
+- `make setup-auto` - Auto-setup (clones dependencies)
+- `make bench` - Run benchmarks
+- `make json` - Generate consolidated JSON
+- `make csv` - Generate CSV from JSON
+- `make report-full` - Generate both JSON and CSV
+- `make deep-analysis` - Deep Commons analysis (CPU cycles, cache, etc.)
+- `make update-gh-pages` - Update GitHub Pages with latest JSON
+- `make check` - Check if all dependencies are available
+- `make validate` - Validate benchmark JSON (FILE=path/to/file.json)
+- `make history` - Track benchmark history for trend analysis
+- `make regressions` - Detect performance regressions vs baseline
+- `make all` - Full workflow (setup + bench + report)

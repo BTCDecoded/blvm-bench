@@ -29,12 +29,13 @@ fn create_test_transaction(i: usize) -> Transaction {
 }
 
 fn benchmark_assemble_block(c: &mut Criterion) {
-    // Create a mempool with transactions (similar to Core's AssembleBlock)
+    // Create a mempool with transactions (matches Core's AssembleBlock exactly)
+    // Core: NUM_BLOCKS=200, COINBASE_MATURITY=100, so txs = 200 - 100 + 1 = 101
     let mut mempool_txs = Vec::new();
     let mut utxo_set = UtxoSet::new();
     
-    // Create 100 transactions in mempool
-    for i in 0..100 {
+    // Create 101 transactions in mempool (matches Core exactly)
+    for i in 0..101 {
         let tx = create_test_transaction(i);
         mempool_txs.push(tx);
     }

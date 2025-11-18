@@ -1,0 +1,29 @@
+# bllvm-bench Configuration
+# Copy this to config.toml and customize paths
+
+[paths]
+# Bitcoin Core path (optional - will auto-discover if not set)
+# core_path = "/path/to/bitcoin-core"
+
+# Bitcoin Commons paths (optional - will auto-discover if not set)
+# commons_consensus_path = "/path/to/bllvm-consensus"
+# commons_node_path = "/path/to/bllvm-node"
+# commons_protocol_path = "/path/to/bllvm-protocol"
+
+# Results directory (default: ./results)
+# results_dir = "./results"
+
+[benchmarks]
+# Which benchmarks to run by default
+# Options: "all", "fast", "fair", "core-only", "commons-only"
+default_suite = "fair"
+
+# Timeout for benchmarks (seconds)
+default_timeout = 300
+
+[report]
+# Report generation options
+generate_html = true
+generate_json = true
+output_dir = "./results"
+

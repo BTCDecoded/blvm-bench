@@ -1,0 +1,61 @@
+name: Run Benchmarks (Manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: 'Benchmark suite to run'
+        required: true
+        default: 'fair'
+        type: choice
+        options:
+          - fair
+          - fair-fast
+          - all
+          - core-only
+          - commons-only
+
+jobs:
+  run-benchmarks:
+    runs-on: self-hosted
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+
+      - name: Run benchmarks
+        run: |
+          ./run-benchmarks.sh ${{ github.event.inputs.suite }}
+        env:
+          RUSTFLAGS: "-C target-cpu=native"
+
+      - name: Generate consolidated JSON
+        run: |
+          make json
+
+      - name: Update GitHub Pages data
+        run: |
+          make update-gh-pages
+
+      - name: Commit benchmark data
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add docs/data/
+          git diff --staged --quiet || git commit -m "🤖 Manual benchmark run: ${{ github.event.inputs.suite }} [skip ci]"
+          git push || echo "No changes to commit"
+
+      - name: Upload benchmark artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: benchmark-results-${{ github.event.inputs.suite }}
+          path: |
+            results/benchmark-results-consolidated-*.json
+            docs/data/benchmark-results-consolidated-latest.json
+

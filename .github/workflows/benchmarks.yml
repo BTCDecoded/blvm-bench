@@ -1,0 +1,139 @@
+name: Run Benchmarks
+
+on:
+  workflow_dispatch:  # Manual trigger
+  schedule:
+    # Run daily at 2 AM UTC
+    - cron: '0 2 * * *'
+  push:
+    branches:
+      - main
+    paths:
+      - 'scripts/**'
+      - 'benches/**'
+      - '.github/workflows/benchmarks.yml'
+
+jobs:
+  run-benchmarks:
+    runs-on: self-hosted  # Self-hosted runner required
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+
+      - name: Cache Rust dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Discover paths
+        id: discover
+        run: |
+          eval "$(./scripts/discover-paths.sh)"
+          echo "core_path=$CORE_PATH" >> $GITHUB_OUTPUT
+          echo "commons_consensus_path=$COMMONS_CONSENSUS_PATH" >> $GITHUB_OUTPUT
+          echo "commons_node_path=$COMMONS_NODE_PATH" >> $GITHUB_OUTPUT
+
+      - name: Check dependencies
+        run: |
+          ./scripts/check-dependencies.sh
+
+      - name: Run benchmarks
+        run: |
+          make bench
+        env:
+          RUSTFLAGS: "-C target-cpu=native"
+
+      - name: Generate consolidated JSON
+        run: |
+          make json
+
+      - name: Validate consolidated JSON
+        run: |
+          LATEST_JSON=$(find results -name "benchmark-results-consolidated-*.json" -type f | sort | tail -1)
+          if [ -n "$LATEST_JSON" ]; then
+            ./scripts/validate-benchmark.sh "$LATEST_JSON" || echo "⚠️  Validation warnings"
+          fi
+
+      - name: Track history
+        run: |
+          LATEST_JSON=$(find results -name "benchmark-results-consolidated-*.json" -type f | sort | tail -1)
+          if [ -n "$LATEST_JSON" ]; then
+            ./scripts/track-history.sh "$LATEST_JSON" || echo "⚠️  History tracking failed"
+          fi
+
+      - name: Detect regressions
+        continue-on-error: true
+        run: |
+          LATEST_JSON=$(find results -name "benchmark-results-consolidated-*.json" -type f | sort | tail -1)
+          if [ -n "$LATEST_JSON" ]; then
+            ./scripts/detect-regressions.sh "$LATEST_JSON" || echo "⚠️  Regressions detected (see report)"
+          fi
+
+      - name: Find latest consolidated JSON
+        id: find_json
+        run: |
+          LATEST_JSON=$(find results -name "benchmark-results-consolidated-*.json" -type f | sort | tail -1)
+          if [ -z "$LATEST_JSON" ]; then
+            echo "❌ No consolidated JSON found"
+            exit 1
+          fi
+          echo "json_file=$LATEST_JSON" >> $GITHUB_OUTPUT
+          echo "Found: $LATEST_JSON"
+
+      - name: Update GitHub Pages data
+        run: |
+          make update-gh-pages
+
+      - name: Commit benchmark data
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add docs/data/
+          git diff --staged --quiet || git commit -m "🤖 Update benchmark data [skip ci]"
+          git push || echo "No changes to commit"
+
+      - name: Create Release (if on main)
+        if: github.ref == 'refs/heads/main' && github.event_name == 'schedule'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: benchmarks-${{ github.run_number }}
+          name: Benchmark Results ${{ github.run_number }}
+          body: |
+            Automated benchmark run from self-hosted runner.
+            
+            **Generated:** ${{ github.run_number }}
+            **Commit:** ${{ github.sha }}
+            
+            Download the consolidated JSON from the assets below.
+          files: |
+            ${{ steps.find_json.outputs.json_file }}
+            docs/data/benchmark-results-consolidated-latest.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload benchmark artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: benchmark-results
+          path: |
+            results/benchmark-results-consolidated-*.json
+            docs/data/benchmark-results-consolidated-latest.json
+          retention-days: 30
+
