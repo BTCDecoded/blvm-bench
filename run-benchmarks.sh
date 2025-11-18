@@ -184,8 +184,39 @@ case "$SUITE" in
         ;;
     
     "all")
-        echo "Running all available benchmarks..."
-        # Run all benchmarks (to be expanded)
+        echo "Running all available benchmarks for maximum coverage..."
+        
+        # Run all Core benchmarks
+        if [ -n "$CORE_PATH" ]; then
+            echo ""
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "Running Core Benchmarks"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            for bench_script in "$BLLVM_BENCH_ROOT/scripts/core"/*.sh; do
+                if [ -f "$bench_script" ]; then
+                    bench_name=$(basename "$bench_script" .sh)
+                    run_benchmark "core-${bench_name}" "$bench_script" 600
+                fi
+            done
+        else
+            echo "⚠️  Core path not found, skipping Core benchmarks"
+        fi
+        
+        # Run all Commons benchmarks
+        if [ -n "$COMMONS_CONSENSUS_PATH" ]; then
+            echo ""
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "Running Commons Benchmarks"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            for bench_script in "$BLLVM_BENCH_ROOT/scripts/commons"/*.sh; do
+                if [ -f "$bench_script" ]; then
+                    bench_name=$(basename "$bench_script" .sh)
+                    run_benchmark "commons-${bench_name}" "$bench_script" 600
+                fi
+            done
+        else
+            echo "⚠️  Commons path not found, skipping Commons benchmarks"
+        fi
         ;;
     
     "core-only")

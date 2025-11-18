@@ -208,7 +208,8 @@ jobs:
           fi
           
           echo "✅ All paths verified, running benchmarks..."
-          make bench
+          # Run ALL benchmarks (both Core and Commons) for maximum coverage
+          ./run-benchmarks.sh all 600
 
       - name: Generate consolidated JSON
         run: |
