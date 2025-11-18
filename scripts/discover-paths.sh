@@ -5,8 +5,17 @@
 
 # Don't use set -e here as it can cause issues when sourced
 
-# Load config if it exists
-CONFIG_FILE="${BLLVM_BENCH_CONFIG:-./config/config.toml}"
+# Load config if it exists (try multiple locations)
+CONFIG_FILE="${BLLVM_BENCH_CONFIG:-}"
+if [ -z "$CONFIG_FILE" ]; then
+    # Try to find config in common locations
+    for config_path in "./config/config.toml" "$BLLVM_BENCH_ROOT/config/config.toml" "$HOME/.bllvm-bench/config.toml"; do
+        if [ -f "$config_path" ]; then
+            CONFIG_FILE="$config_path"
+            break
+        fi
+    done
+fi
 if [ -f "$CONFIG_FILE" ]; then
     # Simple TOML parsing (basic key=value extraction)
     # Extract values, handling both quoted and unquoted strings

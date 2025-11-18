@@ -42,23 +42,93 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
 
+      - name: Setup dependencies (Core and Commons)
+        run: |
+          echo "Setting up Bitcoin Core and Bitcoin Commons..."
+          
+          # Setup Core
+          if [ ! -d "$HOME/bitcoin-core" ]; then
+            echo "Cloning Bitcoin Core..."
+            git clone --depth 1 https://github.com/bitcoin/bitcoin.git "$HOME/bitcoin-core" || {
+              echo "⚠️  Failed to clone Core, will try to use existing if available"
+            }
+          else
+            echo "✅ Bitcoin Core already exists at $HOME/bitcoin-core"
+          fi
+          
+          # Setup Commons consensus
+          if [ ! -d "$HOME/bllvm-consensus" ]; then
+            echo "Cloning Bitcoin Commons (bllvm-consensus)..."
+            git clone --depth 1 https://github.com/BTCDecoded/bllvm-consensus.git "$HOME/bllvm-consensus" || {
+              echo "⚠️  Failed to clone bllvm-consensus, will try to use existing if available"
+            }
+          else
+            echo "✅ bllvm-consensus already exists at $HOME/bllvm-consensus"
+          fi
+          
+          # Setup Commons node
+          if [ ! -d "$HOME/bllvm-node" ]; then
+            echo "Cloning Bitcoin Commons (bllvm-node)..."
+            git clone --depth 1 https://github.com/BTCDecoded/bllvm-node.git "$HOME/bllvm-node" || {
+              echo "⚠️  Failed to clone bllvm-node, will try to use existing if available"
+            }
+          else
+            echo "✅ bllvm-node already exists at $HOME/bllvm-node"
+          fi
+          
+          # Create config.toml with absolute paths
+          mkdir -p config
+          cat > config/config.toml << EOF
+          [paths]
+          core_path = "$HOME/bitcoin-core"
+          commons_consensus_path = "$HOME/bllvm-consensus"
+          commons_node_path = "$HOME/bllvm-node"
+          EOF
+          echo "✅ Created config/config.toml with paths"
+
       - name: Discover paths
         id: discover
         run: |
-          eval "$(./scripts/discover-paths.sh)"
+          source ./scripts/discover-paths.sh
           echo "core_path=$CORE_PATH" >> $GITHUB_OUTPUT
           echo "commons_consensus_path=$COMMONS_CONSENSUS_PATH" >> $GITHUB_OUTPUT
           echo "commons_node_path=$COMMONS_NODE_PATH" >> $GITHUB_OUTPUT
+          echo "Discovered paths:"
+          echo "  CORE_PATH: $CORE_PATH"
+          echo "  COMMONS_CONSENSUS_PATH: $COMMONS_CONSENSUS_PATH"
+          echo "  COMMONS_NODE_PATH: $COMMONS_NODE_PATH"
 
       - name: Check dependencies
+        env:
+          CORE_PATH: ${{ steps.discover.outputs.core_path }}
+          COMMONS_CONSENSUS_PATH: ${{ steps.discover.outputs.commons_consensus_path }}
+          COMMONS_NODE_PATH: ${{ steps.discover.outputs.commons_node_path }}
         run: |
+          export CORE_PATH="$CORE_PATH"
+          export COMMONS_CONSENSUS_PATH="$COMMONS_CONSENSUS_PATH"
+          export COMMONS_NODE_PATH="$COMMONS_NODE_PATH"
           ./scripts/check-dependencies.sh
+          if [ -z "$COMMONS_CONSENSUS_PATH" ]; then
+            echo "❌ COMMONS_CONSENSUS_PATH is still not set!"
+            exit 1
+          fi
+          if [ ! -d "$COMMONS_CONSENSUS_PATH" ]; then
+            echo "❌ COMMONS_CONSENSUS_PATH directory does not exist: $COMMONS_CONSENSUS_PATH"
+            exit 1
+          fi
+          echo "✅ All dependencies found and validated"
 
       - name: Run benchmarks
-        run: |
-          make bench
         env:
           RUSTFLAGS: "-C target-cpu=native"
+          CORE_PATH: ${{ steps.discover.outputs.core_path }}
+          COMMONS_CONSENSUS_PATH: ${{ steps.discover.outputs.commons_consensus_path }}
+          COMMONS_NODE_PATH: ${{ steps.discover.outputs.commons_node_path }}
+        run: |
+          export CORE_PATH="$CORE_PATH"
+          export COMMONS_CONSENSUS_PATH="$COMMONS_CONSENSUS_PATH"
+          export COMMONS_NODE_PATH="$COMMONS_NODE_PATH"
+          make bench
 
       - name: Generate consolidated JSON
         run: |
