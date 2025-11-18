@@ -9,17 +9,16 @@ BLLVM_BENCH_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 source "$SCRIPT_DIR/shared/common.sh"
 
 OUTPUT_DIR=$(get_output_dir "${1:-$RESULTS_DIR}")
-TIMESTAMP=$(date +%Y%m%d-%H%M%S)
 
 # Find latest consolidated JSON
-CONSOLIDATED_JSON=$(find "$OUTPUT_DIR" -name "benchmark-results-consolidated-*.json" -type f | sort | tail -1)
+CONSOLIDATED_JSON="$OUTPUT_DIR/benchmark-results-consolidated-latest.json"
 
-if [ -z "$CONSOLIDATED_JSON" ]; then
-    echo "❌ No consolidated JSON found. Generate it first with: make json"
+if [ ! -f "$CONSOLIDATED_JSON" ]; then
+    echo "❌ No consolidated JSON found at $CONSOLIDATED_JSON. Generate it first with: make json"
     exit 1
 fi
 
-CSV_FILE="$OUTPUT_DIR/benchmark-results-consolidated-$TIMESTAMP.csv"
+CSV_FILE="$OUTPUT_DIR/benchmark-results-consolidated-latest.csv"
 
 echo "╔══════════════════════════════════════════════════════════════╗"
 echo "║  Generating CSV Report from Consolidated JSON                 ║"
