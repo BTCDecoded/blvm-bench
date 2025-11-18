@@ -380,12 +380,12 @@ jobs:
             ./scripts/detect-regressions.sh "$LATEST_JSON" || echo "⚠️  Regressions detected (see report)"
           fi
 
-      - name: Find latest consolidated JSON
+      - name: Find consolidated JSON
         id: find_json
         run: |
-          LATEST_JSON=$(find results -name "benchmark-results-consolidated-*.json" -type f | sort | tail -1)
-          if [ -z "$LATEST_JSON" ]; then
-            echo "❌ No consolidated JSON found"
+          LATEST_JSON="results/benchmark-results-consolidated-latest.json"
+          if [ ! -f "$LATEST_JSON" ]; then
+            echo "❌ No consolidated JSON found at $LATEST_JSON"
             exit 1
           fi
           echo "json_file=$LATEST_JSON" >> $GITHUB_OUTPUT
@@ -471,7 +471,7 @@ jobs:
         with:
           name: benchmark-results
           path: |
-            results/benchmark-results-consolidated-*.json
+            results/benchmark-results-consolidated-latest.json
             docs/data/benchmark-results-consolidated-latest.json
           retention-days: 30
 
