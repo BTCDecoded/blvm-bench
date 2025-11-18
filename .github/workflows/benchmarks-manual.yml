@@ -86,12 +86,16 @@ jobs:
           
           # Create config.toml with absolute paths
           mkdir -p config
-          cat > config/config.toml << EOF
+          cat > config/config.toml << 'EOF'
 [paths]
 core_path = "$CORE_DIR"
 commons_consensus_path = "$CONSENSUS_DIR"
 commons_node_path = "$NODE_DIR"
 EOF
+          # Replace variables in config file
+          sed -i "s|\$CORE_DIR|$CORE_DIR|g" config/config.toml
+          sed -i "s|\$CONSENSUS_DIR|$CONSENSUS_DIR|g" config/config.toml
+          sed -i "s|\$NODE_DIR|$NODE_DIR|g" config/config.toml
           echo "✅ Created config/config.toml"
           
           # Export paths for this step
