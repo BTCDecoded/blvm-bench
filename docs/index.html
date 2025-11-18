@@ -337,52 +337,97 @@
                     ...bench
                 }));
                 
-                const categories = groupByCategory(benchmarks);
+                // Separate comparison benchmarks (both Core and Commons) from Commons-only
+                const comparisonBenchmarks = [];
+                const commonsOnlyBenchmarks = [];
                 
-                for (const [category, benchList] of Object.entries(categories)) {
-                    html += `<h2>${category}</h2>`;
-                    html += '<table>';
-                    html += '<tr><th>Benchmark</th><th>Bitcoin Core</th><th>Bitcoin Commons</th><th>Winner</th><th>Speed Difference</th></tr>';
+                for (const bench of benchmarks) {
+                    const hasCore = bench.core && Object.keys(bench.core).length > 0;
+                    const hasCommons = bench.commons && Object.keys(bench.commons).length > 0;
                     
-                    for (const bench of benchList) {
-                        const core = bench.core || {};
-                        const commons = bench.commons || {};
-                        const comparison = bench.comparison || {};
+                    if (hasCore && hasCommons) {
+                        // Both Core and Commons - this is a comparison
+                        comparisonBenchmarks.push(bench);
+                    } else if (hasCommons && !hasCore) {
+                        // Commons only - show separately
+                        commonsOnlyBenchmarks.push(bench);
+                    }
+                    // Skip Core-only benchmarks (they're not useful for comparison)
+                }
+                
+                // Render comparison benchmarks by category
+                if (comparisonBenchmarks.length > 0) {
+                    html += '<h1>Fair Comparison Benchmarks</h1>';
+                    html += '<p>Benchmarks with both Bitcoin Core and Bitcoin Commons data for direct comparison.</p>';
+                    
+                    const comparisonCategories = groupByCategory(comparisonBenchmarks);
+                    
+                    for (const [category, benchList] of Object.entries(comparisonCategories)) {
+                        html += `<h2>${category}</h2>`;
+                        html += '<table>';
+                        html += '<tr><th>Benchmark</th><th>Bitcoin Core</th><th>Bitcoin Commons</th><th>Winner</th><th>Speed Difference</th></tr>';
                         
-                        // Extract time from various possible structures
-                        const coreTime = extractTime(core);
-                        const commonsTime = extractTime(commons);
-                        const winner = comparison.winner || (coreTime !== '—' && commonsTime !== '—' ? 'N/A' : (coreTime !== '—' ? 'core-only' : 'commons-only'));
-                        const speedup = comparison.speedup || comparison.speed_difference || '';
-                        
-                        const winnerClass = winner === 'core' ? 'winner-core' : 
-                                           winner === 'commons' ? 'winner-commons' : 
-                                           winner === 'core-only' ? 'winner-core' :
-                                           winner === 'commons-only' ? 'winner-commons' :
-                                           'winner-tie';
-                        
-                        // Format winner display
-                        let winnerDisplay = '—';
-                        if (winner === 'core') {
-                            winnerDisplay = '🏆 Core';
-                        } else if (winner === 'commons') {
-                            winnerDisplay = '🏆 Commons';
-                        } else if (winner === 'core-only') {
-                            winnerDisplay = 'Core Only';
-                        } else if (winner === 'commons-only') {
-                            winnerDisplay = 'Commons Only';
+                        for (const bench of benchList) {
+                            const core = bench.core || {};
+                            const commons = bench.commons || {};
+                            const comparison = bench.comparison || {};
+                            
+                            // Extract time from various possible structures
+                            const coreTime = extractTime(core);
+                            const commonsTime = extractTime(commons);
+                            const winner = comparison.winner || 'N/A';
+                            const speedup = comparison.speedup || comparison.speed_difference || '';
+                            
+                            const winnerClass = winner === 'core' ? 'winner-core' : 
+                                               winner === 'commons' ? 'winner-commons' : 
+                                               'winner-tie';
+                            
+                            // Format winner display
+                            let winnerDisplay = '—';
+                            if (winner === 'core') {
+                                winnerDisplay = '🏆 Core';
+                            } else if (winner === 'commons') {
+                                winnerDisplay = '🏆 Commons';
+                            }
+                            
+                            html += '<tr>';
+                            html += `<td><strong>${bench.name || 'Unknown'}</strong></td>`;
+                            html += `<td style="text-align: right;">${coreTime}</td>`;
+                            html += `<td style="text-align: right;">${commonsTime}</td>`;
+                            html += `<td class="${winnerClass}" style="text-align: center;">${winnerDisplay}</td>`;
+                            html += `<td class="speedup" style="text-align: right;">${speedup || '—'}</td>`;
+                            html += '</tr>';
                         }
                         
-                        html += '<tr>';
-                        html += `<td><strong>${bench.name || 'Unknown'}</strong></td>`;
-                        html += `<td style="text-align: right;">${coreTime}</td>`;
-                        html += `<td style="text-align: right;">${commonsTime}</td>`;
-                        html += `<td class="${winnerClass}" style="text-align: center;">${winnerDisplay}</td>`;
-                        html += `<td class="speedup" style="text-align: right;">${speedup || '—'}</td>`;
-                        html += '</tr>';
+                        html += '</table>';
                     }
+                }
+                
+                // Render Commons-only benchmarks separately
+                if (commonsOnlyBenchmarks.length > 0) {
+                    html += '<h1>Bitcoin Commons Only Benchmarks</h1>';
+                    html += '<p>Additional benchmarks available only for Bitcoin Commons (no Core equivalent).</p>';
                     
-                    html += '</table>';
+                    const commonsOnlyCategories = groupByCategory(commonsOnlyBenchmarks);
+                    
+                    for (const [category, benchList] of Object.entries(commonsOnlyCategories)) {
+                        html += `<h2>${category}</h2>`;
+                        html += '<table>';
+                        html += '<tr><th>Benchmark</th><th>Bitcoin Commons</th><th>Notes</th></tr>';
+                        
+                        for (const bench of benchList) {
+                            const commons = bench.commons || {};
+                            const commonsTime = extractTime(commons);
+                            
+                            html += '<tr>';
+                            html += `<td><strong>${bench.name || 'Unknown'}</strong></td>`;
+                            html += `<td style="text-align: right;">${commonsTime}</td>`;
+                            html += `<td>Commons-only benchmark</td>`;
+                            html += '</tr>';
+                        }
+                        
+                        html += '</table>';
+                    }
                 }
             }
 
