@@ -72,19 +72,24 @@ while IFS= read -r json_file; do
     if echo "$BENCH_NAME" | grep -q "^core-"; then
         CORE_COUNT=$((CORE_COUNT + 1))
         BENCH_KEY=$(echo "$BENCH_NAME" | sed 's/^core-//')
+        BENCH_COUNT=$((BENCH_COUNT + 1))
         
-        # Add to consolidated JSON
+        # Add to consolidated JSON (initialize benchmark entry if it doesn't exist)
         jq --arg key "$BENCH_KEY" --argfile data "$json_file" \
-           '.benchmarks[$key].core = $data' \
+           '.benchmarks[$key] = (.benchmarks[$key] // {}) | .benchmarks[$key].core = $data' \
            "$OUTPUT_FILE" > "$OUTPUT_FILE.tmp" && mv "$OUTPUT_FILE.tmp" "$OUTPUT_FILE"
         
     elif echo "$BENCH_NAME" | grep -q "^commons-"; then
         COMMONS_COUNT=$((COMMONS_COUNT + 1))
         BENCH_KEY=$(echo "$BENCH_NAME" | sed 's/^commons-//')
+        # Only increment BENCH_COUNT if this is a new benchmark (not already counted from core)
+        if ! jq -e ".benchmarks[\"$BENCH_KEY\"]" "$OUTPUT_FILE" >/dev/null 2>&1; then
+            BENCH_COUNT=$((BENCH_COUNT + 1))
+        fi
         
-        # Add to consolidated JSON
+        # Add to consolidated JSON (initialize benchmark entry if it doesn't exist)
         jq --arg key "$BENCH_KEY" --argfile data "$json_file" \
-           '.benchmarks[$key].commons = $data' \
+           '.benchmarks[$key] = (.benchmarks[$key] // {}) | .benchmarks[$key].commons = $data' \
            "$OUTPUT_FILE" > "$OUTPUT_FILE.tmp" && mv "$OUTPUT_FILE.tmp" "$OUTPUT_FILE"
         
         # If both core and commons exist for same benchmark, it's a comparison

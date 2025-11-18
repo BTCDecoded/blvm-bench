@@ -36,6 +36,7 @@ jobs:
         with:
           path: 'docs'
           # Ensure .nojekyll is included to disable Jekyll processing
+          # This ensures index.html is served directly
       
       - name: Deploy to GitHub Pages
         id: deployment
