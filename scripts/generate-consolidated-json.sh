@@ -21,15 +21,24 @@ echo ""
 LATEST_SUITE=$(find "$OUTPUT_DIR" -type d -name "suite-*" 2>/dev/null | sort | tail -1)
 
 if [ -z "$LATEST_SUITE" ]; then
-    echo "❌ No benchmark suite found. Run benchmarks first."
-    exit 1
+    echo "⚠️  No benchmark suite found, searching all result directories..."
+    # Try to find JSON files in results directory directly
+    LATEST_SUITE="$OUTPUT_DIR"
 fi
 
 echo "Using suite: $LATEST_SUITE"
 echo ""
 
-# Collect all JSON files
-JSON_FILES=$(find "$OUTPUT_DIR" "$LATEST_SUITE" -name "*.json" -type f ! -name "summary.json" ! -name "*consolidated*" 2>/dev/null | sort)
+# Collect all JSON files (search both suite directory and results root)
+# Exclude history files, trends, and other non-benchmark files
+JSON_FILES=$(find "$OUTPUT_DIR" "$LATEST_SUITE" -name "*.json" -type f \
+    ! -name "summary.json" \
+    ! -name "*consolidated*" \
+    ! -name "history-*.json" \
+    ! -name "trends-*.json" \
+    ! -name "timeseries.json" \
+    ! -path "*/history/*" \
+    2>/dev/null | grep -E "(core-|commons-)" | sort | uniq)
 
 if [ -z "$JSON_FILES" ]; then
     echo "❌ No benchmark JSON files found"
@@ -75,7 +84,9 @@ while IFS= read -r json_file; do
         BENCH_COUNT=$((BENCH_COUNT + 1))
         
         # Add to consolidated JSON (initialize benchmark entry if it doesn't exist)
-        jq --arg key "$BENCH_KEY" --argfile data "$json_file" \
+        # Read JSON file content and merge it
+        DATA_CONTENT=$(cat "$json_file" 2>/dev/null || echo "{}")
+        jq --arg key "$BENCH_KEY" --argjson data "$DATA_CONTENT" \
            '.benchmarks[$key] = (.benchmarks[$key] // {}) | 
             .benchmarks[$key].name = $key |
             .benchmarks[$key].core = $data' \
@@ -90,7 +101,9 @@ while IFS= read -r json_file; do
         fi
         
         # Add to consolidated JSON (initialize benchmark entry if it doesn't exist)
-        jq --arg key "$BENCH_KEY" --argfile data "$json_file" \
+        # Read JSON file content and merge it
+        DATA_CONTENT=$(cat "$json_file" 2>/dev/null || echo "{}")
+        jq --arg key "$BENCH_KEY" --argjson data "$DATA_CONTENT" \
            '.benchmarks[$key] = (.benchmarks[$key] // {}) | 
             .benchmarks[$key].name = $key |
             .benchmarks[$key].commons = $data' \
