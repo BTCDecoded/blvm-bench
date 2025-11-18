@@ -247,74 +247,38 @@ jobs:
           echo "json_file=$LATEST_JSON" >> $GITHUB_OUTPUT
           echo "Found: $LATEST_JSON"
 
-      - name: Update GitHub Pages data
+      - name: Find latest consolidated JSON
+        id: find_json
         run: |
-          make update-gh-pages
-
-      - name: Commit benchmark data
-        env:
-          PAT_TOKEN: ${{ secrets.REPO_ACCESS_TOKEN }}
-        run: |
-          # Verify token is set
-          if [ -z "$PAT_TOKEN" ]; then
-            echo "❌ PAT_TOKEN (REPO_ACCESS_TOKEN) is not set!"
-            echo "   Please add REPO_ACCESS_TOKEN secret in repository settings"
+          LATEST_JSON=$(find results -name "benchmark-results-consolidated-*.json" -type f | sort | tail -1)
+          if [ -z "$LATEST_JSON" ]; then
+            echo "❌ No consolidated JSON found"
             exit 1
           fi
-          
-          # Verify token format (should start with ghp_ for classic PATs)
-          if [[ ! "$PAT_TOKEN" =~ ^ghp_ ]] && [[ ! "$PAT_TOKEN" =~ ^gho_ ]] && [[ ! "$PAT_TOKEN" =~ ^github_pat_ ]]; then
-            echo "⚠️  Warning: Token format doesn't look like a PAT (should start with ghp_, gho_, or github_pat_)"
-          fi
-          
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          
-          # Use HTTPS with PAT token for authentication (runner only has API access, not SSH)
-          # Use the PAT directly in the URL (not x-access-token prefix)
-          git remote set-url origin https://${PAT_TOKEN}@github.com/${{ github.repository }}.git
-          
-          # Verify remote is set correctly (hide token in output)
-          echo "Remote URL configured (using PAT token)"
-          git remote -v | sed "s/${PAT_TOKEN}/***HIDDEN***/g" || true
-          
-          git add docs/data/
-          if ! git diff --staged --quiet; then
-            git commit -m "🤖 Update benchmark data [skip ci]"
-            echo "Pushing to origin/main..."
-            
-            # Try push with verbose output (but hide token)
-            GIT_CURL_VERBOSE=1 GIT_TRACE=1 git push origin main 2>&1 | sed "s/${PAT_TOKEN}/***HIDDEN***/g" || {
-              echo ""
-              echo "⚠️  Push failed. Troubleshooting:"
-              echo "   1. Verify REPO_ACCESS_TOKEN has 'repo' scope"
-              echo "   2. Check if token has expired"
-              echo "   3. Verify repository permissions for the token"
-              echo "   4. Check if branch protection rules are blocking the push"
-              exit 1
-            }
-          else
-            echo "No changes to commit"
-          fi
+          echo "json_file=$LATEST_JSON" >> $GITHUB_OUTPUT
+          echo "Found: $LATEST_JSON"
 
-      - name: Create Release (if on main)
-        if: github.ref == 'refs/heads/main' && github.event_name == 'schedule'
+      - name: Create or Update Release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: benchmarks-${{ github.run_number }}
-          name: Benchmark Results ${{ github.run_number }}
+          tag_name: benchmarks-latest
+          name: Latest Benchmark Results
           body: |
-            Automated benchmark run from self-hosted runner.
+            Latest benchmark results from self-hosted runner.
             
-            **Generated:** ${{ github.run_number }}
+            **Run Number:** ${{ github.run_number }}
             **Commit:** ${{ github.sha }}
+            **Generated:** ${{ github.event.head_commit.timestamp || github.run_id }}
+            
+            The GitHub Pages site automatically loads data from this release.
             
             Download the consolidated JSON from the assets below.
           files: |
             ${{ steps.find_json.outputs.json_file }}
-            docs/data/benchmark-results-consolidated-latest.json
+          draft: false
+          prerelease: false
         env:
-          GITHUB_TOKEN: ${{ secrets.REPO_ACCESS_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.REPO_ACCESS_TOKEN || secrets.GITHUB_TOKEN }}
 
       - name: Upload benchmark artifacts
         uses: actions/upload-artifact@v4
