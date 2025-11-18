@@ -12,22 +12,8 @@ source "$SCRIPT_DIR/../shared/common.sh"
 
 
 
-BENCH_BITCOIN="$CORE_DIR$CORE_PATH/$CORE_PATH/build/bin/bench_bitcoin"
-OUTPUT_FILE="$OUTPUT_DIR/core-segwit-bench-$(date +%Y%m%d-%H%M%S).json"
-
-echo "=== Bitcoin Core SegWit Operations Benchmark ==="
-echo ""
-
-if [ ! -f "$BENCH_BITCOIN" ]; then
-    echo "❌ bench_bitcoin not found at $BENCH_BITCOIN"
-    echo "   Building bench_bitcoin..."
-    cd "$CORE_DIR"
-    make -j$(nproc) bench_bitcoin 2>&1 | tail -5
-    if [ ! -f "$BENCH_BITCOIN" ]; then
-        echo "❌ Failed to build bench_bitcoin"
-        exit 1
-    fi
-fi
+# Reliably find or build bench_bitcoin
+BENCH_BITCOIN=$(get_bench_bitcoin)
 
 echo "Running bench_bitcoin for SegWit operations (this may take 1-2 minutes)..."
 echo "This benchmarks SegWit block validation (ConnectBlockAllEcdsa/AllSchnorr)"

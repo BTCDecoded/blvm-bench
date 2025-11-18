@@ -13,21 +13,8 @@ source "$SCRIPT_DIR/../shared/common.sh"
 
 OUTPUT_FILE="$OUTPUT_DIR/core-mempool-operations-bench-$(date +%Y%m%d-%H%M%S).json"
 
-BENCH_BITCOIN="$CORE_PATH/build/bin/bench_bitcoin"
-
-echo "=== Bitcoin Core Mempool Operations Benchmark ==="
-echo ""
-
-if [ ! -f "$BENCH_BITCOIN" ]; then
-    echo "❌ bench_bitcoin not found"
-    cat > "$OUTPUT_FILE" << EOF
-{
-  "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-  "error": "bench_bitcoin binary not found"
-}
-EOF
-    exit 1
-fi
+# Reliably find or build bench_bitcoin
+BENCH_BITCOIN=$(get_bench_bitcoin)
 
 echo "Running mempool operations benchmarks..."
 TEMP_JSON=$(mktemp)

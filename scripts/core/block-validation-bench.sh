@@ -14,22 +14,8 @@ OUTPUT_FILE="$OUTPUT_DIR/core-block-validation-bench-$(date +%Y%m%d-%H%M%S).json
 echo "=== Bitcoin Core Block Validation Benchmark (ConnectBlock) ==="
 echo ""
 
-# Find bench_bitcoin
-BENCH_BITCOIN=""
-if [ -n "$CORE_PATH" ]; then
-    # Try build/bin/bench_bitcoin first
-    if [ -f "$CORE_PATH/build/bin/bench_bitcoin" ]; then
-        BENCH_BITCOIN="$CORE_PATH/build/bin/bench_bitcoin"
-    # Try bin/bench_bitcoin
-    elif [ -f "$CORE_PATH/bin/bench_bitcoin" ]; then
-        BENCH_BITCOIN="$CORE_PATH/bin/bench_bitcoin"
-    fi
-fi
-
-# Fallback: check if bench_bitcoin is in PATH
-if [ -z "$BENCH_BITCOIN" ] && command -v bench_bitcoin >/dev/null 2>&1; then
-    BENCH_BITCOIN=$(command -v bench_bitcoin)
-fi
+# Reliably find or build bench_bitcoin
+BENCH_BITCOIN=$(get_bench_bitcoin)
 
 if [ -z "$BENCH_BITCOIN" ] || [ ! -f "$BENCH_BITCOIN" ]; then
     if [ -n "$CORE_PATH" ]; then

@@ -12,22 +12,8 @@ source "$SCRIPT_DIR/../shared/common.sh"
 
 
 
-BENCH_BITCOIN="$CORE_DIR$CORE_PATH/$CORE_PATH/build/bin/bench_bitcoin"
-OUTPUT_FILE="$OUTPUT_DIR/core-standard-tx-bench-$(date +%Y%m%d-%H%M%S).json"
-
-echo "=== Bitcoin Core Standard Transaction Checks Benchmark ==="
-echo ""
-
-if [ ! -f "$BENCH_BITCOIN" ]; then
-    echo "❌ bench_bitcoin not found at $BENCH_BITCOIN"
-    cat > "$OUTPUT_FILE" << EOF
-{
-  "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-  "error": "bench_bitcoin binary not found"
-}
-EOF
-    exit 1
-fi
+# Reliably find or build bench_bitcoin
+BENCH_BITCOIN=$(get_bench_bitcoin)
 
 echo "Running standard transaction checks benchmarks..."
 echo "Note: Core may not have a specific IsStandardTx benchmark."

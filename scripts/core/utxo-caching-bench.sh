@@ -15,22 +15,8 @@ mkdir -p "$OUTPUT_DIR"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 CORE_DIR="$PROJECT_ROOT/core"
-BENCH_BITCOIN="$CORE_DIR$CORE_PATH/$CORE_PATH/build/bin/bench_bitcoin"
-OUTPUT_FILE="$OUTPUT_DIR/core-utxo-caching-bench-$(date +%Y%m%d-%H%M%S).json"
-
-echo "=== Bitcoin Core UTXO Caching Benchmark ==="
-echo ""
-
-if [ ! -f "$BENCH_BITCOIN" ]; then
-    echo "❌ bench_bitcoin not found at $BENCH_BITCOIN"
-    echo "   Building bench_bitcoin..."
-    cd "$CORE_DIR"
-    make -j$(nproc) bench_bitcoin 2>&1 | tail -5
-    if [ ! -f "$BENCH_BITCOIN" ]; then
-        echo "❌ Failed to build bench_bitcoin"
-        exit 1
-    fi
-fi
+# Reliably find or build bench_bitcoin
+BENCH_BITCOIN=$(get_bench_bitcoin)
 
 echo "Running bench_bitcoin for UTXO operations (this may take 1-2 minutes)..."
 echo "This benchmarks UTXO insert/get/remove operations (matches Commons' utxo_insert/utxo_get/utxo_remove)."

@@ -11,15 +11,8 @@ source "$SCRIPT_DIR/../shared/common.sh"
 # Measures transaction serialization performance using bench_bitcoin
 
 
-BENCH_BITCOIN="$CORE_DIR$CORE_PATH/$CORE_PATH/build/bin/bench_bitcoin"
-
-OUTPUT_FILE="$OUTPUT_DIR/core-transaction-serialization-bench-$(date +%Y%m%d-%H%M%S).json"
-
-if [ ! -f "$BENCH_BITCOIN" ]; then
-    echo "ERROR: bench_bitcoin not found at $BENCH_BITCOIN"
-    echo "Please build Bitcoin Core first: cd $CORE_DIR && make -j$(nproc)"
-    exit 1
-fi
+# Reliably find or build bench_bitcoin
+BENCH_BITCOIN=$(get_bench_bitcoin)
 
 echo "Running Core Transaction Serialization benchmark..."
 echo "Output: $OUTPUT_FILE"

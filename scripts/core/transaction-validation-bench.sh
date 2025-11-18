@@ -15,14 +15,8 @@ echo "=== Bitcoin Core Transaction Validation Benchmark ==="
 echo ""
 
 # Find bench_bitcoin
-BENCH_BITCOIN=""
-if [ -n "$CORE_PATH" ]; then
-    if [ -f "$CORE_PATH/build/bin/bench_bitcoin" ]; then
-        BENCH_BITCOIN="$CORE_PATH/build/bin/bench_bitcoin"
-    elif [ -f "$CORE_PATH/bin/bench_bitcoin" ]; then
-        BENCH_BITCOIN="$CORE_PATH/bin/bench_bitcoin"
-    fi
-fi
+# Reliably find or build bench_bitcoin
+BENCH_BITCOIN=$(get_bench_bitcoin)
 
 if [ -z "$BENCH_BITCOIN" ] && command -v bench_bitcoin >/dev/null 2>&1; then
     BENCH_BITCOIN=$(command -v bench_bitcoin)
