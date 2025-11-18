@@ -53,8 +53,8 @@ done
 
 if [ "$BENCH_SUCCESS" = "false" ]; then
     echo "❌ All transaction validation benchmarks failed - check $LOG_FILE"
-    echo "   Available benchmarks:"
-    cargo bench --list 2>&1 | grep -E "check|transaction" || echo "   (none found)"
+    echo "   Checking available benchmarks..."
+    cargo bench --help 2>&1 | head -5 || true
 fi
 
 CRITERION_DIR="$BENCH_DIR/target/criterion"

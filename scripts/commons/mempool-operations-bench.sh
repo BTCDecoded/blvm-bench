@@ -46,8 +46,8 @@ done
 
 if [ "$BENCH_SUCCESS" = "false" ]; then
     echo "❌ All mempool benchmarks failed - check $LOG_FILE"
-    echo "   Available benchmarks:"
-    cargo bench --list 2>&1 | grep -E "mempool" || echo "   (none found)"
+    echo "   Checking available benchmarks..."
+    cargo bench --help 2>&1 | head -5 || true
 fi
 
 # Extract from Criterion JSON files (more reliable than parsing stdout)
