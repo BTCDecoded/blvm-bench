@@ -4,8 +4,12 @@
 
 set -e
 
+# Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Ensure we're in the bllvm-bench root (where run-benchmarks.sh is located)
 cd "$SCRIPT_DIR"
+# BLLVM_BENCH_ROOT is the same as SCRIPT_DIR since run-benchmarks.sh is in the root
+BLLVM_BENCH_ROOT="$SCRIPT_DIR"
 
 # Source common functions (includes path discovery and RESULTS_DIR)
 if [ -f "scripts/shared/common.sh" ]; then
@@ -106,30 +110,60 @@ case "$SUITE" in
         
         # Block Validation
         if [ -n "$CORE_PATH" ]; then
-            run_benchmark "core-block-validation-bench" "$SCRIPT_DIR/scripts/core/block-validation-bench.sh" 300
+            BENCH_SCRIPT="$BLLVM_BENCH_ROOT/scripts/core/block-validation-bench.sh"
+            if [ -f "$BENCH_SCRIPT" ]; then
+                run_benchmark "core-block-validation-bench" "$BENCH_SCRIPT" 300
+            else
+                echo "⚠️  Script not found: $BENCH_SCRIPT"
+            fi
         fi
         if [ -n "$COMMONS_CONSENSUS_PATH" ]; then
-            run_benchmark "commons-block-validation-bench" "$SCRIPT_DIR/scripts/commons/block-validation-bench.sh" 300
+            BENCH_SCRIPT="$BLLVM_BENCH_ROOT/scripts/commons/block-validation-bench.sh"
+            if [ -f "$BENCH_SCRIPT" ]; then
+                run_benchmark "commons-block-validation-bench" "$BENCH_SCRIPT" 300
+            else
+                echo "⚠️  Script not found: $BENCH_SCRIPT"
+            fi
         fi
         
         # Transaction Validation
         if [ -n "$CORE_PATH" ]; then
-            run_benchmark "core-transaction-validation-bench" "$SCRIPT_DIR/scripts/core/transaction-validation-bench.sh" 300
+            BENCH_SCRIPT="$BLLVM_BENCH_ROOT/scripts/core/transaction-validation-bench.sh"
+            if [ -f "$BENCH_SCRIPT" ]; then
+                run_benchmark "core-transaction-validation-bench" "$BENCH_SCRIPT" 300
+            else
+                echo "⚠️  Script not found: $BENCH_SCRIPT"
+            fi
         fi
         if [ -n "$COMMONS_CONSENSUS_PATH" ]; then
-            run_benchmark "commons-transaction-validation-bench" "$SCRIPT_DIR/scripts/commons/transaction-validation-bench.sh" 300
+            BENCH_SCRIPT="$BLLVM_BENCH_ROOT/scripts/commons/transaction-validation-bench.sh"
+            if [ -f "$BENCH_SCRIPT" ]; then
+                run_benchmark "commons-transaction-validation-bench" "$BENCH_SCRIPT" 300
+            else
+                echo "⚠️  Script not found: $BENCH_SCRIPT"
+            fi
         fi
         
         # Mempool Operations
         if [ -n "$CORE_PATH" ]; then
-            run_benchmark "core-mempool-operations-bench" "$SCRIPT_DIR/scripts/core/mempool-operations-bench.sh" 300
+            BENCH_SCRIPT="$BLLVM_BENCH_ROOT/scripts/core/mempool-operations-bench.sh"
+            if [ -f "$BENCH_SCRIPT" ]; then
+                run_benchmark "core-mempool-operations-bench" "$BENCH_SCRIPT" 300
+            else
+                echo "⚠️  Script not found: $BENCH_SCRIPT"
+            fi
         fi
         if [ -n "$COMMONS_CONSENSUS_PATH" ]; then
-            run_benchmark "commons-mempool-operations-bench" "$SCRIPT_DIR/scripts/commons/mempool-operations-bench.sh" 300
+            BENCH_SCRIPT="$BLLVM_BENCH_ROOT/scripts/commons/mempool-operations-bench.sh"
+            if [ -f "$BENCH_SCRIPT" ]; then
+                run_benchmark "commons-mempool-operations-bench" "$BENCH_SCRIPT" 300
+            else
+                echo "⚠️  Script not found: $BENCH_SCRIPT"
+            fi
         fi
         
         # Run all other ported benchmarks
-        for bench_script in "$SCRIPT_DIR/scripts/core"/*.sh "$SCRIPT_DIR/scripts/commons"/*.sh; do
+        for bench_script in "$BLLVM_BENCH_ROOT/scripts/core"/*.sh "$BLLVM_BENCH_ROOT/scripts/commons"/*.sh; do
             if [ -f "$bench_script" ]; then
                 bench_name=$(basename "$bench_script" .sh)
                 # Skip already run benchmarks
@@ -171,7 +205,7 @@ case "$SUITE" in
         echo "Running Commons-only benchmarks..."
         
         # Run all Commons benchmarks
-        for bench_script in "$SCRIPT_DIR/scripts/commons"/*.sh; do
+        for bench_script in "$BLLVM_BENCH_ROOT/scripts/commons"/*.sh; do
             if [ -f "$bench_script" ]; then
                 bench_name=$(basename "$bench_script" .sh)
                 run_benchmark "commons-${bench_name}" "$bench_script" 300
