@@ -19,9 +19,10 @@ fi
 if [ -f "$CONFIG_FILE" ]; then
     # Simple TOML parsing (basic key=value extraction)
     # Extract values, handling both quoted and unquoted strings
-    CORE_PATH=$(grep -E "^core_path\s*=" "$CONFIG_FILE" 2>/dev/null | sed 's/.*=\s*"\([^"]*\)".*/\1/' | sed 's/.*=\s*\([^#]*\).*/\1/' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' || echo "")
-    COMMONS_CONSENSUS_PATH=$(grep -E "^commons_consensus_path\s*=" "$CONFIG_FILE" 2>/dev/null | sed 's/.*=\s*"\([^"]*\)".*/\1/' | sed 's/.*=\s*\([^#]*\).*/\1/' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' || echo "")
-    COMMONS_NODE_PATH=$(grep -E "^commons_node_path\s*=" "$CONFIG_FILE" 2>/dev/null | sed 's/.*=\s*"\([^"]*\)".*/\1/' | sed 's/.*=\s*\([^#]*\).*/\1/' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' || echo "")
+    # First try to extract quoted strings, then unquoted
+    CORE_PATH=$(grep -E "^core_path\s*=" "$CONFIG_FILE" 2>/dev/null | sed -E 's/^[^=]*=\s*"([^"]*)".*/\1/' | sed -E 's/^[^=]*=\s*([^#[:space:]]+).*/\1/' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' || echo "")
+    COMMONS_CONSENSUS_PATH=$(grep -E "^commons_consensus_path\s*=" "$CONFIG_FILE" 2>/dev/null | sed -E 's/^[^=]*=\s*"([^"]*)".*/\1/' | sed -E 's/^[^=]*=\s*([^#[:space:]]+).*/\1/' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' || echo "")
+    COMMONS_NODE_PATH=$(grep -E "^commons_node_path\s*=" "$CONFIG_FILE" 2>/dev/null | sed -E 's/^[^=]*=\s*"([^"]*)".*/\1/' | sed -E 's/^[^=]*=\s*([^#[:space:]]+).*/\1/' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' || echo "")
     
     # Resolve config paths to absolute paths
     if [ -n "$CORE_PATH" ] && [ -d "$CORE_PATH" ]; then
