@@ -1,12 +1,12 @@
 {
-  "timestamp": "2025-11-18T19:08:59Z",
+  "timestamp": "2025-11-18T19:30:23Z",
   "suite_directory": "/home/acolyte/src/node-comparison/commons/bllvm-bench/results/suite-commons-only-20251118-190808",
   "generated_by": "bllvm-bench consolidated JSON generator",
   "benchmarks": {},
   "summary": {
-    "total_benchmarks": 9,
+    "total_benchmarks": 13,
     "core_benchmarks": 0,
-    "commons_benchmarks": 4,
+    "commons_benchmarks": 6,
     "comparisons": 0
   }
 }
