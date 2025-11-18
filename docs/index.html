@@ -457,13 +457,16 @@
                 }
                 
                 // Check nested objects (e.g., bitcoin_core_block_validation.primary_comparison.time_per_block_ms)
+                // Also check for Commons-specific structures like bitcoin_commons_block_validation.connect_block.time_per_block_ms
                 if (!time || time === 0) {
                     const findNestedTime = (obj, depth = 0) => {
-                        if (depth > 5) return 0; // Prevent infinite recursion
+                        if (depth > 8) return 0; // Prevent infinite recursion (increased depth)
                         for (const key in obj) {
+                            // Check for time fields (including time_per_block_ms, time_per_block_ns, etc.)
                             if (key.includes('time') && typeof obj[key] === 'number' && obj[key] > 0) {
                                 return obj[key];
                             }
+                            // Check for median/mean fields
                             if (key === 'median' || key === 'mean') {
                                 const val = obj[key];
                                 if (typeof val === 'number' && val > 0) return val;
@@ -471,15 +474,31 @@
                                     return val.point_estimate;
                                 }
                             }
+                            // Check for nested structures (connect_block, primary_comparison, etc.)
                             if (typeof obj[key] === 'object' && obj[key] !== null && !Array.isArray(obj[key])) {
                                 const found = findNestedTime(obj[key], depth + 1);
                                 if (found) return found;
+                            }
+                            // Check arrays for time values
+                            if (Array.isArray(obj[key])) {
+                                for (const item of obj[key]) {
+                                    if (typeof item === 'object' && item !== null) {
+                                        const found = findNestedTime(item, depth + 1);
+                                        if (found) return found;
+                                    }
+                                }
                             }
                         }
                         return 0;
                     };
                     time = findNestedTime(data);
                 }
+            }
+            
+            // Convert time_per_block_ms to ms if found
+            if (time > 0 && time < 0.001) {
+                // Might be in seconds, check if we need to convert
+                // This handles cases where time_per_block_ms is actually in a different unit
             }
             
             return formatTime(time);
@@ -526,17 +545,27 @@
         function formatTime(time) {
             if (!time || time === 0 || isNaN(time)) return '—';
             
-            // If time is in nanoseconds, convert to appropriate unit
-            if (time < 1) {
-                return `${(time * 1000).toFixed(2)} ns`;
-            } else if (time < 1000) {
-                return `${time.toFixed(2)} ns`;
-            } else if (time < 1000000) {
-                return `${(time / 1000).toFixed(2)} µs`;
-            } else if (time < 1000000000) {
+            // Handle time_per_block_ms (already in milliseconds)
+            // Handle time_per_block_ns (in nanoseconds)
+            // Handle time_ms (milliseconds)
+            // Handle time_ns (nanoseconds)
+            
+            // If time is in nanoseconds (typically > 1000), convert to ms
+            if (time >= 1000000) {
+                // Likely nanoseconds, convert to ms
                 return `${(time / 1000000).toFixed(2)} ms`;
+            } else if (time >= 1000) {
+                // Could be microseconds, convert to ms
+                return `${(time / 1000).toFixed(2)} ms`;
+            } else if (time < 1 && time > 0) {
+                // Very small number, might be seconds, convert to ms
+                return `${(time * 1000).toFixed(2)} ms`;
+            } else if (time >= 1) {
+                // Already in milliseconds
+                return `${time.toFixed(2)} ms`;
             } else {
-                return `${(time / 1000000000).toFixed(2)} s`;
+                // Fallback: assume milliseconds
+                return `${time.toFixed(2)} ms`;
             }
         }
 
