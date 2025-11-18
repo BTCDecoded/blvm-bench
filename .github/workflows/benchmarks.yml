@@ -392,7 +392,7 @@ jobs:
           echo "Found: $LATEST_JSON"
 
       - name: Archive old releases (if any)
-            run: |
+        run: |
               # Archive releases older than 1 week (skip if no releases exist)
               ONE_WEEK_AGO=$(date -u -d '1 week ago' +%Y-%m-%dT%H:%M:%SZ)
               
@@ -419,11 +419,32 @@ jobs:
                   gh release edit "$TAG" --title "Archived: $TAG" --repo ${{ github.repository }} || echo "⚠️  Failed to archive $TAG"
                 fi
               done
-            env:
-              GITHUB_TOKEN: ${{ secrets.REPO_ACCESS_TOKEN || secrets.GITHUB_TOKEN }}
-            continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.REPO_ACCESS_TOKEN || secrets.GITHUB_TOKEN }}
+        continue-on-error: true
 
-          - name: Create or Update Release (benchmarks-latest)
+      - name: Delete old assets from benchmarks-latest release
+        run: |
+          # Delete all existing JSON assets from benchmarks-latest release
+          # This ensures only one JSON file exists per release
+          RELEASE_ID=$(gh release view benchmarks-latest --repo ${{ github.repository }} --json id -q .id 2>/dev/null || echo "")
+          
+          if [ -n "$RELEASE_ID" ]; then
+            echo "Found existing benchmarks-latest release, deleting old JSON assets..."
+            ASSETS=$(gh release view benchmarks-latest --repo ${{ github.repository }} --json assets -q '.assets[] | select(.name | endswith(".json")) | .id' 2>/dev/null || echo "")
+            
+            for asset_id in $ASSETS; do
+              echo "Deleting asset ID: $asset_id"
+              gh api repos/${{ github.repository }}/releases/assets/$asset_id -X DELETE || echo "⚠️  Failed to delete asset $asset_id"
+            done
+          else
+            echo "No existing benchmarks-latest release found (will be created)"
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.REPO_ACCESS_TOKEN || secrets.GITHUB_TOKEN }}
+        continue-on-error: true
+
+      - name: Create or Update Release (benchmarks-latest)
             uses: softprops/action-gh-release@v1
             with:
               tag_name: benchmarks-latest
