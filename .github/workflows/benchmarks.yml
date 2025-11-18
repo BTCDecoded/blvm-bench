@@ -15,6 +15,8 @@ on:
 
 jobs:
   run-benchmarks:
+    outputs:
+      json_file: ${{ steps.find_json.outputs.json_file }}
     runs-on: [self-hosted, linux]  # Self-hosted runner required
     
     steps:
@@ -389,7 +391,7 @@ jobs:
           echo "json_file=$LATEST_JSON" >> $GITHUB_OUTPUT
           echo "Found: $LATEST_JSON"
 
-          - name: Archive old releases (if any)
+      - name: Archive old releases (if any)
             run: |
               # Archive releases older than 1 week (skip if no releases exist)
               ONE_WEEK_AGO=$(date -u -d '1 week ago' +%Y-%m-%dT%H:%M:%SZ)
