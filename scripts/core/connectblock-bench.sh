@@ -7,19 +7,18 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../shared/common.sh"
 
-# Bitcoin Core ConnectBlock Benchmark
-# Uses existing core-block-validation-bench.sh but with different output name
-# This is a duplicate/alias for the ConnectBlock benchmark
-
-
-
+OUTPUT_DIR=$(get_output_dir "${1:-$RESULTS_DIR}")
 OUTPUT_FILE="$OUTPUT_DIR/core-connectblock-bench-$(date +%Y%m%d-%H%M%S).json"
+
+# Bitcoin Core ConnectBlock Benchmark
+# Uses existing block-validation-bench.sh but with different output name
+# This is a duplicate/alias for the ConnectBlock benchmark
 
 echo "=== Bitcoin Core ConnectBlock Benchmark ==="
 echo ""
 
 # Use the existing block validation benchmark script
-"$SCRIPT_DIR/core-block-validation-bench.sh" "$OUTPUT_DIR"
+"$SCRIPT_DIR/block-validation-bench.sh" "$OUTPUT_DIR"
 
 # Find the most recent core-block-validation-bench file and copy/rename it
 LATEST_BLOCK_VAL=$(find "$OUTPUT_DIR" -name "core-block-validation-bench-*.json" -type f 2>/dev/null | xargs ls -t 2>/dev/null | head -1)

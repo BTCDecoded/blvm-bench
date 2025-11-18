@@ -3,14 +3,13 @@
 # Source common functions
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../shared/common.sh"
+
+OUTPUT_DIR=$(get_output_dir "${1:-$RESULTS_DIR}")
 # This benchmark matches Core's approach: uses pre-computed hashes (not transactions)
 # for fair comparison of tree-building performance
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/../shared/common.sh"
-RESULTS_DIR="$PROJECT_ROOT/results"
 BENCH_DIR="$BLLVM_BENCH_ROOT"
 
 # Create results directory if it doesn't exist
