@@ -338,12 +338,23 @@
                 }));
                 
                 // Separate comparison benchmarks (both Core and Commons) from Commons-only
+                // Also track failed benchmarks
                 const comparisonBenchmarks = [];
                 const commonsOnlyBenchmarks = [];
+                const failedBenchmarks = [];
                 
                 for (const bench of benchmarks) {
-                    const hasCore = bench.core && Object.keys(bench.core).length > 0;
-                    const hasCommons = bench.commons && Object.keys(bench.commons).length > 0;
+                    // Check if benchmark has an error
+                    const hasError = bench.commons?.error || bench.core?.error || bench.error;
+                    
+                    if (hasError) {
+                        // Failed benchmark - show separately
+                        failedBenchmarks.push(bench);
+                        continue;
+                    }
+                    
+                    const hasCore = bench.core && Object.keys(bench.core).length > 0 && !bench.core.error;
+                    const hasCommons = bench.commons && Object.keys(bench.commons).length > 0 && !bench.commons.error;
                     
                     if (hasCore && hasCommons) {
                         // Both Core and Commons - this is a comparison
@@ -423,6 +434,35 @@
                             html += `<td><strong>${bench.name || 'Unknown'}</strong></td>`;
                             html += `<td style="text-align: right;">${commonsTime}</td>`;
                             html += `<td>Commons-only benchmark</td>`;
+                            html += '</tr>';
+                        }
+                        
+                        html += '</table>';
+                    }
+                }
+                
+                // Render failed benchmarks separately
+                if (failedBenchmarks.length > 0) {
+                    html += '<h1>Failed Benchmarks</h1>';
+                    html += '<p>Benchmarks that encountered errors during execution. Check log files for details.</p>';
+                    
+                    const failedCategories = groupByCategory(failedBenchmarks);
+                    
+                    for (const [category, benchList] of Object.entries(failedCategories)) {
+                        html += `<h2>${category}</h2>`;
+                        html += '<table>';
+                        html += '<tr><th>Benchmark</th><th>Status</th><th>Error Details</th><th>Log File</th></tr>';
+                        
+                        for (const bench of benchList) {
+                            const error = bench.commons?.error || bench.core?.error || bench.error || 'Unknown error';
+                            const logFile = bench.commons?.log_file || bench.core?.log_file || bench.log_file || '—';
+                            const note = bench.commons?.note || bench.core?.note || bench.note || '';
+                            
+                            html += '<tr>';
+                            html += `<td><strong>${bench.name || 'Unknown'}</strong></td>`;
+                            html += `<td style="color: #c33; font-weight: bold;">❌ Failed</td>`;
+                            html += `<td>${error}${note ? '<br><small>' + note + '</small>' : ''}</td>`;
+                            html += `<td><small>${logFile}</small></td>`;
                             html += '</tr>';
                         }
                         
