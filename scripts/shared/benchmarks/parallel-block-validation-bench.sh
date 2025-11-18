@@ -29,11 +29,15 @@ echo ""
 echo "Fairness: Both validate the same N blocks with identical structure"
 echo ""
 
+# Source common functions
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../../shared/common.sh"
+
 # Configuration
 NUM_BLOCKS=1000  # Number of blocks to validate
-CORE_DIR="$PROJECT_ROOT/core"
-CONSENSUS_DIR="$PROJECT_ROOT/commons/bllvm-consensus"
-NODE_DIR="$PROJECT_ROOT/commons/bllvm-node"
+CORE_DIR="${CORE_PATH:-$HOME/bitcoin-core}"
+CONSENSUS_DIR="${COMMONS_CONSENSUS_PATH:-$HOME/bllvm-consensus}"
+NODE_DIR="${COMMONS_NODE_PATH:-$HOME/bllvm-node}"
 BENCH_BITCOIN="$CORE_DIR/build/bin/bench_bitcoin"
 
 # Bitcoin Core: Sequential Validation
@@ -48,8 +52,18 @@ CORE_BLOCKS_PER_SEC=0
 
 if [ ! -f "$BENCH_BITCOIN" ]; then
     echo "⚠️  bench_bitcoin not found, building..."
-    cd "$CORE_DIR"
-    make -j$(nproc) bench_bitcoin > /dev/null 2>&1 || echo "Build may have failed"
+    if [ -d "$CORE_DIR" ]; then
+        cd "$CORE_DIR"
+        # Try CMake build first (modern Core)
+        if [ -f "CMakeLists.txt" ]; then
+            cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_BENCH=ON -DENABLE_WALLET=OFF -DBUILD_GUI=OFF > /dev/null 2>&1 || true
+            cmake --build build -t bench_bitcoin -j$(nproc) > /dev/null 2>&1 || echo "Build may have failed"
+        else
+            make -j$(nproc) bench_bitcoin > /dev/null 2>&1 || echo "Build may have failed"
+        fi
+    else
+        echo "❌ Core directory not found: $CORE_DIR"
+    fi
 fi
 
 if [ -f "$BENCH_BITCOIN" ]; then

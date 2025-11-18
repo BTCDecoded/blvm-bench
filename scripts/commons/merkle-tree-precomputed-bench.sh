@@ -1,5 +1,8 @@
 #!/bin/bash
 # Benchmark Merkle Tree Operations with Pre-computed Hashes
+# Source common functions
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../shared/common.sh"
 # This benchmark matches Core's approach: uses pre-computed hashes (not transactions)
 # for fair comparison of tree-building performance
 

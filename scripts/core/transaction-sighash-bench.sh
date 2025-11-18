@@ -11,7 +11,7 @@ mkdir -p "$OUTPUT_DIR"
 
 PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CORE_DIR="$PROJECT_ROOT/core"
-BENCH_BITCOIN="$CORE_DIR/build/bin/bench_bitcoin"
+BENCH_BITCOIN="$CORE_DIR$CORE_PATH/$CORE_PATH/build/bin/bench_bitcoin"
 
 OUTPUT_FILE="$OUTPUT_DIR/core-transaction-sighash-bench-$(date +%Y%m%d-%H%M%S).json"
 

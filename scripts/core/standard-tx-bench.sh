@@ -12,7 +12,7 @@ source "$SCRIPT_DIR/../shared/common.sh"
 
 
 
-BENCH_BITCOIN="$CORE_DIR/build/bin/bench_bitcoin"
+BENCH_BITCOIN="$CORE_DIR$CORE_PATH/$CORE_PATH/build/bin/bench_bitcoin"
 OUTPUT_FILE="$OUTPUT_DIR/core-standard-tx-bench-$(date +%Y%m%d-%H%M%S).json"
 
 echo "=== Bitcoin Core Standard Transaction Checks Benchmark ==="
