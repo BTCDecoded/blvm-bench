@@ -207,18 +207,34 @@
                     const releaseResponse = await fetch(RELEASE_JSON_URL);
                     if (releaseResponse.ok) {
                         const release = await releaseResponse.json();
+                        console.log('Release found:', release.tag_name);
                         // Find JSON asset in release
                         const jsonAsset = release.assets.find(a => a.name.includes('benchmark-results-consolidated') && a.name.endsWith('.json'));
                         if (jsonAsset) {
-                            response = await fetch(jsonAsset.browser_download_url);
+                            console.log('Found JSON asset:', jsonAsset.name);
+                            // Use browser_download_url which works from browser
+                            response = await fetch(jsonAsset.browser_download_url, {
+                                method: 'GET',
+                                headers: {
+                                    'Accept': 'application/json',
+                                },
+                                // CORS should work for GitHub release assets
+                            });
                             if (response.ok) {
                                 jsonData = await response.json();
-                                console.log('✅ Loaded from release');
+                                console.log('✅ Loaded from release:', jsonAsset.name);
+                            } else {
+                                console.warn('Failed to fetch release asset:', response.status, response.statusText);
                             }
+                        } else {
+                            console.warn('No JSON asset found in release. Assets:', release.assets.map(a => a.name));
                         }
+                    } else {
+                        console.warn('Release API call failed:', releaseResponse.status, releaseResponse.statusText);
                     }
                 } catch (releaseErr) {
-                    console.log('Release not available, trying local file...');
+                    console.log('Release not available:', releaseErr.message);
+                    console.log('Trying local file...');
                 }
                 
                 // Priority 2: Fallback to local file (for GitHub Pages)
