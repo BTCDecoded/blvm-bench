@@ -450,15 +450,15 @@ jobs:
           tag_name: benchmarks-latest
           name: Latest Benchmark Results
           body: |
-                Latest benchmark results from self-hosted runner.
-                
-                **Run Number:** ${{ github.run_number }}
-                **Commit:** ${{ github.sha }}
-                **Generated:** ${{ github.event.head_commit.timestamp || github.run_id }}
-                
-                The GitHub Pages site automatically loads data from this release.
-                
-                This release is automatically updated on each benchmark run. Only one JSON file is kept per release.
+            Latest benchmark results from self-hosted runner.
+            
+            **Run Number:** ${{ github.run_number }}
+            **Commit:** ${{ github.sha }}
+            **Generated:** ${{ github.event.head_commit.timestamp || github.run_id }}
+            
+            The GitHub Pages site automatically loads data from this release.
+            
+            This release is automatically updated on each benchmark run. Only one JSON file is kept per release.
           files: |
             ${{ steps.find_json.outputs.json_file }}
           draft: false
