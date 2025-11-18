@@ -13,7 +13,7 @@ HISTORY_DIR="${HISTORY_DIR:-$BLLVM_BENCH_ROOT/results/history}"
 
 if [ -z "$CURRENT_JSON" ]; then
     # Find latest consolidated JSON
-    CURRENT_JSON=$(find "$BLLVM_BENCH_ROOT/results" -name "benchmark-results-consolidated-*.json" -type f | sort | tail -1)
+    CURRENT_JSON="$BLLVM_BENCH_ROOT/results/benchmark-results-consolidated-latest.json"
 fi
 
 if [ ! -f "$CURRENT_JSON" ]; then

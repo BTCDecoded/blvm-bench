@@ -9,8 +9,7 @@ BLLVM_BENCH_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 source "$SCRIPT_DIR/shared/common.sh"
 
 OUTPUT_DIR=$(get_output_dir "${1:-$RESULTS_DIR}")
-TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-OUTPUT_FILE="$OUTPUT_DIR/benchmark-results-consolidated-$TIMESTAMP.json"
+OUTPUT_FILE="$OUTPUT_DIR/benchmark-results-consolidated-latest.json"
 
 echo "╔══════════════════════════════════════════════════════════════╗"
 echo "║  Generating Consolidated JSON Report                          ║"

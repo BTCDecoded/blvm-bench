@@ -27,10 +27,10 @@ echo "Generating consolidated JSON..."
 "$BLLVM_BENCH_ROOT/scripts/generate-consolidated-json.sh"
 
 # Find latest consolidated JSON
-LATEST_JSON=$(find "$RESULTS_DIR" -name "benchmark-results-consolidated-*.json" -type f | sort | tail -1)
+LATEST_JSON="$RESULTS_DIR/benchmark-results-consolidated-latest.json"
 
-if [ -z "$LATEST_JSON" ]; then
-    echo "❌ No consolidated JSON found. Run 'make json' first."
+if [ ! -f "$LATEST_JSON" ]; then
+    echo "❌ No consolidated JSON found at $LATEST_JSON. Run 'make json' first."
     exit 1
 fi
 

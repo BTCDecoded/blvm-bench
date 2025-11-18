@@ -360,23 +360,23 @@ jobs:
 
       - name: Validate consolidated JSON
         run: |
-          LATEST_JSON=$(find results -name "benchmark-results-consolidated-*.json" -type f | sort | tail -1)
-          if [ -n "$LATEST_JSON" ]; then
+          LATEST_JSON="results/benchmark-results-consolidated-latest.json"
+          if [ -f "$LATEST_JSON" ]; then
             ./scripts/validate-benchmark.sh "$LATEST_JSON" || echo "⚠️  Validation warnings"
           fi
 
       - name: Track history
         run: |
-          LATEST_JSON=$(find results -name "benchmark-results-consolidated-*.json" -type f | sort | tail -1)
-          if [ -n "$LATEST_JSON" ]; then
+          LATEST_JSON="results/benchmark-results-consolidated-latest.json"
+          if [ -f "$LATEST_JSON" ]; then
             ./scripts/track-history.sh "$LATEST_JSON" || echo "⚠️  History tracking failed"
           fi
 
       - name: Detect regressions
         continue-on-error: true
         run: |
-          LATEST_JSON=$(find results -name "benchmark-results-consolidated-*.json" -type f | sort | tail -1)
-          if [ -n "$LATEST_JSON" ]; then
+          LATEST_JSON="results/benchmark-results-consolidated-latest.json"
+          if [ -f "$LATEST_JSON" ]; then
             ./scripts/detect-regressions.sh "$LATEST_JSON" || echo "⚠️  Regressions detected (see report)"
           fi
 
@@ -472,6 +472,32 @@ jobs:
           name: benchmark-results
           path: |
             results/benchmark-results-consolidated-latest.json
-            docs/data/benchmark-results-consolidated-latest.json
           retention-days: 30
+
+  # Deploy GitHub Pages after benchmarks complete
+  deploy-pages:
+    needs: run-benchmarks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+      
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: 'docs'
+      
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
 
