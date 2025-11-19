@@ -59,20 +59,38 @@ echo "Running mempool operations benchmarks..."
 TEMP_JSON=$(mktemp)
 LOG_FILE="/tmp/core-mempool.log"
 # Run multiple mempool benchmarks and combine results
-if "$BENCH_BITCOIN" -filter="MempoolCheck|MempoolEviction" -min-time=500 2>&1 | tee "$LOG_FILE"; then
-    # Parse bench_bitcoin pipe-delimited table format
-    BENCHMARKS="[]"
-    while IFS= read -r line; do
-        if echo "$line" | grep -qE '`.*`'; then
-            BENCH_NAME=$(echo "$line" | grep -oE '`[^`]+`' | tr -d '`' || echo "")
-            TIME_NS=$(echo "$line" | awk -F'|' '{gsub(/[^0-9.]/,"",$2); print $2}' 2>/dev/null | head -1 || echo "")
-            
-            if [ -n "$BENCH_NAME" ] && [ -n "$TIME_NS" ] && [ "$TIME_NS" != "0" ] && [ "$TIME_NS" != "" ]; then
-                TIME_MS=$(awk "BEGIN {printf \"%.6f\", $TIME_NS / 1000000}")
-                BENCHMARKS=$(echo "$BENCHMARKS" | jq --arg name "$BENCH_NAME" --arg time "$TIME_MS" --arg timens "$TIME_NS" '. += [{"name": $name, "time_ms": ($time | tonumber), "time_ns": ($timens | tonumber)}]' 2>/dev/null || echo "$BENCHMARKS")
-            fi
+# Try multiple filter patterns to catch all mempool benchmarks
+"$BENCH_BITCOIN" -filter="MempoolCheck|MempoolEviction|MempoolAccept" -min-time=500 2>&1 | tee "$LOG_FILE" || true
+
+# Parse bench_bitcoin pipe-delimited table format
+BENCHMARKS="[]"
+while IFS= read -r line; do
+    # Look for lines with backticks (benchmark names) or lines with mempool-related names
+    if echo "$line" | grep -qE '`.*`|MempoolCheck|MempoolEviction|MempoolAccept'; then
+        # Try to extract benchmark name from backticks first
+        BENCH_NAME=$(echo "$line" | grep -oE '`[^`]+`' | tr -d '`' | head -1 || echo "")
+        # If no backticks, try to extract from the line directly
+        if [ -z "$BENCH_NAME" ]; then
+            BENCH_NAME=$(echo "$line" | grep -oE "(MempoolCheck|MempoolEviction|MempoolAccept)" | head -1 || echo "")
         fi
-    done < "$LOG_FILE"
+        
+        # Extract time value - try multiple column positions
+        TIME_NS=$(echo "$line" | awk -F'|' '{for(i=2;i<=NF;i++){gsub(/[^0-9.]/,"",$i); if($i!="" && $i!="0"){print $i; exit}}}' 2>/dev/null | head -1 || echo "")
+        # If that fails, try extracting any number from the line
+        if [ -z "$TIME_NS" ] || [ "$TIME_NS" = "0" ]; then
+            TIME_NS=$(echo "$line" | grep -oE '[0-9]+\.[0-9]+|[0-9]+' | head -1 || echo "")
+        fi
+        
+        if [ -n "$BENCH_NAME" ] && [ -n "$TIME_NS" ] && [ "$TIME_NS" != "0" ] && [ "$TIME_NS" != "" ]; then
+            TIME_MS=$(awk "BEGIN {printf \"%.6f\", $TIME_NS / 1000000}" 2>/dev/null || echo "0")
+            # Use direct number substitution (no --argjson)
+            BENCHMARKS=$(echo "$BENCHMARKS" | jq --arg name "$BENCH_NAME" ". += [{\"name\": \$name, \"time_ms\": $TIME_MS, \"time_ns\": $TIME_NS}]" 2>/dev/null || echo "$BENCHMARKS")
+        fi
+    fi
+done < "$LOG_FILE"
+
+# Only write JSON if we found benchmarks
+if [ "$BENCHMARKS" != "[]" ]; then
     
     cat > "$OUTPUT_FILE" << EOF
 {
