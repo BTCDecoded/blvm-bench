@@ -60,18 +60,19 @@ TEMP_JSON=$(mktemp)
 LOG_FILE="/tmp/core-mempool.log"
 # Run multiple mempool benchmarks and combine results
 # Try multiple filter patterns to catch all mempool benchmarks
-"$BENCH_BITCOIN" -filter="MempoolCheck|MempoolEviction|MempoolAccept" -min-time=500 2>&1 | tee "$LOG_FILE" || true
+# Note: Core uses ComplexMemPool, not MempoolCheck/MempoolEviction
+"$BENCH_BITCOIN" -filter="ComplexMemPool|MempoolCheck|MempoolEviction|MempoolAccept" -min-time=500 2>&1 | tee "$LOG_FILE" || true
 
 # Parse bench_bitcoin pipe-delimited table format
 BENCHMARKS="[]"
 while IFS= read -r line; do
     # Look for lines with backticks (benchmark names) or lines with mempool-related names
-    if echo "$line" | grep -qE '`.*`|MempoolCheck|MempoolEviction|MempoolAccept'; then
+    if echo "$line" | grep -qE '`.*`|ComplexMemPool|MempoolCheck|MempoolEviction|MempoolAccept'; then
         # Try to extract benchmark name from backticks first
         BENCH_NAME=$(echo "$line" | grep -oE '`[^`]+`' | tr -d '`' | head -1 || echo "")
         # If no backticks, try to extract from the line directly
         if [ -z "$BENCH_NAME" ]; then
-            BENCH_NAME=$(echo "$line" | grep -oE "(MempoolCheck|MempoolEviction|MempoolAccept)" | head -1 || echo "")
+            BENCH_NAME=$(echo "$line" | grep -oE "(ComplexMemPool|MempoolCheck|MempoolEviction|MempoolAccept)" | head -1 || echo "")
         fi
         
         # Extract time value - try multiple column positions

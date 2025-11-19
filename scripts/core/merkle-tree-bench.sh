@@ -86,10 +86,12 @@ else
     cat > "$OUTPUT_FILE" << EOF
 {
   "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-  "error": "Benchmark execution failed"
+  "error": "No merkle tree benchmarks found",
+  "log_file": "$LOG_FILE",
+  "note": "bench_bitcoin may not have MerkleRoot benchmark, or filter didn't match"
 }
 EOF
-    exit 1
+    echo "⚠️  No benchmarks found, wrote error JSON"
 fi
 
 echo "✅ Results saved to: $OUTPUT_FILE"
