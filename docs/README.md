@@ -1,6 +1,6 @@
 # GitHub Pages Site
 
-This directory contains the static site for `benchmarks.thebitcoincommons.org`.
+This directory contains the static site for **`benchmarks.thebitcoincommons.org`** (not docs.thebitcoincommons.org).
 
 ## Setup
 
@@ -34,13 +34,17 @@ docs/
 
 To use `benchmarks.thebitcoincommons.org`:
 
-1. Add CNAME file in `docs/`:
-   ```
-   benchmarks.thebitcoincommons.org
-   ```
+1. **CNAME file** is already in `docs/CNAME` with `benchmarks.thebitcoincommons.org`
 
-2. Configure DNS:
-   - Add CNAME record pointing to `BTCDecoded.github.io` (or your GitHub Pages URL)
+2. **Configure DNS**:
+   - Add CNAME record: `benchmarks.thebitcoincommons.org` → `BTCDecoded.github.io`
+   - Or use A records pointing to GitHub Pages IPs if CNAME doesn't work
+
+3. **GitHub Pages Settings**:
+   - Source: Deploy from a branch
+   - Branch: `main`
+   - Folder: `/docs`
+   - Custom domain: `benchmarks.thebitcoincommons.org`
 
 ## Updating Data
 
