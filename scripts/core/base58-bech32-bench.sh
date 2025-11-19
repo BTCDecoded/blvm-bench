@@ -127,7 +127,8 @@ for bench_name in "Base58Encode" "Base58CheckEncode" "Base58Decode" "Bech32Encod
         
         if [ "$TIME_NS" != "0" ]; then
             TIME_MS=$(awk "BEGIN {printf \"%.6f\", $TIME_NS / 1000000}")
-            BENCHMARKS=$(echo "$BENCHMARKS" | jq --arg name "$bench_name" --arg time "$TIME_MS" --arg timens "$TIME_NS" '. += [{"name": $name, "time_ms": ($time | tonumber), "time_ns": ($timens | tonumber), "ops_per_sec": ($OPS | tonumber)}]' 2>/dev/null || echo "$BENCHMARKS")
+            # Use direct number substitution (no --argjson needed)
+            BENCHMARKS=$(echo "$BENCHMARKS" | jq --arg name "$bench_name" ". += [{\"name\": \$name, \"time_ms\": $TIME_MS, \"time_ns\": $TIME_NS, \"ops_per_sec\": $OPS}]" 2>/dev/null || echo "$BENCHMARKS")
         fi
     fi
 done
