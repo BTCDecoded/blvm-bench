@@ -621,6 +621,46 @@ COMMONS_COUNT_VAL=${COMMONS_COUNT:-0}
 # Use the comparison count from final pass (set above)
 COMPARISONS_VAL=${COMPARISON_COUNT:-0}
 
+# Use temp files with JSON numbers for --slurpfile (more reliable than --argjson)
+TEMP_TOTAL=$(mktemp)
+TEMP_CORE=$(mktemp)
+TEMP_COMMONS=$(mktemp)
+TEMP_COMPARISONS=$(mktemp)
+
+# Create JSON numbers - use jq -n to create valid JSON numbers directly
+# Ensure values are valid integers first
+TOTAL_COUNT_INT=$(awk "BEGIN {printf \"%d\", ($TOTAL_COUNT + 0)}" 2>/dev/null || echo "0")
+CORE_COUNT_INT=$(awk "BEGIN {printf \"%d\", ($CORE_COUNT_VAL + 0)}" 2>/dev/null || echo "0")
+COMMONS_COUNT_INT=$(awk "BEGIN {printf \"%d\", ($COMMONS_COUNT_VAL + 0)}" 2>/dev/null || echo "0")
+COMPARISONS_COUNT_INT=$(awk "BEGIN {printf \"%d\", ($COMPARISONS_VAL + 0)}" 2>/dev/null || echo "0")
+
+# Use jq -n to create valid JSON numbers - ensure numbers are valid first
+# Validate and sanitize numbers
+TOTAL_COUNT_INT=$(printf "%d" "$TOTAL_COUNT_INT" 2>/dev/null || echo "0")
+CORE_COUNT_INT=$(printf "%d" "$CORE_COUNT_INT" 2>/dev/null || echo "0")
+COMMONS_COUNT_INT=$(printf "%d" "$COMMONS_COUNT_INT" 2>/dev/null || echo "0")
+COMPARISONS_COUNT_INT=$(printf "%d" "$COMPARISONS_COUNT_INT" 2>/dev/null || echo "0")
+
+# Create JSON numbers using printf (more reliable than jq -n for simple numbers)
+printf "%d" "$TOTAL_COUNT_INT" > "$TEMP_TOTAL" 2>/dev/null || echo "0" > "$TEMP_TOTAL"
+printf "%d" "$CORE_COUNT_INT" > "$TEMP_CORE" 2>/dev/null || echo "0" > "$TEMP_CORE"
+printf "%d" "$COMMONS_COUNT_INT" > "$TEMP_COMMONS" 2>/dev/null || echo "0" > "$TEMP_COMMONS"
+printf "%d" "$COMPARISONS_COUNT_INT" > "$TEMP_COMPARISONS" 2>/dev/null || echo "0" > "$TEMP_COMPARISONS"
+
+# Read numbers and use them directly in jq expression (simpler and more reliable)
+jq ".summary.total_benchmarks = $(cat "$TEMP_TOTAL" 2>/dev/null || echo "0") | 
+     .summary.core_benchmarks = $(cat "$TEMP_CORE" 2>/dev/null || echo "0") | 
+     .summary.commons_benchmarks = $(cat "$TEMP_COMMONS" 2>/dev/null || echo "0") | 
+     .summary.comparisons = $(cat "$TEMP_COMPARISONS" 2>/dev/null || echo "0")" \
+   "$OUTPUT_FILE" > "$OUTPUT_FILE.tmp" 2>/dev/null && mv "$OUTPUT_FILE.tmp" "$OUTPUT_FILE" || {
+    echo "⚠️  Warning: Failed to update summary, using fallback" >&2
+    # Fallback: use direct values
+    jq ".summary.total_benchmarks = $TOTAL_COUNT_INT | .summary.core_benchmarks = $CORE_COUNT_INT | .summary.commons_benchmarks = $COMMONS_COUNT_INT | .summary.comparisons = $COMPARISONS_COUNT_INT" \
+       "$OUTPUT_FILE" > "$OUTPUT_FILE.tmp" 2>/dev/null && mv "$OUTPUT_FILE.tmp" "$OUTPUT_FILE" || true
+}
+
+rm -f "$TEMP_TOTAL" "$TEMP_CORE" "$TEMP_COMMONS" "$TEMP_COMPARISONS"
+
 # Validate the output
 if command -v "$SCRIPT_DIR/validate-benchmark.sh" >/dev/null 2>&1; then
     echo ""
