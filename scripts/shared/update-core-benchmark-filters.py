@@ -20,7 +20,7 @@ with open(BENCHMARKS_JSON) as f:
 mempool = [b for b in data.get("categories", {}).get("mempool", []) if b]
 transaction = [b for b in data.get("categories", {}).get("transaction", []) if b]
 block = [b for b in data.get("categories", {}).get("block", []) if b]
-script = [b for b in data.get("categories", {}).get("script", []) if b]
+script_benchmarks = [b for b in data.get("categories", {}).get("script", []) if b]
 hash_benchmarks = [b for b in data.get("categories", {}).get("hash", []) if b]
 encoding = [b for b in data.get("categories", {}).get("encoding", []) if b]
 utxo = [b for b in data.get("categories", {}).get("utxo", []) if b]
@@ -29,7 +29,7 @@ print("🔄 Updating Core benchmark scripts...")
 print(f"  Mempool: {len(mempool)} benchmarks")
 print(f"  Transaction: {len(transaction)} benchmarks")
 print(f"  Block: {len(block)} benchmarks")
-print(f"  Script: {len(script)} benchmarks")
+print(f"  Script: {len(script_benchmarks)} benchmarks")
 print(f"  Hash: {len(hash_benchmarks)} benchmarks")
 print(f"  Encoding: {len(encoding)} benchmarks")
 print(f"  UTXO: {len(utxo)} benchmarks")
@@ -93,10 +93,10 @@ if block_ser_script.exists() and block:
             print(f"✅ Updated {block_ser_script.name}")
 
 # Update script-verification-bench.sh
-if script:
+if script_benchmarks:
     script_file = CORE_SCRIPTS_DIR / "script-verification-bench.sh"
     if script_file.exists():
-        filter_str = "|".join(script)
+        filter_str = "|".join(script_benchmarks)
         if update_filter_in_file(script_file, filter_str):
             print(f"✅ Updated {script_file.name}")
 

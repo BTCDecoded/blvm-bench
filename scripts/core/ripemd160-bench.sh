@@ -63,7 +63,7 @@ echo "Running bench_bitcoin for RIPEMD160 operations (this may take a few minute
 echo "This benchmarks RIPEMD160 hash performance."
 
 # Run bench_bitcoin and capture output
-BENCH_OUTPUT=$("$BENCH_BITCOIN" -filter="RIPEMD160" 2>&1 || echo "")
+BENCH_OUTPUT=$("$BENCH_BITCOIN" -filter="BenchRIPEMD160" 2>&1 || echo "")
 
 # Parse bench_bitcoin output
 parse_bench_bitcoin() {

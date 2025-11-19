@@ -59,7 +59,7 @@ echo "This benchmarks UTXO insert/get/remove operations (matches Commons' utxo_i
 
 # Run bench_bitcoin and capture output for all UTXO operations
 # Run all three benchmarks separately and combine output
-BENCH_OUTPUT=$("$BENCH_BITCOIN" -filter="UTXOInsert|UTXOGet|UTXORemove" 2>&1 || echo "")
+BENCH_OUTPUT=$("$BENCH_BITCOIN" -filter="CCoinsCaching|UTXOGet|UTXOInsert|UTXORemove" 2>&1 || echo "")
 
 # Parse bench_bitcoin output
 # Format: "| 163.32 | 6,123,018.76 | 1.1% | 1,763.00 | 598.70 | 2.945 | 93.00 | 0.0% | 0.01 | `UTXOInsert`"

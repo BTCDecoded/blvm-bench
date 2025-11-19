@@ -72,7 +72,7 @@ echo "Running bench_bitcoin for Base58/Bech32 operations (this may take a few mi
 echo "This benchmarks Base58 and Bech32 encoding/decoding performance."
 
 # Run bench_bitcoin and capture output
-BENCH_OUTPUT=$("$BENCH_BITCOIN" -filter="Base58|Bech32" 2>&1 || echo "")
+BENCH_OUTPUT=$("$BENCH_BITCOIN" -filter="Base58CheckEncode|Base58Decode|Base58Encode|Bech32Decode|Bech32Encode|GCSFilterDecode|GCSFilterDecodeSkipCheck" 2>&1 || echo "")
 
 # Check if bench_bitcoin actually produced output
 if [ -z "$BENCH_OUTPUT" ] || ! echo "$BENCH_OUTPUT" | grep -qE "(Base58|Bech32)"; then
