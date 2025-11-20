@@ -816,6 +816,10 @@
         }
         
         function renderTable(benchmarks, isComparison) {
+            if (!benchmarks || benchmarks.length === 0) {
+                return '<p>No benchmarks to display.</p>';
+            }
+            
             let html = '<table>';
             if (isComparison) {
                 html += '<thead><tr>';
