@@ -859,14 +859,19 @@
                     html += '</tr>';
                 }
             } else {
-                html += '<thead><tr><th>Benchmark</th><th>Bitcoin Commons</th><th>Notes</th></tr></thead><tbody>';
+                html += '<thead><tr><th>Benchmark</th><th>Time</th><th>Notes</th></tr></thead><tbody>';
                 for (const bench of benchmarks) {
+                    // Try commons first, then core, then any other data
                     const commons = bench.commons || {};
-                    const commonsTime = extractTime(commons);
+                    const core = bench.core || {};
+                    const time = extractTime(commons || core || bench);
+                    const notes = core && !commons ? 'Core-only benchmark' : 
+                                 commons && !core ? 'Commons-only benchmark' : 
+                                 'Single implementation';
                     html += '<tr>';
                     html += `<td class="benchmark-name">${bench.name}</td>`;
-                    html += `<td class="time-value">${commonsTime}</td>`;
-                    html += '<td>Commons-only benchmark</td>';
+                    html += `<td class="time-value">${time}</td>`;
+                    html += `<td>${notes}</td>`;
                     html += '</tr>';
                 }
             }
