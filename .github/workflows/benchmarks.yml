@@ -411,15 +411,22 @@ jobs:
             
             # Try autotools if CMake fails
             if [ -f "autogen.sh" ]; then
-              ./autogen.sh || echo "⚠️  autogen.sh failed"
+              echo "Running autogen.sh..."
+              ./autogen.sh || {
+                echo "❌ autogen.sh failed"
+                exit 1
+              }
+              echo "Running configure..."
               ./configure --enable-bench --disable-wallet --disable-gui || {
                 echo "❌ Configure failed"
                 exit 1
               }
+              echo "Building bench_bitcoin with autotools..."
               make -j$(nproc) bench_bitcoin || {
                 echo "❌ Build failed"
                 exit 1
               }
+              echo "✅ bench_bitcoin built successfully with autotools"
               exit 0
             else
               echo "❌ No autogen.sh found, CMake is required"
