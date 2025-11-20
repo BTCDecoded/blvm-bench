@@ -608,6 +608,7 @@
             html += '<div class="filter-buttons">';
             html += '<button class="filter-btn active" onclick="setFilter(\'all\')">All</button>';
             html += '<button class="filter-btn" onclick="setFilter(\'comparisons\')">Comparisons</button>';
+            html += '<button class="filter-btn" onclick="setFilter(\'core-only\')">Core Only</button>';
             html += '<button class="filter-btn" onclick="setFilter(\'commons-only\')">Commons Only</button>';
             html += '</div>';
             html += '</div>';
@@ -615,7 +616,10 @@
             // Separate benchmarks
             const comparisonBenchmarks = [];
             const commonsOnlyBenchmarks = [];
+            const coreOnlyBenchmarks = [];
             const failedBenchmarks = [];
+            
+            console.log(`Processing ${allBenchmarks.length} benchmarks...`);
             
             for (const bench of allBenchmarks) {
                 const hasError = bench.commons?.error || bench.core?.error || bench.error;
@@ -624,15 +628,27 @@
                     continue;
                 }
                 
-                const hasCore = bench.core && Object.keys(bench.core).length > 0 && !bench.core.error;
-                const hasCommons = bench.commons && Object.keys(bench.commons).length > 0 && !bench.commons.error;
+                // More lenient check - just verify the object exists and isn't empty/null
+                const hasCore = bench.core && typeof bench.core === 'object' && 
+                    !bench.core.error && 
+                    (Object.keys(bench.core).length > 0 || bench.core.benchmarks || bench.core.time_ms || bench.core.time_ns);
+                const hasCommons = bench.commons && typeof bench.commons === 'object' && 
+                    !bench.commons.error && 
+                    (Object.keys(bench.commons).length > 0 || bench.commons.benchmarks || bench.commons.time_ms || bench.commons.time_ns);
                 
                 if (hasCore && hasCommons) {
                     comparisonBenchmarks.push(bench);
                 } else if (hasCommons && !hasCore) {
                     commonsOnlyBenchmarks.push(bench);
+                } else if (hasCore && !hasCommons) {
+                    coreOnlyBenchmarks.push(bench);
+                } else {
+                    // Benchmarks with no data at all - log for debugging
+                    console.warn(`Benchmark ${bench.name} has no valid data:`, bench);
                 }
             }
+            
+            console.log(`Categorized: ${comparisonBenchmarks.length} comparisons, ${commonsOnlyBenchmarks.length} commons-only, ${coreOnlyBenchmarks.length} core-only, ${failedBenchmarks.length} failed`);
             
             // Codebase Metrics Section
             if (data.codebase_metrics && Object.keys(data.codebase_metrics).length > 0) {
@@ -653,6 +669,20 @@
                 for (const [category, benchList] of Object.entries(categories)) {
                     html += `<h2>${category} <span class="category-badge">${benchList.length}</span></h2>`;
                     html += renderTable(benchList, true);
+                }
+                html += '</div>';
+            }
+            
+            // Core-only benchmarks
+            if (coreOnlyBenchmarks.length > 0) {
+                html += '<div class="card" id="core-only-section">';
+                html += '<h1>Bitcoin Core Only Benchmarks</h1>';
+                html += '<p>Benchmarks available only for Bitcoin Core.</p>';
+                
+                const categories = groupByCategory(coreOnlyBenchmarks);
+                for (const [category, benchList] of Object.entries(categories)) {
+                    html += `<h2>${category} <span class="category-badge">${benchList.length}</span></h2>`;
+                    html += renderTable(benchList, false);
                 }
                 html += '</div>';
             }
@@ -944,6 +974,8 @@
                 let matchesFilter = true;
                 if (currentFilter === 'comparisons') {
                     matchesFilter = row.closest('#comparisons-section') !== null;
+                } else if (currentFilter === 'core-only') {
+                    matchesFilter = row.closest('#core-only-section') !== null;
                 } else if (currentFilter === 'commons-only') {
                     matchesFilter = row.closest('#commons-only-section') !== null;
                 }
