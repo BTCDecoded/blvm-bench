@@ -319,11 +319,17 @@ echo "✅ Benchmarks complete!"
 echo ""
 
 # Collect codebase metrics if enabled
-if [ "${COLLECT_METRICS:-false}" = "true" ] || [ "${BENCH_SUITE}" = "all" ]; then
+# Check both COLLECT_METRICS env var and BENCH_SUITE variable (not parameter)
+COLLECT_METRICS_FLAG="${COLLECT_METRICS:-false}"
+BENCH_SUITE_VAL="${BENCH_SUITE:-$SUITE}"
+
+if [ "$COLLECT_METRICS_FLAG" = "true" ] || [ "$BENCH_SUITE_VAL" = "all" ]; then
     echo ""
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo "Collecting Codebase Metrics"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "COLLECT_METRICS: $COLLECT_METRICS_FLAG"
+    echo "BENCH_SUITE: $BENCH_SUITE_VAL"
     
     # Use suite directory if available, otherwise fall back to RESULTS_DIR
     METRICS_OUTPUT_DIR="${SUITE_DIR:-$RESULTS_DIR}"
@@ -331,28 +337,53 @@ if [ "${COLLECT_METRICS:-false}" = "true" ] || [ "${BENCH_SUITE}" = "all" ]; the
     
     if [ -f "scripts/metrics/code-size.sh" ]; then
         echo "Running code size metrics..."
-        ./scripts/metrics/code-size.sh "$METRICS_OUTPUT_DIR" || echo "⚠️  Code size metrics failed"
+        bash -x ./scripts/metrics/code-size.sh "$METRICS_OUTPUT_DIR" 2>&1 || {
+            EXIT_CODE=$?
+            echo "⚠️  Code size metrics failed with exit code $EXIT_CODE"
+        }
+    else
+        echo "⚠️  Code size metrics script not found"
     fi
     
     if [ -f "scripts/metrics/features.sh" ]; then
         echo "Running feature flags analysis..."
-        ./scripts/metrics/features.sh "$METRICS_OUTPUT_DIR" || echo "⚠️  Feature flags analysis failed"
+        bash -x ./scripts/metrics/features.sh "$METRICS_OUTPUT_DIR" 2>&1 || {
+            EXIT_CODE=$?
+            echo "⚠️  Feature flags analysis failed with exit code $EXIT_CODE"
+        }
+    else
+        echo "⚠️  Features metrics script not found"
     fi
     
     if [ -f "scripts/metrics/tests.sh" ]; then
         echo "Running test metrics..."
-        ./scripts/metrics/tests.sh "$METRICS_OUTPUT_DIR" || echo "⚠️  Test metrics failed"
+        bash -x ./scripts/metrics/tests.sh "$METRICS_OUTPUT_DIR" 2>&1 || {
+            EXIT_CODE=$?
+            echo "⚠️  Test metrics failed with exit code $EXIT_CODE"
+        }
+    else
+        echo "⚠️  Tests metrics script not found"
     fi
     
     # Phase 2: Combined views
     if [ -f "scripts/metrics/combined-view.sh" ]; then
         echo "Generating combined view..."
-        ./scripts/metrics/combined-view.sh "$METRICS_OUTPUT_DIR" || echo "⚠️  Combined view failed"
+        bash -x ./scripts/metrics/combined-view.sh "$METRICS_OUTPUT_DIR" 2>&1 || {
+            EXIT_CODE=$?
+            echo "⚠️  Combined view failed with exit code $EXIT_CODE"
+        }
+    else
+        echo "⚠️  Combined view script not found"
     fi
     
     if [ -f "scripts/metrics/full-view.sh" ]; then
         echo "Generating full view..."
-        ./scripts/metrics/full-view.sh "$METRICS_OUTPUT_DIR" || echo "⚠️  Full view failed"
+        bash -x ./scripts/metrics/full-view.sh "$METRICS_OUTPUT_DIR" 2>&1 || {
+            EXIT_CODE=$?
+            echo "⚠️  Full view failed with exit code $EXIT_CODE"
+        }
+    else
+        echo "⚠️  Full view script not found"
     fi
     
     echo "✅ Codebase metrics collection complete"
