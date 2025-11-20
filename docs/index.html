@@ -539,11 +539,14 @@
                         const jsonAsset = release.assets?.find(a => a.name.includes('benchmark-results-consolidated') && a.name.endsWith('.json'));
                         if (jsonAsset) {
                             console.log('Found JSON asset:', jsonAsset.name, 'Size:', jsonAsset.size, 'bytes');
-                            const response = await fetch(jsonAsset.browser_download_url);
+                            // Add cache-busting query parameter
+                            const assetUrl = jsonAsset.browser_download_url + '?t=' + Date.now();
+                            const response = await fetch(assetUrl);
                             if (response.ok) {
                                 jsonData = await response.json();
                                 console.log('✅ Loaded from release:', jsonAsset.name);
                                 console.log('Benchmarks in JSON:', Object.keys(jsonData.benchmarks || {}).length);
+                                console.log('Summary:', jsonData.summary);
                             } else {
                                 console.error('Failed to fetch JSON asset:', response.status, response.statusText);
                             }
