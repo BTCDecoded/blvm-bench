@@ -695,12 +695,26 @@ jobs:
       - name: Find consolidated JSON
         id: find_json
         run: |
+          # Look for consolidated JSON in results directory
           LATEST_JSON="results/benchmark-results-consolidated-latest.json"
+          
+          # Also check suite directories
           if [ ! -f "$LATEST_JSON" ]; then
-            echo "❌ No consolidated JSON found at $LATEST_JSON"
+            echo "⚠️  Not found at $LATEST_JSON, searching suite directories..."
+            LATEST_JSON=$(find results -name "benchmark-results-consolidated-latest.json" -type f | head -1)
+          fi
+          
+          if [ -z "$LATEST_JSON" ] || [ ! -f "$LATEST_JSON" ]; then
+            echo "❌ No consolidated JSON found"
+            echo "   Searched: results/benchmark-results-consolidated-latest.json"
+            echo "   And: results/suite-*/benchmark-results-consolidated-latest.json"
+            echo "   Listing results directory:"
+            ls -la results/ 2>/dev/null || echo "   results/ directory doesn't exist"
             echo "   Release will NOT be created - all benchmarks must complete successfully"
             exit 1
           fi
+          
+          echo "✅ Found consolidated JSON: $LATEST_JSON"
           
           # Validate JSON has content
           if [ ! -s "$LATEST_JSON" ]; then
