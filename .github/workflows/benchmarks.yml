@@ -386,6 +386,7 @@ jobs:
             -DBUILD_BENCH=ON
             -DENABLE_WALLET=OFF
             -DBUILD_GUI=OFF
+            -DENABLE_IPC=OFF
           )
           
           # Add compiler settings if we found real compilers
@@ -434,14 +435,17 @@ jobs:
             echo ""
             echo "Trying autotools fallback..."
             if [ -f "autogen.sh" ]; then
+              echo "Running autogen.sh..."
               ./autogen.sh || {
                 echo "❌ autogen.sh failed"
                 exit 1
               }
+              echo "Running configure..."
               ./configure --enable-bench --disable-wallet --disable-gui || {
                 echo "❌ Configure failed"
                 exit 1
               }
+              echo "Building bench_bitcoin with autotools..."
               make -j$(nproc) bench_bitcoin || {
                 echo "❌ Build failed"
                 exit 1
