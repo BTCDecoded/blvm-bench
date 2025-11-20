@@ -319,17 +319,16 @@ echo "✅ Benchmarks complete!"
 echo ""
 
 # Collect codebase metrics if enabled
-# Check both COLLECT_METRICS env var and BENCH_SUITE variable (not parameter)
+# Check both COLLECT_METRICS env var and SUITE variable
 COLLECT_METRICS_FLAG="${COLLECT_METRICS:-false}"
-BENCH_SUITE_VAL="${BENCH_SUITE:-$SUITE}"
 
-if [ "$COLLECT_METRICS_FLAG" = "true" ] || [ "$BENCH_SUITE_VAL" = "all" ]; then
+if [ "$COLLECT_METRICS_FLAG" = "true" ] || [ "$SUITE" = "all" ]; then
     echo ""
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo "Collecting Codebase Metrics"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo "COLLECT_METRICS: $COLLECT_METRICS_FLAG"
-    echo "BENCH_SUITE: $BENCH_SUITE_VAL"
+    echo "SUITE: $SUITE"
     
     # Use suite directory if available, otherwise fall back to RESULTS_DIR
     METRICS_OUTPUT_DIR="${SUITE_DIR:-$RESULTS_DIR}"
