@@ -873,9 +873,10 @@ jobs:
             results/benchmark-results-consolidated-latest.json
           retention-days: 30
 
-  # Deploy GitHub Pages after benchmarks complete
+  # Deploy GitHub Pages after benchmarks complete and release is created
   deploy-pages:
     needs: run-benchmarks
+    if: always() && needs.run-benchmarks.result == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: read
