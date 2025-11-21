@@ -508,9 +508,9 @@
 
     <script>
         // Configuration
-        // Load from GitHub Release via API (supports CORS)
-        const RELEASE_TAG = 'benchmarks-latest';
-        const RELEASE_API_URL = `https://api.github.com/repos/BTCDecoded/bllvm-bench/releases/tags/${RELEASE_TAG}`;
+        // Load from raw.githubusercontent.com (same origin, no CORS issues)
+        // The JSON file is committed to docs/data/ by the workflow
+        const JSON_URL = 'https://raw.githubusercontent.com/BTCDecoded/bllvm-bench/main/docs/data/benchmark-results-consolidated-latest.json?t=' + Date.now();
         
         let allBenchmarks = [];
         let currentFilter = 'all';
@@ -529,60 +529,32 @@
             try {
                 let jsonData;
                 
-                // Load from GitHub Release via API (GitHub API supports CORS)
-                console.log('Fetching release info from:', RELEASE_API_URL);
-                const releaseResponse = await fetch(RELEASE_API_URL + '?t=' + Date.now());
-                if (!releaseResponse.ok) {
-                    throw new Error(`Failed to fetch release: ${releaseResponse.status} ${releaseResponse.statusText}`);
-                }
-                
-                const release = await releaseResponse.json();
-                console.log('Release found:', release.tag_name, 'Published:', release.published_at);
-                
-                const jsonAsset = release.assets?.find(a => 
-                    a.name.includes('benchmark-results-consolidated') && 
-                    a.name.endsWith('.json')
-                );
-                
-                if (!jsonAsset) {
-                    throw new Error('No JSON asset found in release. Available assets: ' + (release.assets?.map(a => a.name).join(', ') || 'none'));
-                }
-                
-                console.log('Found JSON asset:', jsonAsset.name, 'Size:', jsonAsset.size, 'bytes', 'ID:', jsonAsset.id);
-                
-                // Use GitHub API to get asset content directly (this works with CORS)
-                // Format: https://api.github.com/repos/OWNER/REPO/releases/assets/ASSET_ID
-                // Need Accept: application/octet-stream header
-                const assetApiUrl = `https://api.github.com/repos/BTCDecoded/bllvm-bench/releases/assets/${jsonAsset.id}`;
-                console.log('Fetching asset content from:', assetApiUrl);
-                
-                // GitHub API asset endpoint redirects to actual download URL
-                // We need to follow redirects and handle CORS
-                const assetResponse = await fetch(assetApiUrl, {
+                // Load from raw.githubusercontent.com (same origin as GitHub Pages, no CORS issues)
+                // The JSON file is committed to docs/data/ by the workflow
+                console.log('Loading benchmark data from:', JSON_URL);
+                const response = await fetch(JSON_URL, {
+                    cache: 'no-store',
                     headers: {
-                        'Accept': 'application/octet-stream',
-                        'Cache-Control': 'no-cache'
-                    },
-                    redirect: 'follow'  // Follow redirects
+                        'Cache-Control': 'no-cache, no-store, must-revalidate',
+                        'Pragma': 'no-cache'
+                    }
                 });
                 
-                if (assetResponse.ok) {
-                    // The API may redirect, but the final response should be the file content
-                    const text = await assetResponse.text();
+                if (response.ok) {
+                    const text = await response.text();
                     try {
                         jsonData = JSON.parse(text);
-                        console.log('✅ Loaded from release:', jsonAsset.name);
+                        console.log('✅ Loaded from raw.githubusercontent.com');
                         console.log('Benchmarks in JSON:', Object.keys(jsonData.benchmarks || {}).length);
                         console.log('Summary:', JSON.stringify(jsonData.summary, null, 2));
                         console.log('First few benchmark names:', Object.keys(jsonData.benchmarks || {}).slice(0, 5));
                     } catch (parseError) {
                         console.error('Failed to parse JSON:', parseError);
                         console.error('Response text (first 500 chars):', text.substring(0, 500));
-                        throw new Error('Invalid JSON in release asset: ' + parseError.message);
+                        throw new Error('Invalid JSON: ' + parseError.message);
                     }
                 } else {
-                    const errorText = await assetResponse.text().catch(() => '');
-                    throw new Error(`Failed to fetch asset: ${assetResponse.status} ${assetResponse.statusText}. ${errorText.substring(0, 200)}`);
+                    throw new Error(`Failed to fetch JSON: ${response.status} ${response.statusText}`);
                 }
 
                 if (!jsonData || !jsonData.benchmarks) {
