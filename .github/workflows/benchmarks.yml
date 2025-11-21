@@ -681,20 +681,6 @@ jobs:
         run: |
           make json
           
-      - name: Copy JSON to docs/data for GitHub Pages
-        run: |
-          LATEST_JSON="results/benchmark-results-consolidated-latest.json"
-          if [ ! -f "$LATEST_JSON" ]; then
-            LATEST_JSON=$(find results -name "benchmark-results-consolidated-latest.json" -type f | head -1)
-          fi
-          if [ -f "$LATEST_JSON" ]; then
-            mkdir -p docs/data
-            cp "$LATEST_JSON" docs/data/benchmark-results-consolidated-latest.json
-            echo "✅ Copied JSON to docs/data/"
-            ls -lh docs/data/benchmark-results-consolidated-latest.json
-          else
-            echo "⚠️  No consolidated JSON found to copy"
-          fi
 
       - name: Validate consolidated JSON
         run: |
@@ -877,25 +863,6 @@ jobs:
             ${{ steps.find_json.outputs.json_file }}
           draft: false
           prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.REPO_ACCESS_TOKEN || secrets.GITHUB_TOKEN }}
-
-      - name: Commit and push JSON to repo
-        run: |
-          if [ -f "docs/data/benchmark-results-consolidated-latest.json" ]; then
-            git config user.name "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-            git add docs/data/benchmark-results-consolidated-latest.json
-            if git diff --staged --quiet; then
-              echo "No changes to commit"
-            else
-              git commit -m "chore: update benchmark results [skip ci]"
-              git push
-              echo "✅ Pushed JSON to repo"
-            fi
-          else
-            echo "⚠️  No JSON file to commit"
-          fi
         env:
           GITHUB_TOKEN: ${{ secrets.REPO_ACCESS_TOKEN || secrets.GITHUB_TOKEN }}
 
