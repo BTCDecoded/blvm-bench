@@ -508,9 +508,10 @@
 
     <script>
         // Configuration
-        // Load from raw.githubusercontent.com (same origin, no CORS issues)
+        // Load from relative path (same origin as GitHub Pages, no CORS issues)
         // The JSON file is committed to docs/data/ by the workflow
-        const JSON_URL = 'https://raw.githubusercontent.com/BTCDecoded/bllvm-bench/main/docs/data/benchmark-results-consolidated-latest.json?t=' + Date.now();
+        // GitHub Pages serves it from the same origin, so we can use a relative path
+        const JSON_URL = './data/benchmark-results-consolidated-latest.json?t=' + Date.now();
         
         let allBenchmarks = [];
         let currentFilter = 'all';
