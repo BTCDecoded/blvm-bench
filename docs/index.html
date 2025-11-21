@@ -508,10 +508,9 @@
 
     <script>
         // Configuration
-        // Primary: Local file (committed to repo, updated by workflow)
-        const LOCAL_JSON_URL = './data/benchmark-results-consolidated-latest.json';
-        // Fallback: Main branch raw URL (same file, different source)
-        const MAIN_JSON_URL = 'https://raw.githubusercontent.com/BTCDecoded/bllvm-bench/main/docs/data/benchmark-results-consolidated-latest.json?t=' + Date.now();
+        // Load from raw.githubusercontent.com (no CORS issues)
+        // The JSON file is in results/ directory and accessible via raw.githubusercontent.com
+        const MAIN_JSON_URL = 'https://raw.githubusercontent.com/BTCDecoded/bllvm-bench/main/results/benchmark-results-consolidated-latest.json?t=' + Date.now();
         
         let allBenchmarks = [];
         let currentFilter = 'all';
@@ -530,51 +529,23 @@
             try {
                 let jsonData;
                 
-                // Try local file first (committed to repo, updated by workflow)
-                try {
-                    const response = await fetch(LOCAL_JSON_URL + '?t=' + Date.now(), {
-                        cache: 'no-store',
-                        headers: {
-                            'Cache-Control': 'no-cache, no-store, must-revalidate',
-                            'Pragma': 'no-cache'
-                        }
-                    });
-                    if (response.ok) {
-                        jsonData = await response.json();
-                        console.log('✅ Loaded from local file');
-                        console.log('Benchmarks in JSON:', Object.keys(jsonData.benchmarks || {}).length);
-                        console.log('Summary:', JSON.stringify(jsonData.summary, null, 2));
-                        console.log('First few benchmark names:', Object.keys(jsonData.benchmarks || {}).slice(0, 5));
-                    } else {
-                        console.log('Local file not found:', response.status, response.statusText);
+                // Load from raw.githubusercontent.com (no CORS issues)
+                console.log('Loading benchmark data from:', MAIN_JSON_URL);
+                const response = await fetch(MAIN_JSON_URL, {
+                    cache: 'no-store',
+                    headers: {
+                        'Cache-Control': 'no-cache, no-store, must-revalidate',
+                        'Pragma': 'no-cache'
                     }
-                } catch (e) {
-                    console.error('Error loading from local file:', e);
-                    console.log('Trying main branch...');
-                }
-                
-                // Fallback to main branch raw URL
-                if (!jsonData) {
-                    try {
-                        const response = await fetch(MAIN_JSON_URL, {
-                            cache: 'no-store',
-                            headers: {
-                                'Cache-Control': 'no-cache, no-store, must-revalidate',
-                                'Pragma': 'no-cache'
-                            }
-                        });
-                        if (response.ok) {
-                            jsonData = await response.json();
-                            console.log('✅ Loaded from main branch');
-                            console.log('Benchmarks in JSON:', Object.keys(jsonData.benchmarks || {}).length);
-                            console.log('Summary:', JSON.stringify(jsonData.summary, null, 2));
-                        } else {
-                            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-                        }
-                    } catch (e) {
-                        console.error('Error loading from main branch:', e);
-                        throw new Error('Failed to load benchmark data from all sources');
-                    }
+                });
+                if (response.ok) {
+                    jsonData = await response.json();
+                    console.log('✅ Loaded from main branch');
+                    console.log('Benchmarks in JSON:', Object.keys(jsonData.benchmarks || {}).length);
+                    console.log('Summary:', JSON.stringify(jsonData.summary, null, 2));
+                    console.log('First few benchmark names:', Object.keys(jsonData.benchmarks || {}).slice(0, 5));
+                } else {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
                 }
 
                 if (!jsonData || !jsonData.benchmarks) {
