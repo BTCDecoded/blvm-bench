@@ -6,7 +6,8 @@ Cargo.lock
 # Benchmark results
 /results/
 *.json
-!docs/data/benchmark-results-consolidated-latest.json
+# JSON is downloaded from release during Pages deployment, not committed
+docs/data/benchmark-results-consolidated-latest.json
 !config.toml.example
 
 # Logs
