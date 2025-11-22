@@ -675,9 +675,15 @@
                         }
                     }
                     
-                    // Check for arrays with data
+                    // Check for arrays with data (must have length > 0)
                     if (Array.isArray(obj.benchmarks) && obj.benchmarks.length > 0) {
                         return true;
+                    }
+                    
+                    // Check for primary_comparison (common in nested structures)
+                    if (obj.primary_comparison && typeof obj.primary_comparison === 'object') {
+                        const primaryTime = findNestedTime(obj.primary_comparison);
+                        if (primaryTime) return true;
                     }
                     
                     return false;
@@ -1153,7 +1159,13 @@
                 }
             }
             
-            // Arrays of benchmarks
+            // Special handling for nested structures - check primary_comparison first (highest priority after direct fields)
+            if (obj.primary_comparison && typeof obj.primary_comparison === 'object') {
+                const primary = findNestedTime(obj.primary_comparison, depth + 1, maxDepth);
+                if (primary) return primary;
+            }
+            
+            // Arrays of benchmarks (must have length > 0)
             if (Array.isArray(obj.benchmarks) && obj.benchmarks.length > 0) {
                 const first = findNestedTime(obj.benchmarks[0], depth + 1, maxDepth);
                 if (first) return first;
@@ -1164,7 +1176,8 @@
                 if (obj.hasOwnProperty(key) && typeof obj[key] === 'object' && obj[key] !== null) {
                     // Skip metadata keys
                     if (key === 'error' || key === 'timestamp' || key === 'log_file' || 
-                        key === 'note' || key === 'raw_output' || key === 'measurement_method') {
+                        key === 'note' || key === 'raw_output' || key === 'measurement_method' ||
+                        key === 'implementation' || key === 'benchmark' || key === 'comparison_note') {
                         continue;
                     }
                     const result = findNestedTime(obj[key], depth + 1, maxDepth);
