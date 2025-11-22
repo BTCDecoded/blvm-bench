@@ -901,8 +901,24 @@
                     
                     const coreTime = extractTime(core);
                     const commonsTime = extractTime(commons);
-                    const winner = comparison.winner || 'N/A';
-                    const speedup = comparison.speedup || '';
+                    
+                    // Calculate comparison if not present
+                    let winner = comparison.winner;
+                    let speedup = comparison.speedup;
+                    
+                    if (!winner && coreTime !== '—' && commonsTime !== '—') {
+                        const coreNum = parseFloat(coreTime.replace(/[^\d.]/g, ''));
+                        const commonsNum = parseFloat(commonsTime.replace(/[^\d.]/g, ''));
+                        if (!isNaN(coreNum) && !isNaN(commonsNum) && coreNum > 0 && commonsNum > 0) {
+                            if (coreNum < commonsNum) {
+                                winner = 'core';
+                                speedup = (commonsNum / coreNum).toFixed(2);
+                            } else if (commonsNum < coreNum) {
+                                winner = 'commons';
+                                speedup = (coreNum / commonsNum).toFixed(2);
+                            }
+                        }
+                    }
                     
                     const winnerClass = winner === 'core' ? 'winner-core' : 
                                        winner === 'commons' ? 'winner-commons' : '';
@@ -914,8 +930,14 @@
                         winnerDisplay = '<span class="winner-badge winner-commons">Commons</span>';
                     }
                     
+                    // Add indicator if data is partial
+                    let nameDisplay = bench.name;
+                    if (coreTime === '—' || commonsTime === '—') {
+                        nameDisplay += ' <span style="color: #888; font-size: 0.9em;">(partial)</span>';
+                    }
+                    
                     html += '<tr>';
-                    html += `<td class="benchmark-name">${bench.name}</td>`;
+                    html += `<td class="benchmark-name">${nameDisplay}</td>`;
                     html += `<td class="time-value">${coreTime}</td>`;
                     html += `<td class="time-value">${commonsTime}</td>`;
                     html += `<td>${winnerDisplay}</td>`;
