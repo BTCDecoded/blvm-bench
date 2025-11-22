@@ -154,7 +154,7 @@ get_bench_bitcoin() {
                 elif [ -f "CMakeLists.txt" ]; then
                     echo "Attempting CMake configure and build..." >&2
                     mkdir -p build
-                    cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_BENCH=ON -DENABLE_WALLET=OFF -DBUILD_GUI=OFF 2>&1 | tail -10 >&2 || true
+                    cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_BENCH=ON -DENABLE_WALLET=OFF -DBUILD_GUI=OFF -DENABLE_IPC=OFF 2>&1 | tail -10 >&2 || true
                     cmake --build build -t bench_bitcoin -j$(nproc) 2>&1 | tail -10 >&2 || true
                 # Fallback to autotools build
                 elif [ -f "autogen.sh" ]; then
