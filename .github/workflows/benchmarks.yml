@@ -32,6 +32,7 @@ jobs:
       core_path: ${{ steps.setup.outputs.core_path }}
       commons_consensus_path: ${{ steps.setup.outputs.commons_consensus_path }}
       commons_node_path: ${{ steps.setup.outputs.commons_node_path }}
+      commons_protocol_path: ${{ steps.setup.outputs.commons_protocol_path }}
       suite: ${{ steps.determine_suite.outputs.suite }}
     steps:
       - name: Checkout repository
@@ -136,6 +137,19 @@ jobs:
           fi
           echo "commons_node_path=$NODE_DIR" >> $GITHUB_OUTPUT
           
+          # Setup Commons protocol
+          PROTOCOL_DIR="$HOME/bllvm-protocol"
+          if [ ! -d "$PROTOCOL_DIR" ]; then
+            echo "Cloning Bitcoin Commons protocol..."
+            git clone --depth 1 https://github.com/BTCDecoded/bllvm-protocol.git "$PROTOCOL_DIR" || {
+              echo "⚠️  Failed to clone protocol, trying existing directory..."
+              if [ -d "$HOME/src/bllvm-protocol" ]; then
+                PROTOCOL_DIR="$HOME/src/bllvm-protocol"
+              fi
+            }
+          fi
+          echo "commons_protocol_path=$PROTOCOL_DIR" >> $GITHUB_OUTPUT
+          
           # Create config.toml
           mkdir -p "$GITHUB_WORKSPACE/config"
           cat > "$GITHUB_WORKSPACE/config/config.toml" << EOF
@@ -145,7 +159,7 @@ jobs:
           [commons]
           consensus_path = "$CONSENSUS_DIR"
           node_path = "$NODE_DIR"
-          protocol_path = "$HOME/bllvm-protocol"
+          protocol_path = "$PROTOCOL_DIR"
           EOF
           
           # Create symlinks for Commons dependencies
@@ -332,15 +346,78 @@ jobs:
           toolchain: stable
           override: true
 
+      - name: Setup Commons dependencies
+        run: |
+          COMMONS_CONSENSUS_PATH="${{ needs.setup.outputs.commons_consensus_path }}"
+          COMMONS_NODE_PATH="${{ needs.setup.outputs.commons_node_path }}"
+          COMMONS_PROTOCOL_PATH="${{ needs.setup.outputs.commons_protocol_path }}"
+          
+          # Create symlinks for Commons dependencies (use absolute paths)
+          cd "$GITHUB_WORKSPACE"
+          if [ ! -e "../bllvm-consensus" ]; then
+            ln -sf "$COMMONS_CONSENSUS_PATH" ../bllvm-consensus
+            echo "✅ Created symlink: ../bllvm-consensus -> $COMMONS_CONSENSUS_PATH"
+          fi
+          if [ ! -e "../bllvm-node" ]; then
+            ln -sf "$COMMONS_NODE_PATH" ../bllvm-node
+            echo "✅ Created symlink: ../bllvm-node -> $COMMONS_NODE_PATH"
+          fi
+          if [ ! -e "../bllvm-protocol" ] && [ -d "$COMMONS_PROTOCOL_PATH" ]; then
+            ln -sf "$COMMONS_PROTOCOL_PATH" ../bllvm-protocol
+            echo "✅ Created symlink: ../bllvm-protocol -> $COMMONS_PROTOCOL_PATH"
+          fi
+          
+          # Verify symlinks
+          echo "Verifying dependencies..."
+          if [ -f "../bllvm-consensus/Cargo.toml" ]; then
+            echo "✅ bllvm-consensus found"
+          else
+            echo "❌ bllvm-consensus not found at ../bllvm-consensus/Cargo.toml"
+            ls -la ../bllvm-consensus 2>/dev/null || echo "   Symlink doesn't exist"
+          fi
+          if [ -f "../bllvm-node/Cargo.toml" ]; then
+            echo "✅ bllvm-node found"
+          else
+            echo "❌ bllvm-node not found at ../bllvm-node/Cargo.toml"
+            ls -la ../bllvm-node 2>/dev/null || echo "   Symlink doesn't exist"
+          fi
+          if [ -f "../bllvm-protocol/Cargo.toml" ]; then
+            echo "✅ bllvm-protocol found"
+          else
+            echo "❌ bllvm-protocol not found at ../bllvm-protocol/Cargo.toml"
+            ls -la ../bllvm-protocol 2>/dev/null || echo "   Symlink doesn't exist"
+            echo "   Expected path: $COMMONS_PROTOCOL_PATH"
+          fi
+
       - name: Verify paths and set environment
         run: |
           CORE_PATH="${{ needs.setup.outputs.core_path }}"
           COMMONS_CONSENSUS_PATH="${{ needs.setup.outputs.commons_consensus_path }}"
           COMMONS_NODE_PATH="${{ needs.setup.outputs.commons_node_path }}"
+          PROTOCOL_DIR="$HOME/bllvm-protocol"
           
+          # Verify Core path and bench_bitcoin
+          echo "Checking Core setup..."
+          echo "CORE_PATH: $CORE_PATH"
+          if [ -f "$CORE_PATH/build/bin/bench_bitcoin" ]; then
+            echo "✅ bench_bitcoin found at: $CORE_PATH/build/bin/bench_bitcoin"
+          elif [ -f "$CORE_PATH/src/bench_bitcoin" ]; then
+            echo "✅ bench_bitcoin found at: $CORE_PATH/src/bench_bitcoin"
+          else
+            echo "⚠️  bench_bitcoin not found, will attempt to build if needed"
+          fi
+          
+          # Export environment variables (make them available to all subsequent steps)
+          echo "CORE_PATH=$CORE_PATH" >> $GITHUB_ENV
+          echo "COMMONS_CONSENSUS_PATH=$COMMONS_CONSENSUS_PATH" >> $GITHUB_ENV
+          echo "COMMONS_NODE_PATH=$COMMONS_NODE_PATH" >> $GITHUB_ENV
+          echo "COMMONS_PROTOCOL_PATH=$PROTOCOL_DIR" >> $GITHUB_ENV
+          
+          # Also export for current step
           export CORE_PATH
           export COMMONS_CONSENSUS_PATH
           export COMMONS_NODE_PATH
+          export COMMONS_PROTOCOL_PATH="$PROTOCOL_DIR"
           
           # Create config.toml
           mkdir -p config
@@ -351,23 +428,47 @@ jobs:
           [commons]
           consensus_path = "$COMMONS_CONSENSUS_PATH"
           node_path = "$COMMONS_NODE_PATH"
-          protocol_path = "$HOME/bllvm-protocol"
+          protocol_path = "$COMMONS_PROTOCOL_PATH"
           EOF
           
-          # Create symlinks
-          if [ ! -e "../bllvm-consensus" ]; then
-            ln -sf "$COMMONS_CONSENSUS_PATH" ../bllvm-consensus
-          fi
-          if [ ! -e "../bllvm-node" ]; then
-            ln -sf "$COMMONS_NODE_PATH" ../bllvm-node
-          fi
+          echo "✅ Config created at config/config.toml"
 
       - name: Run benchmark
         id: run
+        env:
+          CORE_PATH: ${{ needs.setup.outputs.core_path }}
+          COMMONS_CONSENSUS_PATH: ${{ needs.setup.outputs.commons_consensus_path }}
+          COMMONS_NODE_PATH: ${{ needs.setup.outputs.commons_node_path }}
+          COMMONS_PROTOCOL_PATH: ${{ needs.setup.outputs.commons_protocol_path }}
         run: |
-          export CORE_PATH="${{ needs.setup.outputs.core_path }}"
-          export COMMONS_CONSENSUS_PATH="${{ needs.setup.outputs.commons_consensus_path }}"
-          export COMMONS_NODE_PATH="${{ needs.setup.outputs.commons_node_path }}"
+          # Ensure environment variables are set and exported
+          export CORE_PATH="${CORE_PATH:-${{ needs.setup.outputs.core_path }}}"
+          export COMMONS_CONSENSUS_PATH="${COMMONS_CONSENSUS_PATH:-${{ needs.setup.outputs.commons_consensus_path }}}"
+          export COMMONS_NODE_PATH="${COMMONS_NODE_PATH:-${{ needs.setup.outputs.commons_node_path }}}"
+          export COMMONS_PROTOCOL_PATH="${COMMONS_PROTOCOL_PATH:-${{ needs.setup.outputs.commons_protocol_path }}}"
+          
+          # Export to GITHUB_ENV so they're available to the script
+          echo "CORE_PATH=$CORE_PATH" >> $GITHUB_ENV
+          echo "COMMONS_CONSENSUS_PATH=$COMMONS_CONSENSUS_PATH" >> $GITHUB_ENV
+          echo "COMMONS_NODE_PATH=$COMMONS_NODE_PATH" >> $GITHUB_ENV
+          echo "COMMONS_PROTOCOL_PATH=$COMMONS_PROTOCOL_PATH" >> $GITHUB_ENV
+          
+          echo "Environment variables:"
+          echo "  CORE_PATH: $CORE_PATH"
+          echo "  COMMONS_CONSENSUS_PATH: $COMMONS_CONSENSUS_PATH"
+          echo "  COMMONS_NODE_PATH: $COMMONS_NODE_PATH"
+          echo "  COMMONS_PROTOCOL_PATH: $COMMONS_PROTOCOL_PATH"
+          
+          # Verify Core bench_bitcoin exists
+          if [ -f "$CORE_PATH/build/bin/bench_bitcoin" ]; then
+            echo "✅ bench_bitcoin found: $CORE_PATH/build/bin/bench_bitcoin"
+          elif [ -f "$CORE_PATH/src/bench_bitcoin" ]; then
+            echo "✅ bench_bitcoin found: $CORE_PATH/src/bench_bitcoin"
+          else
+            echo "⚠️  bench_bitcoin not found at expected paths"
+            echo "   Checking: $CORE_PATH/build/bin/bench_bitcoin"
+            echo "   Checking: $CORE_PATH/src/bench_bitcoin"
+          fi
           
           # Create results directory
           TIMESTAMP=$(date +%Y%m%d-%H%M%S)
@@ -393,7 +494,7 @@ jobs:
               echo "⏱️  $BENCH_NAME timed out"
               echo "status=timeout" >> $GITHUB_OUTPUT
             else
-              echo "❌ $BENCH_NAME failed"
+              echo "❌ $BENCH_NAME failed (exit code: $EXIT_CODE)"
               echo "status=failed" >> $GITHUB_OUTPUT
             fi
           fi
