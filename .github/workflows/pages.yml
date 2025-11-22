@@ -19,7 +19,7 @@ permissions:
   contents: read
   pages: write
   id-token: write
-  releases: read  # Needed to download release assets
+  releases: read
 
 concurrency:
   group: "pages"
