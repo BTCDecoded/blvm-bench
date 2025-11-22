@@ -186,7 +186,7 @@ jobs:
             mkdir -p build
             cd build
             
-            CMAKE_ARGS=(-DCMAKE_BUILD_TYPE=Release -DENABLE_BENCH=ON -DENABLE_IPC=OFF)
+            CMAKE_ARGS=(-DCMAKE_BUILD_TYPE=Release -DBUILD_BENCH=ON -DENABLE_IPC=OFF)
             
             # Handle ccache
             if command -v ccache >/dev/null 2>&1; then
