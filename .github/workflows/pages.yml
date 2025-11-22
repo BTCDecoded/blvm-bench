@@ -9,8 +9,7 @@ on:
       - '.nojekyll'
   workflow_dispatch:
   workflow_run:
-    workflows:
-      - "Run Benchmarks"
+    workflows: ["Run Benchmarks"]
     types:
       - completed
     branches:
