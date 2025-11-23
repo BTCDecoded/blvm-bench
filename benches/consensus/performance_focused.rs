@@ -178,6 +178,7 @@ fn bench_block_validation(c: &mut Criterion) {
                 black_box(utxo_set),
                 black_box(0),
                 black_box(None),
+                black_box(bllvm_consensus::types::Network::Mainnet),
             );
         })
     });
@@ -193,6 +194,7 @@ fn bench_block_validation(c: &mut Criterion) {
                 black_box(utxo_set),
                 black_box(0),
                 black_box(None),
+                black_box(bllvm_consensus::types::Network::Mainnet),
             );
         })
     });

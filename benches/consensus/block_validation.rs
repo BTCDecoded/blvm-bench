@@ -34,6 +34,7 @@ fn benchmark_connect_block(c: &mut Criterion) {
                 black_box(utxo_set.clone()),
                 black_box(0),
                 black_box(None),
+                black_box(bllvm_consensus::types::Network::Mainnet),
             );
             // Coinbase-only block, so validation should succeed
         })
@@ -110,6 +111,7 @@ fn benchmark_connect_block_multi_tx(c: &mut Criterion) {
                 black_box(utxo_set.clone()),
                 black_box(0),
                 black_box(None),
+                black_box(bllvm_consensus::types::Network::Mainnet),
             );
             // Now with valid UTXOs, this should do actual validation work
         })

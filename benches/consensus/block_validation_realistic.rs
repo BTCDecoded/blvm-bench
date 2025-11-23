@@ -204,6 +204,7 @@ fn benchmark_connect_block_realistic_100tx(c: &mut Criterion) {
                 black_box(utxo_set.clone()),
                 black_box(1), // Height 1 = no assume-valid optimization
                 black_box(None),
+                black_box(bllvm_consensus::types::Network::Mainnet),
             );
             // Ensure we're actually validating - use result to ensure it's computed
             black_box(result);
@@ -225,6 +226,7 @@ fn benchmark_connect_block_realistic_1000tx(c: &mut Criterion) {
                 black_box(utxo_set.clone()),
                 black_box(1), // Height 1 = no assume-valid optimization
                 black_box(None),
+                black_box(bllvm_consensus::types::Network::Mainnet),
             );
             // Ensure we're actually validating - use result to ensure it's computed
             black_box(result);
