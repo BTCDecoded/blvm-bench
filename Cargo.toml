@@ -67,6 +67,12 @@ benchmark-helpers = ["differential"]
 # Additional testing utilities if needed
 proptest = "1.5"
 
+# Local development: Patch crates.io dependencies to use local paths
+# This ensures bllvm-node (which uses published bllvm-protocol) gets the local version
+[patch.crates-io]
+bllvm-protocol = { path = "../bllvm-protocol", package = "bllvm-protocol" }
+bllvm-consensus = { path = "../bllvm-consensus", package = "bllvm-consensus" }
+
 # Benchmark targets - Consensus layer
 [[bench]]
 name = "hash_operations"
