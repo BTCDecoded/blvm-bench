@@ -34,7 +34,7 @@ impl RpcConfig {
     }
 
     /// Create from environment variables (supports remote nodes)
-    /// 
+    ///
     /// Environment variables:
     /// - `BITCOIN_RPC_HOST` (default: "127.0.0.1")
     /// - `BITCOIN_RPC_PORT` (default: 8332 for mainnet, 18443 for regtest)
@@ -42,17 +42,16 @@ impl RpcConfig {
     /// - `BITCOIN_RPC_PASSWORD` (default: "test")
     /// - `BITCOIN_NETWORK` (default: "mainnet") - used to determine default port
     pub fn from_env() -> Self {
-        let rpc_host = std::env::var("BITCOIN_RPC_HOST")
-            .unwrap_or_else(|_| "127.0.0.1".to_string());
-        
-        let rpc_user = std::env::var("BITCOIN_RPC_USER")
-            .unwrap_or_else(|_| "test".to_string());
-        
-        let rpc_pass = std::env::var("BITCOIN_RPC_PASSWORD")
-            .unwrap_or_else(|_| "test".to_string());
-        
+        let rpc_host =
+            std::env::var("BITCOIN_RPC_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
+
+        let rpc_user = std::env::var("BITCOIN_RPC_USER").unwrap_or_else(|_| "test".to_string());
+
+        let rpc_pass = std::env::var("BITCOIN_RPC_PASSWORD").unwrap_or_else(|_| "test".to_string());
+
         // Determine default port based on network
         let default_port = match std::env::var("BITCOIN_NETWORK")
+            .ok()
             .as_ref()
             .map(|s| s.as_str())
         {
@@ -62,14 +61,14 @@ impl RpcConfig {
             Some("signet") => 38332,
             _ => 8332, // Default to mainnet
         };
-        
+
         let rpc_port = std::env::var("BITCOIN_RPC_PORT")
             .ok()
             .and_then(|p| p.parse::<u16>().ok())
             .unwrap_or(default_port);
-        
+
         let url = format!("http://{}:{}", rpc_host, rpc_port);
-        
+
         Self {
             url,
             user: rpc_user,
@@ -277,12 +276,12 @@ impl CoreRpcClient {
     /// Returns (is_pruned, prune_height) where prune_height is the minimum available block height
     pub async fn get_pruning_info(&self) -> Result<(bool, Option<u64>)> {
         let info = self.getblockchaininfo().await?;
-        
+
         let is_pruned = info
             .get("pruned")
             .and_then(|p| p.as_bool())
             .unwrap_or(false);
-        
+
         let prune_height = if is_pruned {
             info.get("pruneheight")
                 .and_then(|h| h.as_u64())
@@ -294,7 +293,7 @@ impl CoreRpcClient {
         } else {
             None
         };
-        
+
         Ok((is_pruned, prune_height))
     }
 
@@ -314,23 +313,26 @@ impl NodeDiscovery {
     /// Discover nodes by reading Bitcoin Core config files
     pub fn discover_from_config_files() -> Vec<RpcConfig> {
         let mut configs = Vec::new();
-        
-        // Common Bitcoin Core config file locations
-        let config_paths = vec![
-            // Mainnet
-            dirs::home_dir().map(|h| h.join(".bitcoin/bitcoin.conf")),
-            PathBuf::from("/etc/bitcoin/bitcoin.conf"),
-            // Testnet
-            dirs::home_dir().map(|h| h.join(".bitcoin/testnet3/bitcoin.conf")),
-            // Regtest
-            dirs::home_dir().map(|h| h.join(".bitcoin/regtest/bitcoin.conf")),
-        ];
 
-        for path_opt in config_paths {
-            if let Some(path) = path_opt {
-                if let Ok(config) = Self::parse_bitcoin_conf(&path) {
-                    configs.push(config);
-                }
+        // Common Bitcoin Core config file locations
+        let mut config_paths = Vec::new();
+        // Mainnet
+        if let Some(home) = dirs::home_dir() {
+            config_paths.push(home.join(".bitcoin/bitcoin.conf"));
+        }
+        config_paths.push(PathBuf::from("/etc/bitcoin/bitcoin.conf"));
+        // Testnet
+        if let Some(home) = dirs::home_dir() {
+            config_paths.push(home.join(".bitcoin/testnet3/bitcoin.conf"));
+        }
+        // Regtest
+        if let Some(home) = dirs::home_dir() {
+            config_paths.push(home.join(".bitcoin/regtest/bitcoin.conf"));
+        }
+
+        for path in config_paths {
+            if let Ok(config) = Self::parse_bitcoin_conf(&path) {
+                configs.push(config);
             }
         }
 
@@ -340,10 +342,10 @@ impl NodeDiscovery {
     /// Parse Bitcoin Core config file
     fn parse_bitcoin_conf(path: &PathBuf) -> Result<RpcConfig> {
         use std::fs;
-        
+
         let content = fs::read_to_string(path)
             .context(format!("Failed to read config file: {}", path.display()))?;
-        
+
         let mut rpc_port: Option<u16> = None;
         let mut rpc_user: Option<String> = None;
         let mut rpc_password: Option<String> = None;
@@ -419,7 +421,7 @@ impl NodeDiscovery {
 
         // Common ports
         let ports = vec![8332, 18332, 18443, 38332]; // mainnet, testnet, regtest, signet
-        
+
         // Common credential combinations
         let credentials = vec![
             ("test", "test"),
@@ -480,7 +482,9 @@ impl NodeDiscovery {
         }
 
         if working.is_empty() {
-            anyhow::bail!("No Bitcoin Core nodes found. Set BITCOIN_RPC_HOST or ensure a node is running.");
+            anyhow::bail!(
+                "No Bitcoin Core nodes found. Set BITCOIN_RPC_HOST or ensure a node is running."
+            );
         }
 
         // Return random node from working candidates

@@ -128,19 +128,18 @@ async fn create_rpc_client(
 ) -> Result<(CoreRpcClient, BitcoinNetwork)> {
     use bllvm_bench::core_builder::CoreBuilder;
     use bllvm_bench::core_rpc_client::NodeDiscovery;
-    
+
     // Check if auto-discovery is disabled (explicit config takes precedence)
     let auto_discover = std::env::var("BITCOIN_AUTO_DISCOVER")
         .ok()
         .and_then(|v| v.parse::<bool>().ok())
         .unwrap_or(true); // Default to enabled
-    
+
     // Check if connecting to remote node (via BITCOIN_RPC_HOST)
-    let rpc_host = std::env::var("BITCOIN_RPC_HOST")
-        .unwrap_or_else(|_| "127.0.0.1".to_string());
-    
+    let rpc_host = std::env::var("BITCOIN_RPC_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
+
     let is_remote = rpc_host != "127.0.0.1" && rpc_host != "localhost";
-    
+
     if is_remote {
         // Connect directly to remote node (explicit configuration)
         println!("🌐 Connecting to remote Bitcoin Core node at {}", rpc_host);
@@ -177,7 +176,7 @@ async fn create_rpc_client_local(
     preferred_network: Option<BitcoinNetwork>,
 ) -> Result<(CoreRpcClient, BitcoinNetwork)> {
     use bllvm_bench::core_builder::CoreBuilder;
-    
+
     // Try to find local node or start regtest
     let builder = CoreBuilder::new();
     let binaries = match builder.find_existing_core() {
@@ -661,7 +660,7 @@ async fn test_historical_blocks_differential() -> Result<()> {
             return Ok(());
         }
     };
-    
+
     println!("📡 Connected to {} node", network.as_str());
 
     // For real historical testing, we'd iterate through blocks 0 to 800,000+
@@ -684,8 +683,11 @@ async fn test_historical_blocks_differential() -> Result<()> {
     let (is_pruned, prune_height) = rpc_client.get_pruning_info().await?;
     if is_pruned {
         if let Some(prune_height_val) = prune_height {
-            println!("⚠️  Node is PRUNED - blocks before height {} are not available", prune_height_val);
-            
+            println!(
+                "⚠️  Node is PRUNED - blocks before height {} are not available",
+                prune_height_val
+            );
+
             // Adjust start_height if it's before prune_height
             if start_height < prune_height_val {
                 println!(
@@ -694,7 +696,7 @@ async fn test_historical_blocks_differential() -> Result<()> {
                 );
                 start_height = prune_height_val;
             }
-            
+
             if start_height > end_height {
                 eprintln!(
                     "❌ Cannot test: start height {} is after end height {} (pruned node)",
@@ -703,7 +705,9 @@ async fn test_historical_blocks_differential() -> Result<()> {
                 return Ok(());
             }
         } else {
-            println!("⚠️  Node is pruned but prune_height not available - will skip unavailable blocks");
+            println!(
+                "⚠️  Node is pruned but prune_height not available - will skip unavailable blocks"
+            );
         }
     } else {
         println!("✅ Node is NOT pruned - full blockchain available");
@@ -751,7 +755,10 @@ async fn test_historical_blocks_differential() -> Result<()> {
                     // In pruned nodes, block data may not be available even if hash is
                     // This is expected, so we skip silently
                 } else {
-                    eprintln!("⚠️  Failed to get block {} (height {}): {}", block_hash, height, e);
+                    eprintln!(
+                        "⚠️  Failed to get block {} (height {}): {}",
+                        block_hash, height, e
+                    );
                 }
                 continue;
             }
@@ -761,7 +768,10 @@ async fn test_historical_blocks_differential() -> Result<()> {
         let block_bytes = match hex::decode(&block_hex) {
             Ok(bytes) => bytes,
             Err(e) => {
-                eprintln!("⚠️  Failed to decode block hex for height {}: {}", height, e);
+                eprintln!(
+                    "⚠️  Failed to decode block hex for height {}: {}",
+                    height, e
+                );
                 continue;
             }
         };
@@ -769,7 +779,10 @@ async fn test_historical_blocks_differential() -> Result<()> {
         let (block, witnesses) = match deserialize_block_with_witnesses(&block_bytes) {
             Ok((b, w)) => (b, w),
             Err(e) => {
-                eprintln!("⚠️  Failed to deserialize block at height {}: {}", height, e);
+                eprintln!(
+                    "⚠️  Failed to deserialize block at height {}: {}",
+                    height, e
+                );
                 continue;
             }
         };
@@ -806,11 +819,19 @@ async fn test_historical_blocks_differential() -> Result<()> {
         let matches = matches!(
             (&bllvm_result, &core_result),
             (ValidationResult::Valid, CoreValidationResult::Valid)
-                | (ValidationResult::Invalid(_), CoreValidationResult::Invalid(_))
+                | (
+                    ValidationResult::Invalid(_),
+                    CoreValidationResult::Invalid(_)
+                )
         );
 
         if !matches {
-            divergences.push((height, block_hash, bllvm_result.clone(), core_result.clone()));
+            divergences.push((
+                height,
+                block_hash,
+                bllvm_result.clone(),
+                core_result.clone(),
+            ));
             eprintln!(
                 "❌ DIVERGENCE at height {}: BLLVM={:?}, Core={:?}",
                 height, bllvm_result, core_result
@@ -825,7 +846,9 @@ async fn test_historical_blocks_differential() -> Result<()> {
         if height % 1000 == 0 || height == end_height {
             println!(
                 "✅ Tested {} blocks (matched: {}, divergences: {})",
-                tested, matched, divergences.len()
+                tested,
+                matched,
+                divergences.len()
             );
         }
     }
