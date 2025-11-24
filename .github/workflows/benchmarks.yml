@@ -292,26 +292,30 @@ jobs:
           fi
 
       - name: Verify Core with Rust infrastructure (optional check)
-        timeout-minutes: 2
         run: |
           # Optional: Use Rust CoreBuilder to verify Core detection
           # This provides better diagnostics and matches differential test behavior
           # Note: This is optional and non-blocking - benchmarks don't require this
           cd "$GITHUB_WORKSPACE"
           
-          echo "🔍 Checking if Rust infrastructure is available (optional, timeout: 2min)..."
+          echo "🔍 Checking if Rust infrastructure is available (optional)..."
           
-          # Use timeout to prevent hanging, show progress
-          if timeout 120 cargo build --features benchmark-helpers --bin bllvm-bench --message-format=short 2>&1 | head -50; then
+          # Verify dependencies are available
+          if [ ! -e "../bllvm-consensus" ] && [ ! -d "../bllvm-consensus" ]; then
+            echo "⚠️  bllvm-consensus dependency not found, skipping Rust check"
+            echo "ℹ️  This is expected if dependencies aren't set up yet (not critical for benchmarks)"
+            exit 0
+          fi
+          
+          # Try to build with verbose output to see what's happening
+          echo "Building bllvm-bench with benchmark-helpers feature..."
+          if cargo build --features benchmark-helpers --bin bllvm-bench --message-format=short 2>&1; then
             echo "✅ Rust infrastructure available for Core detection"
             # Could use: cargo run --features benchmark-helpers --bin bllvm-bench -- --find-core
           else
-            EXIT_CODE=$?
-            if [ $EXIT_CODE -eq 124 ]; then
-              echo "⏱️  Rust build check timed out after 2 minutes (not critical, continuing...)"
-            else
-              echo "ℹ️  Rust infrastructure check skipped (not critical for benchmarks)"
-            fi
+            echo "ℹ️  Rust infrastructure check failed (not critical for benchmarks)"
+            echo "   This is expected if dependencies aren't fully set up or if there are build issues"
+            echo "   Benchmarks will continue using shell scripts which don't require this"
           fi
         continue-on-error: true
 
