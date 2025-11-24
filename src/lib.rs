@@ -12,11 +12,12 @@ pub mod deep_analysis;
 pub mod shell;
 
 /// Differential testing modules (feature-gated)
-#[cfg(feature = "differential")]
+/// Also available for benchmarks via benchmark-helpers feature
+#[cfg(any(feature = "differential", feature = "benchmark-helpers"))]
 pub mod core_builder;
-#[cfg(feature = "differential")]
+#[cfg(any(feature = "differential", feature = "benchmark-helpers"))]
 pub mod regtest_node;
-#[cfg(feature = "differential")]
+#[cfg(any(feature = "differential", feature = "benchmark-helpers"))]
 pub mod core_rpc_client;
 #[cfg(feature = "differential")]
 pub mod differential;

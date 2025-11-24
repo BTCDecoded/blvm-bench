@@ -106,3 +106,4 @@ pub fn validate_bllvm_block(block: &Block, height: u64, network: Network) -> bll
     connect_block(block, &witnesses, utxo_set, height, None, network)
 }
 
+

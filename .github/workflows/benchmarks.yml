@@ -96,9 +96,42 @@ jobs:
         run: |
           echo "Setting up Bitcoin Core and Bitcoin Commons..."
           
-          # Setup Core
-          CORE_DIR="$HOME/bitcoin-core"
-          if [ ! -d "$CORE_DIR" ]; then
+          # Setup Core - improved detection using CoreBuilder patterns
+          CORE_DIR=""
+          CORE_FOUND=false
+          
+          # 1. Check CORE_PATH environment variable
+          if [ -n "$CORE_PATH" ] && [ -d "$CORE_PATH" ]; then
+            CORE_DIR="$CORE_PATH"
+            CORE_FOUND=true
+            echo "✅ Using CORE_PATH: $CORE_DIR"
+          # 2. Check cache directory (self-hosted runner optimization)
+          elif [ -d "/opt/bitcoin-core/binaries/v25.0" ]; then
+            CORE_DIR="/opt/bitcoin-core"
+            CORE_FOUND=true
+            echo "✅ Using cached Core: $CORE_DIR"
+          # 3. Check common build locations
+          elif [ -d "$HOME/bitcoin" ]; then
+            CORE_DIR="$HOME/bitcoin"
+            CORE_FOUND=true
+            echo "✅ Found Core at: $CORE_DIR"
+          elif [ -d "$HOME/src/bitcoin" ]; then
+            CORE_DIR="$HOME/src/bitcoin"
+            CORE_FOUND=true
+            echo "✅ Found Core at: $CORE_DIR"
+          elif [ -d "$HOME/bitcoin-core" ]; then
+            CORE_DIR="$HOME/bitcoin-core"
+            CORE_FOUND=true
+            echo "✅ Found Core at: $CORE_DIR"
+          elif [ -d "$HOME/src/bitcoin-core" ]; then
+            CORE_DIR="$HOME/src/bitcoin-core"
+            CORE_FOUND=true
+            echo "✅ Found Core at: $CORE_DIR"
+          fi
+          
+          # If not found, try to clone
+          if [ "$CORE_FOUND" = "false" ]; then
+            CORE_DIR="$HOME/bitcoin-core"
             echo "Cloning Bitcoin Core..."
             git clone --depth 1 https://github.com/bitcoin/bitcoin.git "$CORE_DIR" || {
               echo "⚠️  Failed to clone Core, trying existing directory..."
@@ -106,10 +139,27 @@ jobs:
                 CORE_DIR="$HOME/src/bitcoin"
               elif [ -d "$HOME/src/bitcoin-core" ]; then
                 CORE_DIR="$HOME/src/bitcoin-core"
+              else
+                echo "❌ Could not find or clone Bitcoin Core"
+                exit 1
               fi
             }
           fi
+          
+          # Verify Core directory exists and has expected structure
+          if [ ! -d "$CORE_DIR" ]; then
+            echo "❌ Core directory does not exist: $CORE_DIR"
+            exit 1
+          fi
+          
+          # Check for source files (indicates it's a source directory, not binaries)
+          if [ ! -f "$CORE_DIR/src/bitcoind.cpp" ] && [ ! -f "$CORE_DIR/CMakeLists.txt" ] && [ ! -f "$CORE_DIR/autogen.sh" ]; then
+            echo "⚠️  Warning: Core directory may not be a source directory"
+            echo "   Expected: src/bitcoind.cpp, CMakeLists.txt, or autogen.sh"
+          fi
+          
           echo "core_path=$CORE_DIR" >> $GITHUB_OUTPUT
+          echo "✅ Core setup complete: $CORE_DIR"
           
           # Setup Commons consensus
           CONSENSUS_DIR="$HOME/bllvm-consensus"
@@ -185,6 +235,19 @@ jobs:
               echo "✅ bllvm-consensus dependency found in Cargo.toml"
             fi
           fi
+
+      - name: Verify Core with Rust infrastructure (optional check)
+        run: |
+          # Optional: Use Rust CoreBuilder to verify Core detection
+          # This provides better diagnostics and matches differential test behavior
+          cd "$GITHUB_WORKSPACE"
+          if cargo build --features benchmark-helpers --bin bllvm-bench 2>/dev/null; then
+            echo "✅ Rust infrastructure available for Core detection"
+            # Could use: cargo run --features benchmark-helpers --bin bllvm-bench -- --find-core
+          else
+            echo "ℹ️  Rust infrastructure check skipped (not critical for benchmarks)"
+          fi
+        continue-on-error: true
 
       - name: Build Bitcoin Core
         run: |
@@ -396,15 +459,51 @@ jobs:
           COMMONS_NODE_PATH="${{ needs.setup.outputs.commons_node_path }}"
           PROTOCOL_DIR="$HOME/bllvm-protocol"
           
-          # Verify Core path and bench_bitcoin
+          # Verify Core path and bench_bitcoin (improved detection)
           echo "Checking Core setup..."
           echo "CORE_PATH: $CORE_PATH"
+          
+          BENCH_BITCOIN_FOUND=false
+          BENCH_BITCOIN_PATH=""
+          
+          # Check multiple possible locations for bench_bitcoin
           if [ -f "$CORE_PATH/build/bin/bench_bitcoin" ]; then
-            echo "✅ bench_bitcoin found at: $CORE_PATH/build/bin/bench_bitcoin"
+            BENCH_BITCOIN_PATH="$CORE_PATH/build/bin/bench_bitcoin"
+            BENCH_BITCOIN_FOUND=true
           elif [ -f "$CORE_PATH/src/bench_bitcoin" ]; then
-            echo "✅ bench_bitcoin found at: $CORE_PATH/src/bench_bitcoin"
+            BENCH_BITCOIN_PATH="$CORE_PATH/src/bench_bitcoin"
+            BENCH_BITCOIN_FOUND=true
+          elif [ -f "$CORE_PATH/build/bench_bitcoin" ]; then
+            BENCH_BITCOIN_PATH="$CORE_PATH/build/bench_bitcoin"
+            BENCH_BITCOIN_FOUND=true
+          fi
+          
+          if [ "$BENCH_BITCOIN_FOUND" = "true" ]; then
+            echo "✅ bench_bitcoin found at: $BENCH_BITCOIN_PATH"
+            echo "BENCH_BITCOIN_PATH=$BENCH_BITCOIN_PATH" >> $GITHUB_ENV
           else
-            echo "⚠️  bench_bitcoin not found, will attempt to build if needed"
+            echo "⚠️  bench_bitcoin not found at expected paths"
+            echo "   Checked:"
+            echo "     - $CORE_PATH/build/bin/bench_bitcoin"
+            echo "     - $CORE_PATH/src/bench_bitcoin"
+            echo "     - $CORE_PATH/build/bench_bitcoin"
+            echo "   Will attempt to build if needed"
+          fi
+          
+          # Verify Commons dependencies
+          echo "Verifying Commons dependencies..."
+          if [ -f "$COMMONS_CONSENSUS_PATH/Cargo.toml" ]; then
+            echo "✅ bllvm-consensus found"
+          else
+            echo "❌ bllvm-consensus not found at: $COMMONS_CONSENSUS_PATH"
+            exit 1
+          fi
+          
+          if [ -f "$COMMONS_NODE_PATH/Cargo.toml" ]; then
+            echo "✅ bllvm-node found"
+          else
+            echo "❌ bllvm-node not found at: $COMMONS_NODE_PATH"
+            exit 1
           fi
           
           # Export environment variables (make them available to all subsequent steps)
@@ -459,15 +558,35 @@ jobs:
           echo "  COMMONS_NODE_PATH: $COMMONS_NODE_PATH"
           echo "  COMMONS_PROTOCOL_PATH: $COMMONS_PROTOCOL_PATH"
           
-          # Verify Core bench_bitcoin exists
+          # Verify Core bench_bitcoin exists (using improved detection)
+          BENCH_BITCOIN_FOUND=false
           if [ -f "$CORE_PATH/build/bin/bench_bitcoin" ]; then
             echo "✅ bench_bitcoin found: $CORE_PATH/build/bin/bench_bitcoin"
+            BENCH_BITCOIN_FOUND=true
           elif [ -f "$CORE_PATH/src/bench_bitcoin" ]; then
             echo "✅ bench_bitcoin found: $CORE_PATH/src/bench_bitcoin"
+            BENCH_BITCOIN_FOUND=true
+          elif [ -f "$CORE_PATH/build/bench_bitcoin" ]; then
+            echo "✅ bench_bitcoin found: $CORE_PATH/build/bench_bitcoin"
+            BENCH_BITCOIN_FOUND=true
           else
             echo "⚠️  bench_bitcoin not found at expected paths"
-            echo "   Checking: $CORE_PATH/build/bin/bench_bitcoin"
-            echo "   Checking: $CORE_PATH/src/bench_bitcoin"
+            echo "   Checked:"
+            echo "     - $CORE_PATH/build/bin/bench_bitcoin"
+            echo "     - $CORE_PATH/src/bench_bitcoin"
+            echo "     - $CORE_PATH/build/bench_bitcoin"
+            echo "   Some benchmarks may fail if bench_bitcoin is required"
+          fi
+          
+          # Export bench_bitcoin path if found
+          if [ "$BENCH_BITCOIN_FOUND" = "true" ]; then
+            if [ -f "$CORE_PATH/build/bin/bench_bitcoin" ]; then
+              echo "BENCH_BITCOIN_PATH=$CORE_PATH/build/bin/bench_bitcoin" >> $GITHUB_ENV
+            elif [ -f "$CORE_PATH/src/bench_bitcoin" ]; then
+              echo "BENCH_BITCOIN_PATH=$CORE_PATH/src/bench_bitcoin" >> $GITHUB_ENV
+            elif [ -f "$CORE_PATH/build/bench_bitcoin" ]; then
+              echo "BENCH_BITCOIN_PATH=$CORE_PATH/build/bench_bitcoin" >> $GITHUB_ENV
+            fi
           fi
           
           # Create results directory

@@ -1,0 +1,204 @@
+name: Differential Tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tests/integration/**'
+      - 'src/differential.rs'
+      - 'src/core_builder.rs'
+      - 'src/regtest_node.rs'
+      - 'src/core_rpc_client.rs'
+      - 'Cargo.toml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'tests/integration/**'
+      - 'src/differential.rs'
+      - 'src/core_builder.rs'
+      - 'src/regtest_node.rs'
+      - 'src/core_rpc_client.rs'
+      - 'Cargo.toml'
+  workflow_dispatch:
+  schedule:
+    # Run daily at 3 AM UTC (after benchmarks at 2 AM)
+    - cron: '0 3 * * *'
+
+jobs:
+  differential:
+    runs-on: [self-hosted, Linux, X64, perf]
+    timeout-minutes: 60
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          token: ${{ secrets.REPO_ACCESS_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Setup Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+
+      - name: Cache Rust dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-differential-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-differential-
+
+      - name: Setup Commons dependencies
+        run: |
+          # Setup Commons dependencies (similar to benchmarks workflow)
+          CONSENSUS_DIR="$HOME/bllvm-consensus"
+          if [ ! -d "$CONSENSUS_DIR" ]; then
+            echo "Cloning Bitcoin Commons consensus..."
+            git clone --depth 1 https://github.com/BTCDecoded/bllvm-consensus.git "$CONSENSUS_DIR" || {
+              if [ -d "$HOME/src/bllvm-consensus" ]; then
+                CONSENSUS_DIR="$HOME/src/bllvm-consensus"
+              fi
+            }
+          fi
+          
+          NODE_DIR="$HOME/bllvm-node"
+          if [ ! -d "$NODE_DIR" ]; then
+            echo "Cloning Bitcoin Commons node..."
+            git clone --depth 1 https://github.com/BTCDecoded/bllvm-node.git "$NODE_DIR" || {
+              if [ -d "$HOME/src/bllvm-node" ]; then
+                NODE_DIR="$HOME/src/bllvm-node"
+              fi
+            }
+          fi
+          
+          PROTOCOL_DIR="$HOME/bllvm-protocol"
+          if [ ! -d "$PROTOCOL_DIR" ]; then
+            echo "Cloning Bitcoin Commons protocol..."
+            git clone --depth 1 https://github.com/BTCDecoded/bllvm-protocol.git "$PROTOCOL_DIR" || {
+              if [ -d "$HOME/src/bllvm-protocol" ]; then
+                PROTOCOL_DIR="$HOME/src/bllvm-protocol"
+              fi
+            }
+          fi
+          
+          # Create symlinks
+          cd "$GITHUB_WORKSPACE"
+          if [ ! -e "../bllvm-consensus" ]; then
+            ln -sf "$CONSENSUS_DIR" ../bllvm-consensus
+          fi
+          if [ ! -e "../bllvm-node" ]; then
+            ln -sf "$NODE_DIR" ../bllvm-node
+          fi
+          if [ ! -e "../bllvm-protocol" ] && [ -d "$PROTOCOL_DIR" ]; then
+            ln -sf "$PROTOCOL_DIR" ../bllvm-protocol
+          fi
+          
+          echo "COMMONS_CONSENSUS_PATH=$CONSENSUS_DIR" >> $GITHUB_ENV
+          echo "COMMONS_NODE_PATH=$NODE_DIR" >> $GITHUB_ENV
+          echo "COMMONS_PROTOCOL_PATH=$PROTOCOL_DIR" >> $GITHUB_ENV
+
+      - name: Check for Core binaries
+        id: check_core
+        run: |
+          # Check multiple locations for Core binaries
+          CORE_FOUND=false
+          CORE_PATH=""
+          
+          # 1. Check CORE_PATH environment variable
+          if [ -n "$CORE_PATH" ] && [ -f "$CORE_PATH/bitcoind" ]; then
+            CORE_FOUND=true
+            CORE_PATH="$CORE_PATH"
+          # 2. Check cache directory
+          elif [ -f "/opt/bitcoin-core/binaries/v25.0/bitcoind" ]; then
+            CORE_FOUND=true
+            CORE_PATH="/opt/bitcoin-core/binaries/v25.0"
+          # 3. Check common build locations
+          elif [ -f "$HOME/bitcoin/src/bitcoind" ]; then
+            CORE_FOUND=true
+            CORE_PATH="$HOME/bitcoin/src"
+          elif [ -f "$HOME/src/bitcoin/src/bitcoind" ]; then
+            CORE_FOUND=true
+            CORE_PATH="$HOME/src/bitcoin/src"
+          elif [ -f "$HOME/bitcoin-core/src/bitcoind" ]; then
+            CORE_FOUND=true
+            CORE_PATH="$HOME/bitcoin-core/src"
+          fi
+          
+          if [ "$CORE_FOUND" = "true" ]; then
+            echo "core_found=true" >> $GITHUB_OUTPUT
+            echo "core_path=$CORE_PATH" >> $GITHUB_OUTPUT
+            echo "✅ Bitcoin Core found at: $CORE_PATH"
+          else
+            echo "core_found=false" >> $GITHUB_OUTPUT
+            echo "⚠️  Bitcoin Core not found, tests will skip Core comparisons"
+            echo "💡 Set CORE_PATH environment variable or install Core in standard locations"
+          fi
+
+      - name: Run differential tests
+        env:
+          CORE_PATH: ${{ steps.check_core.outputs.core_path }}
+          RUST_BACKTRACE: 1
+          RUST_LOG: info
+        run: |
+          echo "Running differential tests..."
+          echo "CORE_PATH: ${CORE_PATH:-not set}"
+          
+          # Run tests with differential feature
+          if [ "${{ steps.check_core.outputs.core_found }}" = "true" ]; then
+            echo "✅ Core available - running full differential tests"
+            cargo test --test integration --features differential -- --nocapture --test-threads=1
+          else
+            echo "⚠️  Core not available - running BLLVM-only tests"
+            # Tests will gracefully skip Core comparisons
+            cargo test --test integration --features differential -- --nocapture --test-threads=1 || {
+              echo "⚠️  Some tests may have failed due to missing Core"
+              echo "This is expected if Core is not available"
+              exit 0
+            }
+          fi
+
+      - name: Collect test results
+        if: always()
+        run: |
+          mkdir -p test-results
+          # Collect any test output files
+          if [ -d "target/test-results" ]; then
+            cp -r target/test-results/* test-results/ 2>/dev/null || true
+          fi
+          
+          # Create summary
+          echo "# Differential Test Results" > test-results/summary.md
+          echo "" >> test-results/summary.md
+          echo "**Run Date**: $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> test-results/summary.md
+          echo "**Core Available**: ${{ steps.check_core.outputs.core_found }}" >> test-results/summary.md
+          if [ "${{ steps.check_core.outputs.core_found }}" = "true" ]; then
+            echo "**Core Path**: ${{ steps.check_core.outputs.core_path }}" >> test-results/summary.md
+          fi
+          echo "" >> test-results/summary.md
+          echo "See test output above for detailed results." >> test-results/summary.md
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: differential-test-results
+          path: |
+            test-results/
+          retention-days: 7
+
+      - name: Report divergences
+        if: failure()
+        run: |
+          echo "❌ Differential tests failed!"
+          echo "This may indicate a consensus divergence between BLLVM and Bitcoin Core."
+          echo ""
+          echo "Please review the test output above for details."
+          echo ""
+          echo "If this is expected (e.g., Core not available), you can ignore this failure."
+

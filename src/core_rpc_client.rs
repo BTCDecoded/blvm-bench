@@ -195,3 +195,4 @@ pub struct SubmitBlockResult {
     pub error: Option<String>,
 }
 
+
