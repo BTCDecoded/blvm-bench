@@ -241,8 +241,20 @@ impl BlockFileReader {
         
         // Move to secondary drive
         let secondary_chunk = chunks_dir.join(format!("chunk_{}.bin.zst", chunk_num));
-        eprintln!("   📦 Moving chunk {} to secondary drive...", chunk_num);
         
+        // CRITICAL FIX: Check if chunk already exists before overwriting
+        if secondary_chunk.exists() {
+            let existing_size = std::fs::metadata(&secondary_chunk)?.len();
+            let new_size = std::fs::metadata(&local_chunk)?.len();
+            if existing_size > 1000 && new_size < existing_size / 10 {
+                // Existing chunk is much larger - don't overwrite with tiny file
+                eprintln!("   ⚠️  ERROR: chunk_{}.bin.zst already exists ({} bytes) and new chunk is much smaller ({} bytes) - SKIPPING to prevent corruption", 
+                         chunk_num, existing_size, new_size);
+                return Err(anyhow::anyhow!("Chunk {} already exists and is much larger - refusing to overwrite", chunk_num));
+            }
+        }
+        
+        eprintln!("   📦 Moving chunk {} to secondary drive...", chunk_num);
         std::fs::copy(&local_chunk, &secondary_chunk)?;
         
         // Verify copy
@@ -651,7 +663,11 @@ impl BlockIterator {
         if !iter.reader.block_files.is_empty() {
             let file_path = iter.get_local_or_remote_path(0)?;
             let file = File::open(&file_path)?;
-            iter.current_file = Some(BufReader::with_capacity(IO_BUFFER_SIZE, file));
+            let mut buf_reader = BufReader::with_capacity(IO_BUFFER_SIZE, file);
+            // CRITICAL: Ensure file starts at position 0
+            use std::io::Seek;
+            buf_reader.seek(std::io::SeekFrom::Start(0))?;
+            iter.current_file = Some(buf_reader);
             
             // Start copying files ahead in background
             iter.start_background_copying();
@@ -786,6 +802,60 @@ impl BlockIterator {
             } else {
                 std::env::temp_dir().join("blvm-bench-blocks-temp.bin")
             };
+            
+            // CRITICAL FIX: Check for existing chunks and calculate starting point
+            // This prevents overwriting existing chunks when restarting collection
+            let chunks_dir = std::path::Path::new(SECONDARY_CHUNK_DIR);
+            let mut existing_chunks = Vec::new();
+            let mut starting_block_count = 0;
+            
+            if chunks_dir.exists() {
+                // Find all existing chunks
+                for entry in std::fs::read_dir(chunks_dir)? {
+                    let entry = entry?;
+                    let path = entry.path();
+                    if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
+                        if file_name.starts_with("chunk_") && file_name.ends_with(".bin.zst") {
+                            // Extract chunk number
+                            if let Some(chunk_num_str) = file_name.strip_prefix("chunk_").and_then(|s| s.strip_suffix(".bin.zst")) {
+                                if let Ok(chunk_num) = chunk_num_str.parse::<usize>() {
+                                    existing_chunks.push(chunk_num);
+                                }
+                            }
+                        }
+                    }
+                }
+                existing_chunks.sort();
+                
+                if !existing_chunks.is_empty() {
+                    // Calculate starting block count based on existing chunks
+                    // If we have chunks 0, 1, 2, then we've collected (3 * 125000) = 375,000 blocks
+                    let max_chunk = *existing_chunks.iter().max().unwrap();
+                    starting_block_count = (max_chunk + 1) * INCREMENTAL_CHUNK_SIZE;
+                    
+                    println!("   📦 Found {} existing chunk(s): {:?}", existing_chunks.len(), existing_chunks);
+                    println!("   📊 Resuming from block {} (after chunk {})", starting_block_count, max_chunk);
+                    println!("   ✅ Will create chunk {} next (blocks {} to {})", 
+                             max_chunk + 1, 
+                             starting_block_count, 
+                             starting_block_count + INCREMENTAL_CHUNK_SIZE - 1);
+                }
+            }
+            
+            // CRITICAL FIX: For Start9 files, blocks are stored OUT OF ORDER
+            // We can't skip blocks during collection because we don't know their heights
+            // until we parse and order them. So we collect ALL blocks, then chunk them.
+            // If we have existing chunks, we still need to collect all blocks (they might
+            // be in the temp file from a previous run), but we'll handle chunking based
+            // on actual block heights after ordering.
+            if starting_block_count > 0 && temp_file.exists() {
+                let temp_size = std::fs::metadata(&temp_file).map(|m| m.len()).unwrap_or(0);
+                if temp_size > 0 {
+                    println!("   ⚠️  Temp file exists with blocks, but chunks exist up to block {}", starting_block_count);
+                    println!("   📊 Will collect all blocks (out of order), then chunk based on actual heights");
+                    // Don't delete temp file - it may have blocks we need
+                }
+            }
             
             // Check if temp file exists and resume from it
             let (mut temp_writer, mut read_count, start_time) = if temp_file.exists() {
@@ -923,9 +993,9 @@ impl BlockIterator {
                 (BufWriter::with_capacity(IO_BUFFER_SIZE, std::fs::File::create(&temp_file)?), 0, std::time::Instant::now())
             };
             
-            // DEBUG: Verify we reach this point
-            eprintln!("   🔍 DEBUG: Reached parallel reading section, read_count={}, temp_file exists={}", 
-                     read_count, temp_file.exists());
+            // DEBUG: Verify we reach this point (disabled to reduce log spam)
+            // eprintln!("   🔍 DEBUG: Reached parallel reading section, read_count={}, temp_file exists={}", 
+            //          read_count, temp_file.exists());
             
             // OPTIMIZATION: Parallel batch file reading
             // Read multiple files in parallel batches for faster processing, especially in sparse regions
@@ -940,7 +1010,7 @@ impl BlockIterator {
                 .context("Failed to create rayon thread pool")?;
             
             println!("   🚀 Using parallel batch reading ({} threads)", num_threads);
-            eprintln!("   🔍 DEBUG: Parallel reading initialized with {} threads", num_threads);
+            // eprintln!("   🔍 DEBUG: Parallel reading initialized with {} threads", num_threads);
             
             // Estimate total blocks (rough estimate based on typical blockchain size)
             let estimated_total = 926000u64; // Rough estimate
@@ -952,10 +1022,12 @@ impl BlockIterator {
             let local_cache_dir_clone = reader.local_cache_dir.clone();
             let read_blocks_from_file = move |file_idx: usize, file_path: &PathBuf| -> Result<Vec<Vec<u8>>> {
                 use std::io::{BufReader, Read, Seek, SeekFrom};
+                use std::time::{Instant, Duration};
                 
                 const XOR_KEY1: [u8; 4] = [0x84, 0x22, 0xe9, 0xad];
                 const XOR_KEY2: [u8; 4] = [0xb7, 0x8f, 0xff, 0x14];
                 const ENCRYPTED_MAGIC: [u8; 4] = [0x7d, 0x9c, 0x5d, 0x74];
+                const MAX_FILE_PROCESSING_TIME: Duration = Duration::from_secs(300); // 5 minutes per file max
                 
                 // Check if file should be skipped (from pre-scan index)
                 if let Some(ref index) = file_index_clone {
@@ -1007,8 +1079,17 @@ impl BlockIterator {
                 // OPTIMIZATION: Reuse buffer instead of allocating each time
                 let mut search_buffer = vec![0u8; SEARCH_BUFFER_SIZE];
                 
+                // CRITICAL FIX: Add timeout to prevent getting stuck on problematic files
+                let file_start_time = Instant::now();
+                
                 // Read blocks from file using full pattern searching logic
                 loop {
+                    // Check timeout - skip file if it's taking too long
+                    if file_start_time.elapsed() > MAX_FILE_PROCESSING_TIME {
+                        eprintln!("⚠️  File {} processing timeout ({}s) - skipping remaining blocks", 
+                                 file_idx, MAX_FILE_PROCESSING_TIME.as_secs());
+                        break; // Return what we have so far
+                    }
                     // CRITICAL FIX: Track file position BEFORE reading magic
                     // This is needed for correct XOR key rotation in Start9 files
                     let magic_start_pos = file_reader.seek(SeekFrom::Current(0)).unwrap_or(0);
@@ -1030,13 +1111,16 @@ impl BlockIterator {
                     
                     if is_encrypted {
                         // CRITICAL FIX: Decrypt magic using correct key based on FILE OFFSET
-                        // Magic is at file offset magic_start_pos, so use key based on that
+                        // Magic is at file offset magic_start_pos, all 4 bytes in same chunk - use u32 XOR
                         let use_key1 = (magic_start_pos / 4) % 2 == 0;
-                        let key = if use_key1 { &XOR_KEY1 } else { &XOR_KEY2 };
-                        for i in 0..4 {
-                            let byte_offset = magic_start_pos + i as u64;
-                            magic_buf[i] ^= key[(byte_offset % 4) as usize];
-                        }
+                        let key1_u32 = u32::from_le_bytes(XOR_KEY1);
+                        let key2_u32 = u32::from_le_bytes(XOR_KEY2);
+                        let key_u32 = if use_key1 { key1_u32 } else { key2_u32 };
+                        
+                        // Decrypt entire 4-byte magic at once using u32 XOR
+                        let magic_u32 = u32::from_le_bytes(magic_buf);
+                        let decrypted_magic_u32 = magic_u32 ^ key_u32;
+                        magic_buf = decrypted_magic_u32.to_le_bytes();
                     }
                     
                     if magic_buf != *magic {
@@ -1045,11 +1129,26 @@ impl BlockIterator {
                             // Seek back and try pattern search
                             file_reader.seek(SeekFrom::Current(-3)).ok();
                             let current_pos = file_reader.seek(SeekFrom::Current(0)).unwrap_or(0);
+                            let file_size = file_reader.get_ref().metadata().map(|m| m.len()).unwrap_or(0);
                             let mut search_pos = current_pos;
                             let mut found = false;
+                            const MAX_SEARCH_DISTANCE: u64 = 10 * 1024 * 1024; // Max 10MB search per block
+                            let search_start = search_pos;
                             
                             // Pattern search for encrypted magic
                             loop {
+                                // CRITICAL FIX: Limit search distance to prevent infinite loops
+                                if search_pos - search_start > MAX_SEARCH_DISTANCE {
+                                    eprintln!("⚠️  Pattern search exceeded {}MB limit at file offset {} - skipping to next file", 
+                                             MAX_SEARCH_DISTANCE / (1024 * 1024), search_pos);
+                                    break;
+                                }
+                                
+                                // Don't search past end of file
+                                if search_pos >= file_size {
+                                    break;
+                                }
+                                
                                 let bytes_read = match file_reader.read(&mut search_buffer) {
                                     Ok(0) => break,
                                     Ok(n) => n,
@@ -1128,20 +1227,16 @@ impl BlockIterator {
                     let mut block_size = if is_xor_encrypted {
                         // CRITICAL FIX: Decrypt size field using correct key based on FILE OFFSET
                         // Size field is at file offset magic_start_pos + 4
-                        // CRITICAL FIX: Decrypt size field using correct key based on FILE OFFSET
-                        // Size field is at file offset magic_start_pos + 4
-                        // All 4 bytes of size field are in the same 4-byte chunk, so they use the same key
+                        // All 4 bytes of size field are in the same 4-byte chunk, so use u32 XOR
                         let size_offset = magic_start_pos + 4;
                         let use_key1 = (size_offset / 4) % 2 == 0;
-                        let key = if use_key1 { &XOR_KEY1 } else { &XOR_KEY2 };
+                        let key1_u32 = u32::from_le_bytes(XOR_KEY1);
+                        let key2_u32 = u32::from_le_bytes(XOR_KEY2);
+                        let key_u32 = if use_key1 { key1_u32 } else { key2_u32 };
                         
-                        // Decrypt each byte of size field with correct key byte
-                        let mut decrypted_size_bytes = [0u8; 4];
-                        for i in 0..4 {
-                            let byte_offset = size_offset + i as u64;
-                            decrypted_size_bytes[i] = size_buf[i] ^ key[(byte_offset % 4) as usize];
-                        }
-                        let decrypted_size_u32 = u32::from_le_bytes(decrypted_size_bytes);
+                        // Decrypt entire 4-byte size field at once using u32 XOR
+                        let size_u32 = u32::from_le_bytes(size_buf);
+                        let decrypted_size_u32 = size_u32 ^ key_u32;
                         decrypted_size_u32 as usize
                     } else {
                         u32::from_le_bytes(size_buf) as usize
@@ -1259,8 +1354,23 @@ impl BlockIterator {
                         if need_search {
                             let mut search_pos = current_pos;
                             let mut found_next = false;
+                            let file_size = file_reader.get_ref().metadata().map(|m| m.len()).unwrap_or(0);
+                            const MAX_SEARCH_DISTANCE: u64 = 10 * 1024 * 1024; // Max 10MB search per block
+                            let search_start = search_pos;
                             
                             loop {
+                                // CRITICAL FIX: Limit search distance to prevent infinite loops
+                                if search_pos - search_start > MAX_SEARCH_DISTANCE {
+                                    eprintln!("⚠️  Pattern search exceeded {}MB limit at file offset {} - skipping to next block/file", 
+                                             MAX_SEARCH_DISTANCE / (1024 * 1024), search_pos);
+                                    break;
+                                }
+                                
+                                // Don't search past end of file
+                                if search_pos >= file_size {
+                                    break;
+                                }
+                                
                                 let bytes_read = match file_reader.read(&mut search_buffer) {
                                     Ok(0) => break,
                                     Ok(n) => n,
@@ -1349,39 +1459,60 @@ impl BlockIterator {
             // OPTIMIZATION: Pre-copy files ahead in large batches before starting to read
             // This ensures local cache is populated before we need the files
             // Start pre-copy from current position (not from beginning if resuming)
+            // CRITICAL FIX: Make pre-copy non-blocking so we can start reading immediately
             if let Some(ref cache_dir) = reader.local_cache_dir {
                 let precopy_count = PRE_COPY_LOOKAHEAD.min(file_paths.len());
-                println!("   📦 Pre-copying {} files ahead (starting from file {}) to local cache...", 
+                println!("   📦 Pre-copying {} files ahead (starting from file {}) to local cache (background)...", 
                          precopy_count, start_file_idx);
                 
                 // Clone paths for parallel processing (starting from current position)
                 let files_to_precopy: Vec<PathBuf> = file_paths.iter().take(precopy_count).map(|p| (*p).clone()).collect();
+                let cache_dir_clone = cache_dir.clone();
                 
-                pool.install(|| {
-                    files_to_precopy.par_iter()
-                        .for_each(|file_path| {
-                            let file_name = match file_path.file_name() {
-                                Some(name) => name,
-                                None => return,
-                            };
-                            let local_path = cache_dir.join(file_name);
-                            
-                            // Copy if not already cached (skip if exists)
-                            if !local_path.exists() {
-                                if let Err(e) = std::fs::copy(file_path, &local_path) {
-                                    eprintln!("⚠️  Failed to pre-copy {}: {}", file_path.display(), e);
-                                }
-                            }
+                // CRITICAL FIX: Spawn pre-copy in background thread so it doesn't block reading
+                std::thread::spawn(move || {
+                    let pool = rayon::ThreadPoolBuilder::new()
+                        .num_threads(MAX_PARALLEL_READ_THREADS)
+                        .build();
+                    if let Ok(pool) = pool {
+                        pool.install(|| {
+                            files_to_precopy.par_iter()
+                                .for_each(|file_path| {
+                                    let file_name = match file_path.file_name() {
+                                        Some(name) => name,
+                                        None => return,
+                                    };
+                                    let local_path = cache_dir_clone.join(file_name);
+                                    
+                                    // Copy if not already cached (skip if exists)
+                                    if !local_path.exists() {
+                                        let _ = std::fs::copy(file_path, &local_path);
+                                    }
+                                });
                         });
+                    }
+                    eprintln!("   ✅ Background pre-copy complete - {} files ready in local cache", precopy_count);
                 });
-                println!("   ✅ Pre-copy complete - {} files ready in local cache", precopy_count);
+                println!("   ⚡ Starting block reading immediately (pre-copy running in background)...");
             }
             
             // Track which files we've pre-copied to continue copying ahead
             // Start from where initial pre-copy ended (relative to start_file_idx)
             let mut last_precopy_idx = PRE_COPY_LOOKAHEAD.min(file_paths.len());
             
+            // CRITICAL FIX: Add debug output and ensure loop starts
+            let total_batches = (file_paths.len() + batch_size - 1) / batch_size;
+            println!("   🚀 Starting to process {} files in {} batches (batch size: {})...", 
+                     file_paths.len(), total_batches, batch_size);
+            
             for (batch_num, batch) in file_paths.chunks(batch_size).enumerate() {
+                // CRITICAL FIX: Add progress output at start of each batch
+                if batch_num % 10 == 0 || batch_num == 0 {
+                    eprintln!("   📦 Processing batch {}/{} (files {}-{})...", 
+                             batch_num + 1, total_batches, 
+                             processed_files, 
+                             processed_files + batch.len().min(batch_size) - 1);
+                }
                 // Continue pre-copying ahead as we progress
                 // Keep 200 files ahead of current reading position
                 if let Some(ref cache_dir) = reader.local_cache_dir {
@@ -1427,6 +1558,7 @@ impl BlockIterator {
                 
                 // Read blocks from all files in batch in parallel using custom thread pool
                 // Files should now be in local cache for fast local disk access
+                eprintln!("   🔍 Starting parallel read of {} files in batch {}...", batch.len(), batch_num + 1);
                 let batch_results: Vec<_> = pool.install(|| {
                     batch.par_iter()
                         .enumerate()
@@ -1436,6 +1568,7 @@ impl BlockIterator {
                         })
                         .collect()
                 });
+                eprintln!("   ✅ Completed parallel read of batch {} ({} files processed)", batch_num + 1, batch.len());
                 
                 // Write all blocks from batch sequentially to temp file
                 // Track blocks in current chunk (resets after each chunk)
@@ -1481,14 +1614,24 @@ impl BlockIterator {
                                     ]);
                                     // Very lenient check for collection - only reject obviously invalid values
                                     // Full validation happens during chunking
+                                    // CRITICAL: Only skip if version is clearly garbage (XOR decryption failure)
+                                    // Don't skip blocks with high but valid versions (BIP9 uses 0x20000000+)
                                     if version > 0x7fffffff {
                                         // Version > 2^31 is definitely invalid (would be negative if signed)
-                                        eprintln!("   ⚠️  ERROR: Block {} has obviously invalid version: {} (>{}) - SKIPPING", 
+                                        // This usually indicates XOR decryption failed or we read from wrong position
+                                        eprintln!("   ⚠️  ERROR: Block {} has obviously invalid version: {} (>{}) - likely XOR decryption failure, SKIPPING", 
                                                  read_count, version, 0x7fffffff);
-                                        continue; // Skip invalid block
+                                        continue; // Skip invalid block (XOR decryption failed)
                                     }
                                     // Otherwise accept it - validation will catch real issues during chunking
+                                    // High versions (0x20000000+) are valid for BIP9 activation
                                 }
+                                
+                                // CRITICAL FIX: Don't skip blocks during collection!
+                                // Blocks are stored OUT OF ORDER in Start9 files, so we can't know
+                                // which block we're reading until we parse it. We need to collect
+                                // ALL blocks, then order them later. The chunking logic will handle
+                                // skipping blocks that are already in chunks.
                                 
                                 // Write block to temp file: [len: u32][data...]
                                 let block_len = block_data.len() as u32;
@@ -1518,7 +1661,22 @@ impl BlockIterator {
                                 
                                 // INCREMENTAL CHUNKING: When we have enough blocks for a chunk, compress and move it
                                 if read_count > 0 && read_count % INCREMENTAL_CHUNK_SIZE == 0 {
+                                    // CRITICAL FIX: Calculate chunk number correctly based on total blocks collected
+                                    // chunk_num = (read_count / INCREMENTAL_CHUNK_SIZE) - 1
+                                    // For read_count = 125000: chunk_num = (125000 / 125000) - 1 = 0
+                                    // For read_count = 250000: chunk_num = (250000 / 125000) - 1 = 1
                                     let chunk_num = (read_count / INCREMENTAL_CHUNK_SIZE) - 1;
+                                    
+                                    // CRITICAL FIX: Check if chunk already exists to prevent overwriting
+                                    let chunk_file = chunks_dir.join(format!("chunk_{}.bin.zst", chunk_num));
+                                    if chunk_file.exists() {
+                                        eprintln!("   ⚠️  WARNING: chunk_{}.bin.zst already exists - SKIPPING to avoid overwrite", chunk_num);
+                                        eprintln!("   📊 This suggests collection is restarting - continuing to next chunk...");
+                                        // Don't create the chunk, just continue collecting
+                                        // The temp file will accumulate blocks for the next chunk
+                                        blocks_in_current_chunk = 0;
+                                        continue;
+                                    }
                                     
                                     eprintln!("   📦 Collected {} blocks - creating chunk {}...", 
                                              read_count, chunk_num);
@@ -1761,25 +1919,68 @@ impl BlockIterator {
             drop(temp_writer);
             
             // Handle final chunk if there are remaining blocks
-            let final_chunk_blocks = read_count % INCREMENTAL_CHUNK_SIZE;
-            if final_chunk_blocks > 0 {
-                let final_chunk_num = read_count / INCREMENTAL_CHUNK_SIZE;
-                eprintln!("   📦 Creating final chunk {} with {} blocks...", final_chunk_num, final_chunk_blocks);
-                
-                BlockFileReader::create_and_move_chunk_from_file(
-                    &temp_file,
-                    final_chunk_num,
-                    final_chunk_blocks
-                )?;
-                
-                // Clear temp file
-                std::fs::remove_file(&temp_file)?;
-                
-                eprintln!("   ✅ Final chunk {} complete and moved to secondary drive", final_chunk_num);
-            } else if read_count > 0 && read_count % INCREMENTAL_CHUNK_SIZE == 0 {
-                // Last chunk was exactly 125k blocks, already handled
-                // Just clean up temp file
-                std::fs::remove_file(&temp_file)?;
+            // CRITICAL FIX: Count actual blocks in temp file, not read_count
+            // (read_count includes skipped blocks, temp file only has written blocks)
+            if temp_file.exists() {
+                let temp_size = std::fs::metadata(&temp_file).map(|m| m.len()).unwrap_or(0);
+                if temp_size > 0 {
+                    // Count actual blocks in temp file
+                    use std::io::{Read, Seek, SeekFrom};
+                    let mut temp_reader = std::fs::File::open(&temp_file)?;
+                    temp_reader.seek(SeekFrom::Start(0))?;
+                    let mut blocks_in_temp = 0;
+                    let mut offset = 0u64;
+                    
+                    loop {
+                        let mut len_buf = [0u8; 4];
+                        match temp_reader.read_exact(&mut len_buf) {
+                            Ok(_) => {},
+                            Err(_) => break, // End of file
+                        }
+                        let block_len = u32::from_le_bytes(len_buf) as u64;
+                        if block_len < 80 || block_len > 32 * 1024 * 1024 {
+                            break; // Invalid size, stop counting
+                        }
+                        offset += 4 + block_len;
+                        if offset > temp_size {
+                            break; // Past end of file
+                        }
+                        temp_reader.seek(SeekFrom::Start(offset))?;
+                        blocks_in_temp += 1;
+                    }
+                    
+                    if blocks_in_temp > 0 {
+                        // Calculate chunk number based on starting_block_count + blocks_in_temp
+                        let total_blocks_collected = starting_block_count as u64 + blocks_in_temp as u64;
+                        let final_chunk_num = total_blocks_collected / INCREMENTAL_CHUNK_SIZE as u64;
+                        let final_chunk_blocks = blocks_in_temp;
+                        
+                        // CRITICAL FIX: Check if chunk already exists before trying to create it
+                        let chunk_file = chunks_dir.join(format!("chunk_{}.bin.zst", final_chunk_num));
+                        if chunk_file.exists() {
+                            eprintln!("   ⚠️  Final chunk {} already exists - SKIPPING to prevent overwrite", final_chunk_num);
+                            eprintln!("   📊 Temp file has {} blocks but chunk {} already exists - preserving temp file for resume", blocks_in_temp, final_chunk_num);
+                            // Don't delete temp file - preserve it for resume
+                        } else {
+                            eprintln!("   📦 Creating final chunk {} with {} blocks from temp file...", final_chunk_num, final_chunk_blocks);
+                            
+                            BlockFileReader::create_and_move_chunk_from_file(
+                                &temp_file,
+                                final_chunk_num as usize,
+                                final_chunk_blocks as usize
+                            )?;
+                            
+                            // Clear temp file only after successful chunk creation
+                            std::fs::remove_file(&temp_file)?;
+                            
+                            eprintln!("   ✅ Final chunk {} complete and moved to secondary drive", final_chunk_num);
+                        }
+                    } else {
+                        eprintln!("   ⚠️  Temp file exists but contains no valid blocks - preserving for resume");
+                    }
+                } else {
+                    eprintln!("   ⚠️  Temp file is empty - no final chunk to create");
+                }
             }
             
             // Final integrity check: verify last 100 blocks (only if temp file still exists)
@@ -1840,9 +2041,26 @@ impl BlockIterator {
                      read_count, total_time.as_secs_f64() / 60.0);
             
             // Now read blocks back from temp file and build hash map
+            // CRITICAL FIX: Check if temp file exists before trying to read it
+            // In collection-only mode with incremental chunking, the temp file may be truncated/deleted after chunking
+            if !temp_file.exists() {
+                println!("   ℹ️  Temp file no longer exists (likely truncated after chunking) - skipping hash map build");
+                println!("   ✅ Collection complete! Blocks have been chunked and moved to secondary drive.");
+                // Return empty iterator - collection-only mode doesn't need hash map
+                return Ok(BlockIterator::new(reader, start_height, max_blocks)?);
+            }
+            
             println!("   📖 Reading blocks from temp file to build hash map...");
             // OPTIMIZATION: Use larger buffer for temp file reading (faster sequential reads)
-            let mut temp_reader = std::io::BufReader::with_capacity(IO_BUFFER_SIZE, std::fs::File::open(&temp_file)?);
+            let mut temp_reader = match std::fs::File::open(&temp_file) {
+                Ok(f) => std::io::BufReader::with_capacity(IO_BUFFER_SIZE, f),
+                Err(e) => {
+                    eprintln!("   ⚠️  Warning: Could not open temp file for hash map building: {} - skipping", e);
+                    println!("   ✅ Collection complete! Blocks have been chunked and moved to secondary drive.");
+                    // Return empty iterator - collection-only mode doesn't need hash map
+                    return Ok(BlockIterator::new(reader, start_height, max_blocks)?);
+                }
+            };
             use std::io::Read;
             
             // FIX OOM: Process blocks in chunks instead of loading all into memory
@@ -2142,40 +2360,190 @@ impl BlockIterator {
         
         // CRITICAL FIX: Track file position BEFORE reading magic
         // This is needed for correct XOR key rotation in Start9 files
-        let magic_start_pos = file.stream_position()?;
+        // Use a loop to handle block boundary detection and retries
+        let mut magic_start_pos = file.stream_position()?;
+        let mut retry_count = 0;
+        const MAX_RETRIES: usize = 1; // Only retry once if we find a block boundary
         
-        match file.read_exact(&mut magic_buf) {
-            Ok(_) => {
-                // Check if file is XOR encrypted (Start9 format)
-                // Encrypted magic is 0x7d9c5d74
-                is_xor_encrypted = magic_buf == ENCRYPTED_MAGIC;
-                
-                if is_xor_encrypted {
-                    // Save original encrypted magic before decrypting
-                    encrypted_magic_bytes = magic_buf;
-                    // CRITICAL FIX: Decrypt magic using correct key based on FILE OFFSET
-                    // Magic is at file offset magic_start_pos, so use key based on that
-                    let use_key1 = (magic_start_pos / 4) % 2 == 0;
-                    let key = if use_key1 { &XOR_KEY1 } else { &XOR_KEY2 };
-                    for i in 0..4 {
-                        let byte_offset = magic_start_pos + i as u64;
-                        magic_buf[i] ^= key[(byte_offset % 4) as usize];
+        loop {
+            if retry_count > MAX_RETRIES {
+                return Ok(None);
+            }
+            
+            match file.read_exact(&mut magic_buf) {
+                Ok(_) => {
+                    // Check if file is XOR encrypted (Start9 format)
+                    // Encrypted magic is 0x7d9c5d74
+                    is_xor_encrypted = magic_buf == ENCRYPTED_MAGIC;
+                    
+                    if is_xor_encrypted {
+                        // Save original encrypted magic before decrypting
+                        encrypted_magic_bytes = magic_buf;
+                        // CRITICAL FIX: Decrypt magic using correct key based on FILE OFFSET
+                        // Magic is at file offset magic_start_pos, all 4 bytes in same chunk - use u32 XOR
+                        let use_key1 = (magic_start_pos / 4) % 2 == 0;
+                        let key1_u32 = u32::from_le_bytes(XOR_KEY1);
+                        let key2_u32 = u32::from_le_bytes(XOR_KEY2);
+                        let key_u32 = if use_key1 { key1_u32 } else { key2_u32 };
+                        
+                        // Decrypt entire 4-byte magic at once using u32 XOR
+                        let magic_u32 = u32::from_le_bytes(magic_buf);
+                        let decrypted_magic_u32 = magic_u32 ^ key_u32;
+                        magic_buf = decrypted_magic_u32.to_le_bytes();
                     }
-                }
-                
-                if magic_buf != *magic {
+                    
+                    if magic_buf == *magic {
+                        // Found valid block boundary - break out of retry loop
+                        // CRITICAL: Verify file position is correct after reading magic
+                        // After reading 4 bytes, position should be magic_start_pos + 4
+                        let verify_pos = file.stream_position()?;
+                        let expected_pos = magic_start_pos + 4;
+                        if verify_pos != expected_pos {
+                            eprintln!("⚠️  WARNING: After reading magic, position is {} but expected {} - seeking to correct", verify_pos, expected_pos);
+                            file.seek(std::io::SeekFrom::Start(expected_pos))?;
+                            // Verify seek worked
+                            let verify_pos2 = file.stream_position()?;
+                            if verify_pos2 != expected_pos {
+                                eprintln!("⚠️  CRITICAL: Cannot seek to position {} (got {}) - aborting block read", expected_pos, verify_pos2);
+                                return Ok(None);
+                            }
+                        }
+                        break;
+                    }
+                    
+                    // Not a block start - we're not at a block boundary
+                    // CRITICAL FIX: If we're in an encrypted file, try to find the next block boundary
+                    if is_xor_encrypted {
+                        // Seek back to where we started reading magic
+                        file.seek(std::io::SeekFrom::Start(magic_start_pos))?;
+                        
+                        // Try to find the next block boundary using pattern search
+                        let mut search_pos = magic_start_pos;
+                        let mut found = false;
+                        let key1_u32 = u32::from_le_bytes(XOR_KEY1);
+                        let key2_u32 = u32::from_le_bytes(XOR_KEY2);
+                        
+                        // Search for next block (read in chunks)
+                        loop {
+                            let bytes_read = match file.read(&mut self.search_buffer) {
+                                Ok(0) => break, // EOF
+                                Ok(n) => n,
+                                Err(_) => break,
+                            };
+                            
+                            // Search for encrypted magic pattern
+                            let first_byte = ENCRYPTED_MAGIC[0];
+                            for i in memchr_iter(first_byte, &self.search_buffer[..bytes_read]) {
+                                if i + 7 >= bytes_read {
+                                    continue;
+                                }
+                                
+                                if self.search_buffer[i+1] == ENCRYPTED_MAGIC[1]
+                                    && self.search_buffer[i+2] == ENCRYPTED_MAGIC[2]
+                                    && self.search_buffer[i+3] == ENCRYPTED_MAGIC[3] {
+                                    
+                                    let file_offset = search_pos + i as u64;
+                                    
+                                    // Verify magic decrypts correctly
+                                    let mut test_magic = [0u8; 4];
+                                    test_magic.copy_from_slice(&self.search_buffer[i..i+4]);
+                                    let magic_u32 = u32::from_le_bytes(test_magic);
+                                    let use_key1 = (file_offset / 4) % 2 == 0;
+                                    let key_u32 = if use_key1 { key1_u32 } else { key2_u32 };
+                                    let decrypted_magic_u32 = magic_u32 ^ key_u32;
+                                    test_magic = decrypted_magic_u32.to_le_bytes();
+                                    
+                                    if test_magic == *magic {
+                                        // Also verify size field is reasonable
+                                        let mut test_size = [0u8; 4];
+                                        test_size.copy_from_slice(&self.search_buffer[i+4..i+8]);
+                                        let size_offset = file_offset + 4;
+                                        let use_key1_size = (size_offset / 4) % 2 == 0;
+                                        let key_u32_size = if use_key1_size { key1_u32 } else { key2_u32 };
+                                        let size_u32 = u32::from_le_bytes(test_size);
+                                        let decrypted_size_u32 = size_u32 ^ key_u32_size;
+                                        let size_hint_test = decrypted_size_u32 as usize;
+                                        
+                                        if size_hint_test >= 80 && size_hint_test <= 4 * 1024 * 1024 {
+                                            // Found valid block boundary - seek to it and retry
+                                            file.seek(std::io::SeekFrom::Start(file_offset))?;
+                                            magic_start_pos = file_offset;
+                                            found = true;
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            if found {
+                                break;
+                            }
+                            
+                            search_pos += bytes_read as u64;
+                            if bytes_read < self.search_buffer.len() {
+                                break; // EOF
+                            }
+                        }
+                        
+                        if found {
+                            // Retry reading from the correct position
+                            retry_count += 1;
+                            continue;
+                        }
+                    }
+                    
                     // Not a block start, might be end of file or corrupted
                     return Ok(None);
                 }
-            }
-            Err(_) => {
-                // End of file
-                return Ok(None);
+                Err(_) => {
+                    // End of file
+                    return Ok(None);
+                }
             }
         }
         
-        // Read size field (4 bytes at file offset 4-7)
+        // CRITICAL FIX: Verify file position is correct before reading size field
+        // After reading magic (4 bytes), position should be magic_start_pos + 4
+        if is_xor_encrypted {
+            let current_pos_after_magic = file.stream_position()?;
+            let expected_pos = magic_start_pos + 4;
+            if current_pos_after_magic != expected_pos {
+                eprintln!("⚠️  File position mismatch before reading size: expected {}, got {} - seeking to correct position", expected_pos, current_pos_after_magic);
+                file.seek(std::io::SeekFrom::Start(expected_pos))?;
+            }
+        }
+        
+        // CRITICAL FIX: Use magic_start_pos as block_start_offset for XOR decryption
+        // This is the file offset where the block's magic bytes start
+        let block_start_offset = if is_xor_encrypted {
+            Some(magic_start_pos)
+        } else {
+            None
+        };
+        
+        // Read size field (4 bytes at file offset magic_start_pos + 4)
+        // CRITICAL: Ensure we're at the correct position before reading
         let mut size_buf = [0u8; 4];
+        if is_xor_encrypted {
+            // CRITICAL FIX: Always seek to the exact position before reading size field
+            // This ensures we're reading from the correct position, even if BufReader
+            // buffer is out of sync
+            let expected_size_pos = magic_start_pos + 4;
+            
+            // Get current position
+            let current_pos = file.stream_position()?;
+            if current_pos != expected_size_pos {
+                // eprintln!("🔍 DEBUG: Seeking to size field position: current={}, expected={}", current_pos, expected_size_pos);
+                file.seek(std::io::SeekFrom::Start(expected_size_pos))?;
+                // Verify position is correct
+                let verify_pos = file.stream_position()?;
+                if verify_pos != expected_size_pos {
+                    eprintln!("⚠️  CRITICAL ERROR: Cannot seek to size field position {} (got {}) - file may be corrupted", expected_size_pos, verify_pos);
+                    return Ok(None);
+                }
+            }
+        }
+        
         match file.read_exact(&mut size_buf) {
             Ok(_) => {},
             Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
@@ -2188,33 +2556,50 @@ impl BlockIterator {
             }
         }
         
-        // CRITICAL FIX: Use magic_start_pos as block_start_offset for XOR decryption
-        // This is the file offset where the block's magic bytes start
-        let block_start_offset = if is_xor_encrypted {
-            Some(magic_start_pos)
-        } else {
-            None
-        };
-        
         // For Start9 encrypted files, decrypt the size field and use it as a HINT
         // Then verify the next block's magic is at the expected position
         let block_data = if is_xor_encrypted {
             // CRITICAL FIX: Decrypt size field using correct key based on FILE OFFSET
             // Size field is at file offset magic_start_pos + 4
+            // All 4 bytes of size field are in the same 4-byte chunk, so use u32 XOR
             let size_offset = magic_start_pos + 4;
             let use_key1 = (size_offset / 4) % 2 == 0;
-            let key = if use_key1 { &XOR_KEY1 } else { &XOR_KEY2 };
+            let key1_u32 = u32::from_le_bytes(XOR_KEY1);
+            let key2_u32 = u32::from_le_bytes(XOR_KEY2);
+            let key_u32 = if use_key1 { key1_u32 } else { key2_u32 };
             
-            // Decrypt each byte of size field with correct key byte
-            let mut decrypted_size_bytes = [0u8; 4];
-            for i in 0..4 {
-                let byte_offset = size_offset + i as u64;
-                decrypted_size_bytes[i] = size_buf[i] ^ key[(byte_offset % 4) as usize];
-            }
-            let decrypted_size_u32 = u32::from_le_bytes(decrypted_size_bytes);
+            // Decrypt entire 4-byte size field at once using u32 XOR
+            let size_u32 = u32::from_le_bytes(size_buf);
+            let decrypted_size_u32 = size_u32 ^ key_u32;
             let size_hint = decrypted_size_u32 as usize;
             
+            // DEBUG: Always log size field decryption for debugging (disabled to reduce log spam)
+            // eprintln!("🔍 DEBUG: Size field at offset {}: encrypted={:02x}{:02x}{:02x}{:02x} (0x{:08x}), key={}, decrypted={} (0x{:08x})", 
+            //          size_offset,
+            //          size_buf[0], size_buf[1], size_buf[2], size_buf[3],
+            //          size_u32,
+            //          if use_key1 { "KEY1" } else { "KEY2" },
+            //          size_hint, decrypted_size_u32);
+            
+            // Also verify the actual file position matches what we expect
+            let actual_pos = file.stream_position()?;
+            let expected_pos_after_size = magic_start_pos + 8;
+            if actual_pos != expected_pos_after_size {
+                eprintln!("⚠️  WARNING: After reading size, position is {} but expected {}", actual_pos, expected_pos_after_size);
+            }
+            
             // Validate size hint is reasonable
+            // DEBUG: Log ALL size field decryptions, not just invalid ones (disabled to reduce log spam)
+            if size_hint > 4 * 1024 * 1024 {
+                // Only log invalid sizes, not every decryption
+                // eprintln!("🔍 DEBUG: Size field at offset {}: encrypted={:02x}{:02x}{:02x}{:02x} (0x{:08x}), key={}, decrypted={} (0x{:08x}) - INVALID", 
+                //          size_offset,
+                //          size_buf[0], size_buf[1], size_buf[2], size_buf[3],
+                //          size_u32,
+                //          if use_key1 { "KEY1" } else { "KEY2" },
+                //          size_hint, decrypted_size_u32);
+            }
+            
             if size_hint >= 80 && size_hint <= 4 * 1024 * 1024 {
                 // OPTIMIZATION: Check file size before attempting to read the block
                 // This avoids expensive "failed to fill whole buffer" errors
@@ -2388,8 +2773,11 @@ impl BlockIterator {
                 
                 // Use memchr for faster searching
                 let first_byte = ENCRYPTED_MAGIC[0];
+                let key1_u32 = u32::from_le_bytes(XOR_KEY1);
+                let key2_u32 = u32::from_le_bytes(XOR_KEY2);
+                
                 for i in memchr_iter(first_byte, &self.search_buffer[..bytes_read]) {
-                    if i + 3 >= bytes_read {
+                    if i + 7 >= bytes_read {
                         continue;
                     }
                     
@@ -2398,23 +2786,32 @@ impl BlockIterator {
                         && self.search_buffer[i+3] == ENCRYPTED_MAGIC[3] {
                         
                         let file_offset = start_file_pos + 8 + i as u64;
+                        
+                        // CRITICAL FIX: Verify magic decrypts correctly using u32 XOR
                         let mut test_magic = [0u8; 4];
                         test_magic.copy_from_slice(&self.search_buffer[i..i+4]);
-                        
-                        for j in 0usize..4 {
-                            let byte_offset = file_offset + j as u64;
-                            let key = if (byte_offset / 4) % 2 == 0 {
-                                &XOR_KEY1
-                            } else {
-                                &XOR_KEY2
-                            };
-                            let key_index = (byte_offset % 4) as usize;
-                            test_magic[j] ^= key[key_index];
-                        }
+                        let magic_u32 = u32::from_le_bytes(test_magic);
+                        let use_key1 = (file_offset / 4) % 2 == 0;
+                        let key_u32 = if use_key1 { key1_u32 } else { key2_u32 };
+                        let decrypted_magic_u32 = magic_u32 ^ key_u32;
+                        test_magic = decrypted_magic_u32.to_le_bytes();
                         
                         if test_magic == *magic {
-                            found_at = Some(i);
-                            break;
+                            // CRITICAL FIX: Also verify size field is reasonable
+                            let mut test_size = [0u8; 4];
+                            test_size.copy_from_slice(&self.search_buffer[i+4..i+8]);
+                            let size_offset = file_offset + 4;
+                            let use_key1_size = (size_offset / 4) % 2 == 0;
+                            let key_u32_size = if use_key1_size { key1_u32 } else { key2_u32 };
+                            let size_u32 = u32::from_le_bytes(test_size);
+                            let decrypted_size_u32 = size_u32 ^ key_u32_size;
+                            let size_hint_test = decrypted_size_u32 as usize;
+                            
+                            // Only accept if size is reasonable (prevents false positives)
+                            if size_hint_test >= 80 && size_hint_test <= 4 * 1024 * 1024 {
+                                found_at = Some(i);
+                                break;
+                            }
                         }
                     }
                 }
@@ -2425,7 +2822,12 @@ impl BlockIterator {
                     file.seek(std::io::SeekFrom::Start(next_block_pos))?;
                     data
                 } else {
-                    self.search_buffer[..bytes_read].to_vec()
+                    // CRITICAL FIX: If pattern search fails, don't return garbage data
+                    // This would cause valid blocks to be skipped as "invalid"
+                    // Instead, return None to move to next file - the block will be read correctly
+                    // when we restart from the correct position
+                    eprintln!("⚠️  Pattern search failed to find next block - moving to next file to avoid skipping valid blocks");
+                    return Ok(None);
                 }
             }
         } else {
@@ -2498,7 +2900,9 @@ impl BlockIterator {
             // If it's too large, we might have included padding or the next block
             if decrypted.len() > 32 * 1024 * 1024 {
                 // Block is unreasonably large - likely read too much
-                anyhow::bail!("Decrypted block size {} bytes is too large (max 32MB)", decrypted.len());
+                // CRITICAL FIX: Return None instead of bailing - skip this corrupted block
+                eprintln!("⚠️  Skipping corrupted block (size {} bytes exceeds 32MB limit) - continuing search", decrypted.len());
+                return Ok(None);
             }
             
             // Verify block header is valid (basic sanity check)
@@ -2506,8 +2910,11 @@ impl BlockIterator {
                 // Check version is reasonable (Bitcoin blocks use version 1-4 typically, but can be higher)
                 let version = u32::from_le_bytes([decrypted[0], decrypted[1], decrypted[2], decrypted[3]]);
                 if version == 0 || version > 0x7fffffff {
-                    // Invalid version - likely read too much data
-                    anyhow::bail!("Invalid block version {} - likely read too much data (block size: {} bytes)", version, decrypted.len());
+                    // Invalid version - likely read too much data or corrupted block
+                    // CRITICAL FIX: Return None instead of bailing - this allows the iterator
+                    // to skip this corrupted block and continue searching for the next valid block
+                    eprintln!("⚠️  Skipping corrupted block (invalid version {} at size {} bytes) - continuing search", version, decrypted.len());
+                    return Ok(None);
                 }
             }
             
@@ -2762,7 +3169,16 @@ impl BlockIterator {
             // Try to open the file, skip if permission denied
             match File::open(&path_to_use) {
                 Ok(file) => {
-                    self.current_file = Some(BufReader::with_capacity(64 * 1024 * 1024, file)); // 64MB buffer (optimized for large files)
+                    use std::io::Seek;
+                    let mut buf_reader = BufReader::with_capacity(64 * 1024 * 1024, file); // 64MB buffer (optimized for large files)
+                    // CRITICAL: Ensure file starts at position 0 for correct XOR decryption
+                    buf_reader.seek(std::io::SeekFrom::Start(0))?;
+                    let verify_pos = buf_reader.stream_position()?;
+                    if verify_pos != 0 {
+                        eprintln!("⚠️  WARNING: File {} opened at position {} instead of 0 - seeking to 0", self.current_file_idx, verify_pos);
+                        buf_reader.seek(std::io::SeekFrom::Start(0))?;
+                    }
+                    self.current_file = Some(buf_reader);
                     self.current_reading_file_idx = Some(self.current_file_idx); // Track which file we're reading from
                     return Ok(true);
                 }

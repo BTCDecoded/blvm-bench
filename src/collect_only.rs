@@ -9,7 +9,7 @@ use std::path::PathBuf;
 /// Blocks are validated during chunking or at intervals
 pub fn collect_blocks_only(
     data_dir: Option<PathBuf>,
-    cache_dir: Option<PathBuf>,
+    _cache_dir: Option<PathBuf>,
 ) -> Result<()> {
     println!("🚀 Starting collection-only mode (fast, no validation during collection)");
     println!("   Validation will occur during chunking");
