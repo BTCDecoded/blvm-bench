@@ -98,3 +98,66 @@ async fn collect_blocks_only() -> Result<()> {
     
     Ok(())
 }
+
+/// Create final chunk from remaining temp file blocks
+#[tokio::test]
+#[cfg(feature = "differential")]
+async fn create_final_chunk() -> Result<()> {
+    use std::path::Path;
+    
+    let temp_file = Path::new("/home/acolyte/.cache/blvm-bench/blvm-bench-blocks-temp.bin");
+    let metadata_file = temp_file.with_extension("bin.meta");
+    
+    if !temp_file.exists() {
+        println!("❌ Temp file doesn't exist");
+        return Ok(());
+    }
+    
+    if !metadata_file.exists() {
+        println!("❌ Metadata file doesn't exist");
+        return Ok(());
+    }
+    
+    // Read block count from metadata
+    let bytes = std::fs::read(&metadata_file)?;
+    if bytes.len() < 8 {
+        println!("❌ Metadata file too small");
+        return Ok(());
+    }
+    
+    let count = u64::from_le_bytes([
+        bytes[0], bytes[1], bytes[2], bytes[3],
+        bytes[4], bytes[5], bytes[6], bytes[7]
+    ]);
+    
+    println!("📊 Temp file has {} blocks", count);
+    
+    if count == 0 {
+        println!("⚠️  No blocks in temp file");
+        return Ok(());
+    }
+    
+    // Check if chunk_9 already exists
+    let chunk_file = Path::new("/run/media/acolyte/Extra/blockchain/chunk_9.bin.zst");
+    if chunk_file.exists() {
+        println!("⚠️  chunk_9 already exists - skipping");
+        return Ok(());
+    }
+    
+    // Create chunk_9 with remaining blocks
+    println!("📦 Creating chunk_9 with {} blocks...", count);
+    BlockFileReader::create_and_move_chunk_from_file(
+        temp_file,
+        9,
+        count as usize
+    )?;
+    
+    println!("✅ Created chunk_9 with {} blocks", count);
+    
+    // Remove temp file
+    std::fs::remove_file(temp_file)?;
+    std::fs::remove_file(&metadata_file)?;
+    println!("✅ Cleaned up temp file");
+    
+    Ok(())
+}

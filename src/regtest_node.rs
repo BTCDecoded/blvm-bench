@@ -265,6 +265,28 @@ impl RegtestNode {
     pub fn rpc_port(&self) -> u16 {
         self.config.rpc_port
     }
+
+    /// Get network type (always Regtest for regtest nodes)
+    pub async fn get_network(&self) -> Result<crate::core_rpc_client::BitcoinNetwork> {
+        // For regtest nodes, we can detect by checking the RPC
+        // But for simplicity, regtest nodes are always Regtest network
+        Ok(crate::core_rpc_client::BitcoinNetwork::Regtest)
+    }
+
+    /// Find or start a regtest node (convenience method)
+    pub async fn find_or_start(
+        binaries: CoreBinaries,
+        _preferred_network: Option<crate::core_rpc_client::BitcoinNetwork>,
+        port_manager: Option<Arc<PortManager>>,
+    ) -> Result<Self> {
+        // Use port manager if provided, otherwise use default config
+        if let Some(pm) = port_manager {
+            Self::start_with_port_manager(binaries, pm).await
+        } else {
+            let config = RegtestNodeConfig::default();
+            Self::start(binaries, config, None).await
+        }
+    }
 }
 
 impl Drop for RegtestNode {

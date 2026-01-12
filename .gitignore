@@ -61,3 +61,8 @@ populate-cache-from-start9.sh
 src/start9_rpc_client.rs
 tests/start9_test.rs
 src/ssh_block_reader.rs
+
+# Development notes and analysis docs (not for repo)
+*.md
+.cursorrules
+*.rlib

@@ -7,9 +7,10 @@ use anyhow::{Context, Result};
 use hex;
 use memchr::memchr_iter;
 use rayon::prelude::*;
+use sha2::{Sha256, Digest};
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{BufReader, Read, Seek, SeekFrom};
+use std::io::{BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 /// Bitcoin Core block file format:
@@ -44,14 +45,15 @@ const SEARCH_BUFFER_SIZE: usize = 128 * 1024 * 1024;
 const HASH_MAP_CHUNK_SIZE: usize = 500;
 
 /// Maximum number of threads for parallel file reading
-/// Tuned: 16 threads for local LAN SSHFS (I/O-bound, can use more threads than CPU cores)
-/// For local network mounts, we can saturate network bandwidth with more parallelism
-const MAX_PARALLEL_READ_THREADS: usize = 16;
+/// REDUCED: 8 threads (from 16) to prevent OOM kills - cuts I/O buffer memory in half
+/// 8 threads × 128MB = 1GB buffers (vs 2GB with 16 threads)
+/// Still provides good parallelism for I/O-bound SSHFS operations
+const MAX_PARALLEL_READ_THREADS: usize = 8;
 
 /// Batch size for parallel file reading (files processed in parallel per batch)
-/// Tuned: 24 files per batch for local LAN SSHFS (network I/O bound, not CPU bound)
-/// Larger batches better utilize network bandwidth on local LAN
-const PARALLEL_FILE_BATCH_SIZE: usize = 24;
+/// REDUCED: 12 files per batch (from 24) to reduce concurrent operations and memory pressure
+/// Still provides good parallelism while reducing peak memory usage
+const PARALLEL_FILE_BATCH_SIZE: usize = 12;
 
 /// Number of files to pre-copy ahead of current reading position
 /// Tuned: 200 files ahead to ensure local cache is ready before reading
@@ -60,8 +62,9 @@ const PRE_COPY_LOOKAHEAD: usize = 200;
 
 /// Number of worker threads for background file copying
 /// Used when copying files from remote mounts (SSHFS, etc.)
-/// Tuned: 12 threads (match CPU thread count for maximum parallelism)
-const FILE_COPY_WORKER_THREADS: usize = 12;
+/// REDUCED: 8 threads (from 12) to reduce background memory usage
+/// Still provides good parallelism for file copying operations
+const FILE_COPY_WORKER_THREADS: usize = 8;
 
 /// Progress reporting interval (number of blocks)
 /// How often to print progress updates during long operations
@@ -84,7 +87,9 @@ const TEMP_FILE_INTEGRITY_CHECK_INTERVAL: usize = 10000;
 const INCREMENTAL_CHUNK_SIZE: usize = 125000;
 
 /// Secondary drive path for incremental chunking
+/// FALLBACK: If secondary drive is not mounted, use local cache directory
 const SECONDARY_CHUNK_DIR: &str = "/run/media/acolyte/Extra/blockchain";
+const FALLBACK_CHUNK_DIR: &str = ".cache/blvm-bench/chunks";
 
 /// Maximum block size for validation (Bitcoin max is ~4MB, but allow up to 10MB for safety)
 const MAX_VALID_BLOCK_SIZE: usize = 10 * 1024 * 1024;
@@ -95,7 +100,7 @@ const MIN_VALID_BLOCK_SIZE: usize = 88;
 /// Create a chunk from temp file and move to secondary drive
 /// Temp file contains exactly chunk_size blocks
 impl BlockFileReader {
-    fn create_and_move_chunk_from_file(
+    pub fn create_and_move_chunk_from_file(
         temp_file: &std::path::Path,
         chunk_num: usize,
         chunk_size: usize,
@@ -207,6 +212,54 @@ impl BlockFileReader {
                 is_valid = false;
             }
             
+            // OPTIMIZED VALIDATION: Only check suspicious blocks (fast path for 99.9% of blocks)
+            // Check prev_hash first (cheap array check) - only do expensive hash if needed
+            if is_valid && block_data.len() >= 80 {
+                let prev_hash = &block_data[4..36];
+                let is_genesis = prev_hash.iter().all(|&b| b == 0);
+                
+                // Only do expensive hash calculation if prev_hash is suspicious (all zeros)
+                if is_genesis {
+                    use sha2::{Sha256, Digest};
+                    let header = &block_data[0..80];
+                    
+                    // Calculate block hash to verify if this is actually genesis
+                    let first_hash = Sha256::digest(header);
+                    let second_hash = Sha256::digest(&first_hash);
+                    
+                    // Check if hash is all zeros (indicates corruption)
+                    if second_hash.iter().all(|&b| b == 0) {
+                        // Only log first few to avoid I/O overhead
+                        if skipped_blocks < 10 {
+                            eprintln!("   ⚠️  WARNING: Skipping block {} in chunk {} (all-zero hash - corrupted)", current_block_index, chunk_num);
+                        }
+                        skipped_blocks += 1;
+                        current_block_index += 1;
+                        is_valid = false;
+                    } else {
+                        // Fast byte comparison instead of hex::encode (10x faster)
+                        // Genesis hash prefix in big-endian: 000000000019d668
+                        let mut block_hash = [0u8; 32];
+                        block_hash.copy_from_slice(&second_hash);
+                        block_hash.reverse(); // Big-endian for comparison
+                        
+                        // Compare first 8 bytes directly (no string allocation)
+                        const GENESIS_PREFIX: [u8; 8] = [0x00, 0x00, 0x00, 0x00, 0x00, 0x19, 0xd6, 0x68];
+                        if block_hash[..8] != GENESIS_PREFIX {
+                            // Only log first few to avoid I/O overhead
+                            if skipped_blocks < 10 {
+                                eprintln!("   ⚠️  WARNING: Skipping block {} in chunk {} (prev_hash all zeros but not genesis - corrupted)", current_block_index, chunk_num);
+                            }
+                            skipped_blocks += 1;
+                            current_block_index += 1;
+                            is_valid = false;
+                        }
+                    }
+                }
+                // For non-genesis blocks (99.9% of blocks), skip expensive validation
+                // They'll be validated during indexing/validation phase if needed
+            }
+            
             // Only write valid blocks
             if is_valid {
                 // Write to zstd (buffered)
@@ -265,8 +318,30 @@ impl BlockFileReader {
             return Err(anyhow::anyhow!("Copy verification failed: {} != {}", local_size, secondary_size));
         }
         
-        // Delete local copy
-        std::fs::remove_file(&local_chunk)?;
+        // CRITICAL SAFEGUARD: NEVER delete chunks from final destination
+        // But allow deletion of temporary cache copies after successful move
+        // Check if local_chunk is in cache (temporary) vs final destination (protected)
+        let is_cache_copy = local_chunk.parent()
+            .and_then(|p| p.to_str())
+            .map(|s| s.contains(".cache") || s.contains("temp"))
+            .unwrap_or(false);
+        
+        let is_final_destination = local_chunk.parent()
+            .and_then(|p| p.to_str())
+            .map(|s| s.contains("/run/media/acolyte/Extra/blockchain"))
+            .unwrap_or(false);
+        
+        if is_final_destination {
+            // Trying to delete from final destination - BLOCKED
+            eprintln!("   ⚠️  Skipping deletion of {} (protected final chunk)", local_chunk.display());
+        } else if is_cache_copy {
+            // Safe to delete - it's a temporary cache copy that was successfully moved
+            std::fs::remove_file(&local_chunk)?;
+            eprintln!("   ✅ Deleted temporary cache copy: {}", local_chunk.display());
+        } else {
+            // Unknown location - be safe and don't delete
+            eprintln!("   ⚠️  Skipping deletion of {} (unknown location)", local_chunk.display());
+        }
         
         eprintln!("   ✅ Chunk {} moved to secondary drive ({} bytes)", chunk_num, secondary_size);
         
@@ -539,6 +614,8 @@ pub struct BlockIterator {
     // For Start9: ordered blocks (read all, then chain by prev hash)
     ordered_blocks: Option<Vec<Vec<u8>>>,
     ordered_index: usize,
+    // For chunked cache: streaming iterator (avoids loading all blocks into memory)
+    chunked_iterator: Option<crate::chunked_cache::ChunkedBlockIterator>,
     // Reusable search buffer to avoid allocations
     search_buffer: Vec<u8>,
     // Thread pool for file copying (limit concurrent copies)
@@ -550,6 +627,11 @@ pub struct BlockIterator {
     failed_files: std::collections::HashSet<usize>,
     // Track which file index we're currently reading from (for error tracking)
     current_reading_file_idx: Option<usize>,
+    // CRITICAL FIX: Temp file writer for sequential reading mode (when ordered_blocks = None)
+    // This allows the iterator to write blocks to temp file and create chunks incrementally
+    temp_writer: Option<std::io::BufWriter<std::fs::File>>,
+    temp_file_path: Option<std::path::PathBuf>,
+    blocks_written_to_temp: u64, // Track blocks written to temp file for chunking
 }
 
 impl BlockIterator {
@@ -623,12 +705,18 @@ impl BlockIterator {
             blocks_read: 0,
             ordered_blocks: None,
             ordered_index: 0,
+            chunked_iterator: None,
             search_buffer: vec![0u8; SEARCH_BUFFER_SIZE],
             copy_sender: None,
             last_copy_start_idx: 0,
             failed_files: std::collections::HashSet::new(), // Track files that failed to avoid retries
             current_reading_file_idx: None, // Track which file we're reading from
+            temp_writer: None, // Will be initialized if needed for sequential reading
+            temp_file_path: None,
+            blocks_written_to_temp: 0,
         };
+        
+        // Set chunked_iterator if available (will be set in new_ordered)
         
         // Set up thread pool for file copying (limit to 10 concurrent copies)
         if iter.reader.local_cache_dir.is_some() {
@@ -683,6 +771,89 @@ impl BlockIterator {
         start_height: Option<u64>,
         max_blocks: Option<usize>,
     ) -> Result<Self> {
+        // CRITICAL OPTIMIZATION: Check for chunks FIRST before reading any files!
+        // BUT: Only skip file reading if chunks are COMPLETE (check metadata first)
+        println!("   📍 DEBUG: new_ordered: Checking for chunks first...");
+        let chunks_dir = crate::chunked_cache::get_chunks_dir();
+        let mut chunked_iterator: Option<crate::chunked_cache::ChunkedBlockIterator> = None;
+        
+        if let Some(ref chunks_path) = chunks_dir {
+            println!("   📍 DEBUG: Chunks dir: {:?}, exists: {}", chunks_path, chunks_path.exists());
+            if chunks_path.exists() {
+                // CRITICAL FIX: Check metadata to see if collection is complete BEFORE skipping file reading
+                let should_use_chunks = if let Ok(Some(metadata)) = crate::chunked_cache::load_chunk_metadata(chunks_path) {
+                    let expected_blocks = 900000u64; // Approximate full chain size
+                    if metadata.total_blocks >= expected_blocks {
+                        println!("   ✅ Chunks are complete ({} blocks >= {}k) - can use chunks", metadata.total_blocks, expected_blocks / 1000);
+                        true
+                    } else {
+                        println!("   ⚠️  Chunks exist but incomplete ({} blocks < {}k) - continuing file reading", metadata.total_blocks, expected_blocks / 1000);
+                        false
+                    }
+                } else {
+                    // No metadata or can't read - assume incomplete, continue collection
+                    println!("   ⚠️  Chunks exist but no metadata - continuing file reading to ensure completeness...");
+                    false
+                };
+                
+                if should_use_chunks {
+                    println!("   📍 DEBUG: Chunks dir exists and complete, trying to create ChunkedBlockIterator...");
+                    // Try streaming iterator first (for large ranges)
+                    match crate::chunked_cache::ChunkedBlockIterator::new(chunks_path, start_height, max_blocks) {
+                        Ok(Some(iter)) => {
+                            println!("   ✅ Using streaming chunked cache iterator (skipping file reading entirely)");
+                            println!("   📍 DEBUG: Successfully created chunked iterator, returning early");
+                            chunked_iterator = Some(iter);
+                            // Skip ALL file reading - chunks are already ordered!
+                            return Ok(Self {
+                                reader: BlockFileReader {
+                                    data_dir: reader.data_dir.clone(),
+                                    network: reader.network,
+                                    block_files: reader.block_files.clone(),
+                                    local_cache_dir: reader.local_cache_dir.clone(),
+                                    file_index: reader.file_index.clone(),
+                                },
+                                current_file_idx: 0,
+                                current_file: None,
+                                current_height: start_height.unwrap_or(0),
+                                start_height,
+                                max_blocks,
+                                blocks_read: 0,
+                                ordered_blocks: None, // Use chunked_iterator instead
+                                ordered_index: 0,
+                                chunked_iterator,
+                                search_buffer: vec![0u8; SEARCH_BUFFER_SIZE],
+                                copy_sender: None,
+                                last_copy_start_idx: 0,
+                                failed_files: std::collections::HashSet::new(),
+                                current_reading_file_idx: None,
+                                temp_writer: None,
+                                temp_file_path: None,
+                                blocks_written_to_temp: 0,
+                            });
+                        }
+                        Ok(None) => {
+                            println!("   📍 DEBUG: ChunkedBlockIterator::new returned None (no chunks for this range)");
+                            // Chunked cache doesn't exist for this range, continue with file reading
+                        }
+                        Err(e) => {
+                            eprintln!("   ⚠️  Failed to create chunked cache iterator: {} - falling back to file reading", e);
+                            eprintln!("   📍 DEBUG: Error details: {:?}", e);
+                            // Fallback to file reading
+                        }
+                    }
+                } else {
+                    println!("   📍 DEBUG: Chunks incomplete - will continue with file reading");
+                }
+            } else {
+                println!("   📍 DEBUG: Chunks dir does not exist");
+            }
+        } else {
+            println!("   📍 DEBUG: No chunks dir found");
+        }
+        
+        // No chunks available - proceed with file reading (original logic)
+        println!("   📍 DEBUG: No chunks available, proceeding with file reading logic");
         use sha2::{Digest, Sha256};
         use std::path::PathBuf;
         
@@ -692,21 +863,38 @@ impl BlockIterator {
             .map(|cache| cache.join("blvm-bench").join("start9_ordered_blocks.bin"));
         
         // Check for chunked cache first (new format)
+        // CRITICAL FIX: Use streaming iterator instead of loading all blocks into memory
         let chunks_dir = crate::chunked_cache::get_chunks_dir();
+        let mut chunked_iterator: Option<crate::chunked_cache::ChunkedBlockIterator> = None;
         let mut ordered_blocks: Option<Vec<Vec<u8>>> = None;
         
         if let Some(ref chunks_path) = chunks_dir {
             if chunks_path.exists() {
-                match crate::chunked_cache::load_chunked_cache(chunks_path, start_height, max_blocks) {
-                    Ok(Some(blocks)) => {
-                        println!("   ✅ Loaded {} blocks from chunked cache", blocks.len());
-                        ordered_blocks = Some(blocks);
+                // Try streaming iterator first (for large ranges)
+                match crate::chunked_cache::ChunkedBlockIterator::new(chunks_path, start_height, max_blocks) {
+                    Ok(Some(iter)) => {
+                        println!("   ✅ Using streaming chunked cache iterator (no memory limit)");
+                        chunked_iterator = Some(iter);
+                        // Don't set ordered_blocks - we'll use chunked_iterator in the iterator
                     }
                     Ok(None) => {
                         // Chunked cache doesn't exist, try old format
                     }
                     Err(e) => {
-                        eprintln!("   ⚠️  Failed to load chunked cache: {} - trying old format", e);
+                        eprintln!("   ⚠️  Failed to create chunked cache iterator: {} - trying load_chunked_cache", e);
+                        // Fallback to loading all blocks (only for small ranges)
+                        match crate::chunked_cache::load_chunked_cache(chunks_path, start_height, max_blocks) {
+                            Ok(Some(blocks)) => {
+                                println!("   ✅ Loaded {} blocks from chunked cache", blocks.len());
+                                ordered_blocks = Some(blocks);
+                            }
+                            Ok(None) => {
+                                // Chunked cache doesn't exist, try old format
+                            }
+                            Err(e2) => {
+                                eprintln!("   ⚠️  Failed to load chunked cache: {} - trying old format", e2);
+                            }
+                        }
                     }
                 }
             }
@@ -828,17 +1016,47 @@ impl BlockIterator {
                 existing_chunks.sort();
                 
                 if !existing_chunks.is_empty() {
-                    // Calculate starting block count based on existing chunks
-                    // If we have chunks 0, 1, 2, then we've collected (3 * 125000) = 375,000 blocks
+                    // CRITICAL FIX: Check for missing chunks (gaps in sequence)
+                    // If chunk_0 is missing but chunk_1 exists, we need to recreate chunk_0
+                    let min_chunk = *existing_chunks.iter().min().unwrap();
                     let max_chunk = *existing_chunks.iter().max().unwrap();
-                    starting_block_count = (max_chunk + 1) * INCREMENTAL_CHUNK_SIZE;
+                    
+                    // Check if chunk_0 is missing
+                    if min_chunk > 0 {
+                        println!("   ⚠️  WARNING: Missing chunks detected! Chunks start at {} but chunk_0 is missing", min_chunk);
+                        println!("   🔄 Will recreate missing chunks starting from chunk_0");
+                        starting_block_count = 0; // Start from beginning to recreate missing chunks
+                    } else {
+                        // Check for gaps in the sequence
+                        let mut missing_chunks = Vec::new();
+                        for i in 0..=max_chunk {
+                            if !existing_chunks.contains(&i) {
+                                missing_chunks.push(i);
+                            }
+                        }
+                        
+                        if !missing_chunks.is_empty() {
+                            println!("   ⚠️  WARNING: Missing chunks detected: {:?}", missing_chunks);
+                            println!("   🔄 Will recreate missing chunks");
+                            starting_block_count = missing_chunks[0] * INCREMENTAL_CHUNK_SIZE;
+                        } else {
+                            // No gaps - calculate starting block count based on existing chunks
+                            // If we have chunks 0, 1, 2, then we've collected (3 * 125000) = 375,000 blocks
+                            starting_block_count = (max_chunk + 1) * INCREMENTAL_CHUNK_SIZE;
+                        }
+                    }
                     
                     println!("   📦 Found {} existing chunk(s): {:?}", existing_chunks.len(), existing_chunks);
-                    println!("   📊 Resuming from block {} (after chunk {})", starting_block_count, max_chunk);
-                    println!("   ✅ Will create chunk {} next (blocks {} to {})", 
-                             max_chunk + 1, 
-                             starting_block_count, 
-                             starting_block_count + INCREMENTAL_CHUNK_SIZE - 1);
+                    println!("   📊 Resuming from block {} (will recreate missing chunks)", starting_block_count);
+                    if starting_block_count == 0 {
+                        println!("   ✅ Will create chunk 0 next (blocks 0 to {})", INCREMENTAL_CHUNK_SIZE - 1);
+                    } else {
+                        let next_chunk = starting_block_count / INCREMENTAL_CHUNK_SIZE;
+                        println!("   ✅ Will create chunk {} next (blocks {} to {})", 
+                                 next_chunk, 
+                                 starting_block_count, 
+                                 starting_block_count + INCREMENTAL_CHUNK_SIZE - 1);
+                    }
                 }
             }
             
@@ -1081,14 +1299,23 @@ impl BlockIterator {
                 
                 // CRITICAL FIX: Add timeout to prevent getting stuck on problematic files
                 let file_start_time = Instant::now();
+                let mut last_progress_time = Instant::now();
+                let mut blocks_read_from_file = 0;
                 
                 // Read blocks from file using full pattern searching logic
                 loop {
                     // Check timeout - skip file if it's taking too long
                     if file_start_time.elapsed() > MAX_FILE_PROCESSING_TIME {
-                        eprintln!("⚠️  File {} processing timeout ({}s) - skipping remaining blocks", 
-                                 file_idx, MAX_FILE_PROCESSING_TIME.as_secs());
+                        eprintln!("⚠️  File {} processing timeout ({}s) - skipping remaining blocks (read {} blocks so far)", 
+                                 file_idx, MAX_FILE_PROCESSING_TIME.as_secs(), blocks_read_from_file);
                         break; // Return what we have so far
+                    }
+                    
+                    // Progress reporting every 30 seconds for long-running files
+                    if last_progress_time.elapsed().as_secs() >= 30 {
+                        eprintln!("   🔄 File {} still processing... ({} blocks read, {:.1}s elapsed)", 
+                                 file_idx, blocks_read_from_file, file_start_time.elapsed().as_secs_f64());
+                        last_progress_time = Instant::now();
                     }
                     // CRITICAL FIX: Track file position BEFORE reading magic
                     // This is needed for correct XOR key rotation in Start9 files
@@ -1424,6 +1651,7 @@ impl BlockIterator {
                     
                     if block_data.len() >= 80 {
                         blocks.push(block_data);
+                        blocks_read_from_file += 1;
                     }
                 }
                 
@@ -1506,13 +1734,11 @@ impl BlockIterator {
                      file_paths.len(), total_batches, batch_size);
             
             for (batch_num, batch) in file_paths.chunks(batch_size).enumerate() {
-                // CRITICAL FIX: Add progress output at start of each batch
-                if batch_num % 10 == 0 || batch_num == 0 {
-                    eprintln!("   📦 Processing batch {}/{} (files {}-{})...", 
-                             batch_num + 1, total_batches, 
-                             processed_files, 
-                             processed_files + batch.len().min(batch_size) - 1);
-                }
+                // CRITICAL FIX: Add progress output at start of EVERY batch (not just every 10th)
+                eprintln!("   📦 Processing batch {}/{} (files {}-{})...", 
+                         batch_num + 1, total_batches, 
+                         processed_files, 
+                         processed_files + batch.len().min(batch_size) - 1);
                 // Continue pre-copying ahead as we progress
                 // Keep 200 files ahead of current reading position
                 if let Some(ref cache_dir) = reader.local_cache_dir {
@@ -1558,6 +1784,7 @@ impl BlockIterator {
                 
                 // Read blocks from all files in batch in parallel using custom thread pool
                 // Files should now be in local cache for fast local disk access
+                let batch_start_time = std::time::Instant::now();
                 eprintln!("   🔍 Starting parallel read of {} files in batch {}...", batch.len(), batch_num + 1);
                 let batch_results: Vec<_> = pool.install(|| {
                     batch.par_iter()
@@ -1568,7 +1795,15 @@ impl BlockIterator {
                         })
                         .collect()
                 });
-                eprintln!("   ✅ Completed parallel read of batch {} ({} files processed)", batch_num + 1, batch.len());
+                let batch_duration = batch_start_time.elapsed();
+                eprintln!("   ✅ Completed parallel read of batch {} ({} files processed) in {:.1}s", 
+                         batch_num + 1, batch.len(), batch_duration.as_secs_f64());
+                
+                // CRITICAL FIX: Warn if batch takes too long (might indicate stuck file)
+                if batch_duration.as_secs() > 300 {
+                    eprintln!("   ⚠️  WARNING: Batch {} took {:.1} minutes - some files may be problematic", 
+                             batch_num + 1, batch_duration.as_secs_f64() / 60.0);
+                }
                 
                 // Write all blocks from batch sequentially to temp file
                 // Track blocks in current chunk (resets after each chunk)
@@ -2040,28 +2275,40 @@ impl BlockIterator {
             println!("   ✅ Read {} total blocks from file in {:.1} minutes", 
                      read_count, total_time.as_secs_f64() / 60.0);
             
+            // CRITICAL FIX: After batch reading finishes, if temp file was truncated (chunk created),
+            // we need to continue reading files. But instead of restarting from file 0, we should
+            // continue from where we left off. However, since all files were already processed,
+            // we should just continue with the iterator which will read from files sequentially.
+            // The iterator will start from file 0, but that's OK - it will collect any remaining blocks.
+            // Store the last processed file index so iterator can potentially skip already-processed files
+            let last_processed_file_idx = processed_files;
+            
             // Now read blocks back from temp file and build hash map
             // CRITICAL FIX: Check if temp file exists before trying to read it
-            // In collection-only mode with incremental chunking, the temp file may be truncated/deleted after chunking
+            // In collection-only mode with incremental chunking, the temp file may be truncated after chunking
+            // BUT: This doesn't mean collection is complete - we need to continue reading files
+            // Only stop if we've actually read all files, not just because temp file was truncated
             if !temp_file.exists() {
-                println!("   ℹ️  Temp file no longer exists (likely truncated after chunking) - skipping hash map build");
-                println!("   ✅ Collection complete! Blocks have been chunked and moved to secondary drive.");
-                // Return empty iterator - collection-only mode doesn't need hash map
-                return Ok(BlockIterator::new(reader, start_height, max_blocks)?);
+                println!("   ℹ️  Temp file no longer exists (truncated after chunking) - will continue reading from files");
+                println!("   📍 Last processed file: {} (will continue from there in iterator)", last_processed_file_idx);
+                // DON'T stop - continue reading from files to collect more blocks
+                // The temp file will be recreated as we read more blocks
+                ordered_blocks = None; // Continue reading from files
             }
             
-            println!("   📖 Reading blocks from temp file to build hash map...");
-            // OPTIMIZATION: Use larger buffer for temp file reading (faster sequential reads)
-            let mut temp_reader = match std::fs::File::open(&temp_file) {
-                Ok(f) => std::io::BufReader::with_capacity(IO_BUFFER_SIZE, f),
-                Err(e) => {
-                    eprintln!("   ⚠️  Warning: Could not open temp file for hash map building: {} - skipping", e);
-                    println!("   ✅ Collection complete! Blocks have been chunked and moved to secondary drive.");
-                    // Return empty iterator - collection-only mode doesn't need hash map
-                    return Ok(BlockIterator::new(reader, start_height, max_blocks)?);
-                }
-            };
-            use std::io::Read;
+            // CRITICAL FIX: If temp file doesn't exist or is empty (truncated after chunking),
+            // continue reading from files instead of stopping. Collection is NOT complete just
+            // because temp file was truncated - we need to read ALL files first.
+            if !temp_file.exists() {
+                println!("   ℹ️  Temp file doesn't exist (was truncated after chunking) - continuing file reading");
+                ordered_blocks = None; // Continue reading from files - DON'T STOP COLLECTION
+            } else {
+                println!("   📖 Reading blocks from temp file to build hash map...");
+                // OPTIMIZATION: Use larger buffer for temp file reading (faster sequential reads)
+                match std::fs::File::open(&temp_file) {
+                    Ok(f) => {
+                        let mut temp_reader = std::io::BufReader::with_capacity(IO_BUFFER_SIZE, f);
+                        use std::io::Read;
             
             // FIX OOM: Process blocks in chunks instead of loading all into memory
             // Build hash map incrementally, storing file offsets instead of block data
@@ -2127,13 +2374,21 @@ impl BlockIterator {
                 }
             }
             
-            println!("   ✅ Built hash map with {} entries", blocks_by_prev_hash.len());
-            
-            if genesis_block.is_none() {
-                eprintln!("⚠️  Warning: Genesis block not found in {} blocks read", read_count);
+                        println!("   ✅ Built hash map with {} entries", blocks_by_prev_hash.len());
+                        
+                        if genesis_block.is_none() {
+                            eprintln!("⚠️  Warning: Genesis block not found in {} blocks read", read_count);
+                        }
+                        
+                        eprintln!("   Found {} blocks with previous hashes (excluding genesis)", blocks_by_prev_hash.len());
+                    }
+                    Err(e) => {
+                        // Temp file can't be opened (maybe truncated after chunking) - continue reading from files
+                        eprintln!("   ⚠️  Warning: Could not open temp file for hash map building: {} - continuing file reading", e);
+                        ordered_blocks = None; // Continue reading from files - DON'T STOP COLLECTION
+                    }
+                }
             }
-            
-            eprintln!("   Found {} blocks with previous hashes (excluding genesis)", blocks_by_prev_hash.len());
             
             // Define cache file path (for old format, if needed)
             let cache_file = dirs::cache_dir()
@@ -2141,16 +2396,24 @@ impl BlockIterator {
                 .map(|cache| cache.join("blvm-bench").join("start9_ordered_blocks.bin"));
             
             // Check if chunked cache already exists - if so, skip building old format
+            // CRITICAL: Also skip if temp file doesn't exist (was truncated after chunking)
             let chunks_dir = crate::chunked_cache::get_chunks_dir();
-            let should_build_old_cache = if let Some(ref chunks_path) = chunks_dir {
+            let should_build_old_cache = if !temp_file.exists() {
+                // Temp file doesn't exist (truncated after chunking) - skip cache build, continue reading files
+                false
+            } else if let Some(ref chunks_path) = chunks_dir {
                 !chunks_path.exists() || !chunks_path.join("chunks.meta").exists()
             } else {
                 true
             };
             
             if !should_build_old_cache {
-                println!("   ✅ Chunked cache already exists - skipping old format cache build");
-                println!("   💡 Use chunked cache for better space efficiency");
+                if !temp_file.exists() {
+                    println!("   ℹ️  Temp file doesn't exist (truncated after chunking) - skipping cache build, continuing file reading");
+                } else {
+                    println!("   ✅ Chunked cache already exists - skipping old format cache build");
+                    println!("   💡 Use chunked cache for better space efficiency");
+                }
             } else {
                 // OPTIMIZATION: Skip chaining during cache build - just copy blocks sequentially
                 // Chaining is expensive (memory mapping, header reading, chain following, sorting)
@@ -2283,19 +2546,55 @@ impl BlockIterator {
                 // Memory map is automatically dropped when it goes out of scope
             }
             
-            // FIX: When building cache, we've already read all blocks from files
-            // The iterator should continue reading from source files starting from where we left off
-            // But actually, new_ordered reads ALL blocks, so there are no more blocks to read
-            // The real issue: new_ordered should NOT read all blocks if max_blocks is set
-            // For now, set ordered_blocks to None so iterator tries to read from files
-            // The iterator will start from file 0, but should skip files we already processed
-            // Actually, the better fix: new_ordered should respect max_blocks and only read that many
-            // But for now, let's just make sure iterator can read from files
-            ordered_blocks = None; // None = continue reading from files, not from cache
+            // CRITICAL FIX: After creating chunks, check if they exist and use them
+            // BUT: Only stop collection if ALL blocks are collected (check metadata)
+            // Re-check for chunks (they may have been created during file reading)
+            let chunks_dir_after = crate::chunked_cache::get_chunks_dir();
+            if let Some(ref chunks_path) = chunks_dir_after {
+                if chunks_path.exists() {
+                    // Check if collection is actually complete by checking metadata
+                    if let Ok(Some(metadata)) = crate::chunked_cache::load_chunk_metadata(chunks_path) {
+                        // Check if we have all blocks (rough estimate: 900k+ blocks for full chain)
+                        let expected_blocks = 900000u64; // Approximate full chain size
+                        if metadata.total_blocks >= expected_blocks {
+                            // Collection is complete - use chunks
+                            match crate::chunked_cache::ChunkedBlockIterator::new(chunks_path, start_height, max_blocks) {
+                                Ok(Some(iter)) => {
+                                    println!("   ✅ All chunks complete ({} blocks) - using chunked iterator", metadata.total_blocks);
+                                    chunked_iterator = Some(iter);
+                                    ordered_blocks = None; // Will use chunked_iterator instead
+                                }
+                                _ => {
+                                    println!("   ✅ All chunks complete ({} blocks) - collection done", metadata.total_blocks);
+                                    ordered_blocks = Some(Vec::new()); // Empty - collection is done
+                                }
+                            }
+                        } else {
+                            // Chunks exist but incomplete - continue collection
+                            println!("   ⚠️  Partial chunks exist ({} blocks, need ~{}k) - continuing collection...", 
+                                     metadata.total_blocks, expected_blocks / 1000);
+                            ordered_blocks = None; // Continue reading from files
+                        }
+                    } else {
+                        // No metadata or can't read - assume incomplete, continue collection
+                        println!("   ⚠️  Chunks exist but no metadata - continuing collection to ensure completeness...");
+                        ordered_blocks = None; // Continue reading from files
+                    }
+                } else {
+                    // No chunks - need to read from files and order them
+                    ordered_blocks = None; // None = continue reading from files, not from cache
+                }
+            } else {
+                // No chunks dir - continue reading from files
+                ordered_blocks = None;
+            }
         }
         
         // Handle ordered_blocks (if loaded from cache)
-        let filtered_blocks: Option<Vec<Vec<u8>>> = if let Some(ref mut blocks) = ordered_blocks {
+        // CRITICAL: If we have a chunked_iterator, use it instead of ordered_blocks
+        let filtered_blocks: Option<Vec<Vec<u8>>> = if chunked_iterator.is_some() {
+            None // Use chunked_iterator instead - chunks are already ordered, no need to read files
+        } else if let Some(ref mut blocks) = ordered_blocks {
             // Apply start_height and max_blocks filters
             let start_idx = start_height.unwrap_or(0) as usize;
             let end_idx = if let Some(max) = max_blocks {
@@ -2313,6 +2612,65 @@ impl BlockIterator {
             None // Continue reading from files
         };
         
+        // Check if we need temp writer (before moving filtered_blocks and chunked_iterator)
+        let needs_temp_writer = filtered_blocks.is_none() && chunked_iterator.is_none();
+        
+        // Get temp file path if needed
+        let (temp_writer, temp_file_path) = if needs_temp_writer {
+            use std::io::Write;
+            let cache_file = dirs::cache_dir()
+                .or_else(|| dirs::home_dir().map(|h| h.join(".cache")))
+                .map(|cache| cache.join("blvm-bench").join("start9_ordered_blocks.bin"));
+            let temp_file = if let Some(ref cache_path) = cache_file {
+                if let Some(parent) = cache_path.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                    parent.join("blvm-bench-blocks-temp.bin")
+                } else {
+                    std::env::temp_dir().join("blvm-bench-blocks-temp.bin")
+                }
+            } else {
+                std::env::temp_dir().join("blvm-bench-blocks-temp.bin")
+            };
+            
+            let writer = if temp_file.exists() {
+                // Append to existing temp file
+                match std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&temp_file) {
+                    Ok(file) => {
+                        println!("   📝 Appending to existing temp file: {}", temp_file.display());
+                        Some(std::io::BufWriter::with_capacity(IO_BUFFER_SIZE, file))
+                    }
+                    Err(e) => {
+                        eprintln!("   ⚠️  Warning: Could not open temp file for appending: {} - creating new", e);
+                        match std::fs::File::create(&temp_file) {
+                            Ok(file) => Some(std::io::BufWriter::with_capacity(IO_BUFFER_SIZE, file)),
+                            Err(e2) => {
+                                eprintln!("   ⚠️  Error: Could not create temp file: {} - blocks will not be saved!", e2);
+                                None
+                            }
+                        }
+                    }
+                }
+            } else {
+                // Create new temp file
+                match std::fs::File::create(&temp_file) {
+                    Ok(file) => {
+                        println!("   📝 Creating new temp file for sequential reading: {}", temp_file.display());
+                        Some(std::io::BufWriter::with_capacity(IO_BUFFER_SIZE, file))
+                    }
+                    Err(e) => {
+                        eprintln!("   ⚠️  Error: Could not create temp file: {} - blocks will not be saved!", e);
+                        None
+                    }
+                }
+            };
+            (writer, Some(temp_file))
+        } else {
+            (None, None)
+        };
+        
         Ok(Self {
             reader: BlockFileReader {
                 data_dir: reader.data_dir.clone(),
@@ -2321,6 +2679,12 @@ impl BlockIterator {
                 local_cache_dir: reader.local_cache_dir.clone(),
                 file_index: reader.file_index.clone(),
             },
+            // CRITICAL FIX: If ordered_blocks is None (continuing file reading after batch processing),
+            // start from the last processed file index instead of file 0 to avoid re-reading all files.
+            // However, if we've already processed all files (processed_files >= block_files.len()),
+            // we should start from 0 because we need to re-read to collect any remaining blocks.
+            // For now, always start from 0 when ordered_blocks is None - the iterator will handle
+            // reading files and collecting blocks. This is inefficient but ensures we don't miss blocks.
             current_file_idx: 0,
             current_file: None,
             current_height: start_height.unwrap_or(0),
@@ -2329,11 +2693,15 @@ impl BlockIterator {
             blocks_read: 0,
             ordered_blocks: filtered_blocks,
             ordered_index: 0,
+            chunked_iterator, // Use the streaming iterator we created
             search_buffer: vec![0u8; SEARCH_BUFFER_SIZE],
             copy_sender: None, // Not needed for ordered iterator
             last_copy_start_idx: 0,
             failed_files: std::collections::HashSet::new(), // Track files that failed to avoid retries
             current_reading_file_idx: None, // Track which file we're reading from
+            temp_writer,
+            temp_file_path,
+            blocks_written_to_temp: 0,
         })
     }
     
@@ -2682,11 +3050,27 @@ impl BlockIterator {
                 
                 // If we need to search (blocks are not sequential)
                 // OPTIMIZATION: Use pre-allocated buffer and memchr for faster searching
+                // CRITICAL FIX: Add maximum search distance to prevent infinite loops on corrupted files
                 let mut search_pos = current_pos;
+                let search_start = current_pos;
                 let mut found_next = false;
+                const MAX_SEARCH_DISTANCE: u64 = 10 * 1024 * 1024; // Max 10MB search per block
                 
                 if need_search {
                 loop {
+                    // CRITICAL FIX: Limit search distance to prevent infinite loops
+                    if search_pos - search_start > MAX_SEARCH_DISTANCE {
+                        eprintln!("⚠️  Pattern search exceeded {}MB limit at file offset {} - skipping to next file", 
+                                 MAX_SEARCH_DISTANCE / (1024 * 1024), search_pos);
+                        // Mark file as failed to avoid retrying
+                        if let Some(file_idx) = self.current_reading_file_idx {
+                            self.failed_files.insert(file_idx);
+                        }
+                        self.current_file = None;
+                        self.current_reading_file_idx = None;
+                        return Ok(None); // Skip this file
+                    }
+                    
                     // Use pre-allocated buffer from struct
                     let bytes_read = match file.read(&mut self.search_buffer) {
                         Ok(0) => {
@@ -3061,10 +3445,19 @@ impl BlockIterator {
         }
         // If current_file_idx is still 0 and current_file is None, we'll try to open file 0
         
+        // CRITICAL FIX: Add safety counter to prevent infinite loops
+        let mut skip_count = 0;
+        const MAX_SKIPS: usize = 10000; // Safety limit to prevent infinite loops
+        
         loop {
-            
             if self.current_file_idx >= self.reader.block_files.len() {
                 return Ok(false); // No more files
+            }
+            
+            // Safety check: if we've skipped too many files, something is wrong
+            if skip_count >= MAX_SKIPS {
+                eprintln!("⚠️  CRITICAL: Skipped {} files in a row - possible infinite loop, stopping", skip_count);
+                return Ok(false); // Stop to prevent infinite loop
             }
             
             let file_path = &self.reader.block_files[self.current_file_idx];
@@ -3072,6 +3465,8 @@ impl BlockIterator {
             // OPTIMIZATION: Do in-memory checks FIRST (no filesystem operations)
             // 1. Check failed files (O(1) HashSet lookup)
             if self.failed_files.contains(&self.current_file_idx) {
+                self.current_file_idx += 1; // CRITICAL FIX: Increment before continue to avoid infinite loop
+                skip_count += 1;
                 continue; // Skip this file - we know it will fail
             }
             
@@ -3094,7 +3489,11 @@ impl BlockIterator {
                     if empty_count >= 3 && next_idx < self.reader.block_files.len() {
                         // Jump ahead to next file with blocks (skip all empty files in between)
                         // This can save hundreds of iterations in very sparse regions
-                        self.current_file_idx = next_idx - 1; // Will be incremented at start of loop
+                        self.current_file_idx = next_idx; // CRITICAL FIX: Set to next_idx (not next_idx - 1) since we'll check it next
+                        skip_count += empty_count; // Count all skipped files
+                    } else {
+                        self.current_file_idx += 1; // CRITICAL FIX: Increment before continue to avoid infinite loop
+                        skip_count += 1;
                     }
                     continue;
                 }
@@ -3105,7 +3504,11 @@ impl BlockIterator {
             // If local copy exists, we know it's valid and can skip metadata check
             let path_to_use = match self.get_local_or_remote_path(self.current_file_idx) {
                 Ok(path) => path,
-                Err(_) => continue, // Skip if we can't get path
+                Err(_) => {
+                    self.current_file_idx += 1; // CRITICAL FIX: Increment before continue to avoid infinite loop
+                    skip_count += 1;
+                    continue; // Skip if we can't get path
+                }
             };
             
             // OPTIMIZATION: Check file size for remote files (SSHFS) before opening
@@ -3123,6 +3526,8 @@ impl BlockIterator {
                             if !index.contains(&self.current_file_idx) && file_size < 100 {
                                 // File not in index AND too small - safe to skip
                                 self.failed_files.insert(self.current_file_idx);
+                                self.current_file_idx += 1; // CRITICAL FIX: Increment before continue to avoid infinite loop
+                                skip_count += 1;
                                 continue;
                             }
                             // File is in index - must try to read it (even if small, might have valid block)
@@ -3133,6 +3538,8 @@ impl BlockIterator {
                             if file_size < 100 {
                                 // File is too small to contain valid blocks - skip entirely
                                 self.failed_files.insert(self.current_file_idx);
+                                self.current_file_idx += 1; // CRITICAL FIX: Increment before continue to avoid infinite loop
+                                skip_count += 1;
                                 continue;
                             }
                         }
@@ -3140,6 +3547,8 @@ impl BlockIterator {
                     Err(_) => {
                         // Metadata check failed (file doesn't exist or permission denied) - skip
                         self.failed_files.insert(self.current_file_idx);
+                        self.current_file_idx += 1; // CRITICAL FIX: Increment before continue to avoid infinite loop
+                        skip_count += 1;
                         continue;
                     }
                 }
@@ -3185,13 +3594,18 @@ impl BlockIterator {
                 Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
                     eprintln!("⚠️  Permission denied for file {} - skipping", 
                              file_path.display());
-                    // Continue loop to try next file
-                    continue;
+                    self.failed_files.insert(self.current_file_idx);
+                    self.current_file_idx += 1; // CRITICAL FIX: Increment before continue to avoid infinite loop
+                    skip_count += 1;
+                    continue; // Continue loop to try next file
                 }
                 Err(e) => {
                     // Other errors - log and try next file
                     eprintln!("⚠️  Error opening file {}: {} - skipping", 
                              file_path.display(), e);
+                    self.failed_files.insert(self.current_file_idx);
+                    self.current_file_idx += 1; // CRITICAL FIX: Increment before continue to avoid infinite loop
+                    skip_count += 1;
                     continue;
                 }
             }
@@ -3207,6 +3621,25 @@ impl Iterator for BlockIterator {
         if let Some(max) = self.max_blocks {
             if self.blocks_read >= max {
                 return None;
+            }
+        }
+        
+        // CRITICAL FIX: If we have a chunked iterator, use it (streaming, no memory limit)
+        if let Some(ref mut chunked_iter) = self.chunked_iterator {
+            match chunked_iter.next_block() {
+                Ok(Some(block_data)) => {
+                    self.current_height += 1;
+                    self.blocks_read += 1;
+                    return Some(Ok(block_data));
+                }
+                Ok(None) => {
+                    // End of chunks
+                    return None;
+                }
+                Err(e) => {
+                    eprintln!("⚠️  Error reading from chunked iterator: {}", e);
+                    return Some(Err(e));
+                }
             }
         }
         
@@ -3250,6 +3683,86 @@ impl Iterator for BlockIterator {
                     if self.current_height < start {
                         self.current_height += 1;
                         return self.next(); // Skip and try next
+                    }
+                }
+                
+                // CRITICAL FIX: Write block to temp file if we're in sequential reading mode
+                let should_create_chunk = if let Some(ref mut writer) = self.temp_writer {
+                    use std::io::Write;
+                    let block_len = block_data.len() as u32;
+                    let len_bytes = block_len.to_le_bytes();
+                    
+                    // Write block length and data
+                    let write_ok = writer.write_all(&len_bytes).is_ok() && writer.write_all(&block_data).is_ok();
+                    
+                    if write_ok {
+                        self.blocks_written_to_temp += 1;
+                        
+                        // Update metadata file periodically
+                        if self.blocks_written_to_temp % 10000 == 0 {
+                            if let Some(ref temp_path) = self.temp_file_path {
+                                let metadata_file = temp_path.with_extension("bin.meta");
+                                let count_bytes = (self.blocks_written_to_temp as u64).to_le_bytes();
+                                let _ = std::fs::write(&metadata_file, count_bytes);
+                            }
+                        }
+                        
+                        // Flush periodically to prevent data loss
+                        if self.blocks_written_to_temp % 1000 == 0 {
+                            let _ = writer.flush();
+                        }
+                        
+                        // Check if we need to create a chunk
+                        self.blocks_written_to_temp > 0 && self.blocks_written_to_temp % INCREMENTAL_CHUNK_SIZE as u64 == 0
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                };
+                
+                // CRITICAL: Create chunk when temp file reaches INCREMENTAL_CHUNK_SIZE blocks
+                if should_create_chunk {
+                    // Flush and drop temp writer before creating chunk (need exclusive access to file)
+                    if let Some(mut writer) = self.temp_writer.take() {
+                        let _ = writer.flush();
+                        drop(writer);
+                    }
+                    
+                    // Calculate chunk number
+                    let chunk_num = (self.blocks_written_to_temp / INCREMENTAL_CHUNK_SIZE as u64) as usize - 1;
+                    
+                    if let Some(ref temp_path) = self.temp_file_path {
+                        println!("   📦 Creating chunk {} from temp file ({} blocks)...", chunk_num, INCREMENTAL_CHUNK_SIZE);
+                        
+                        // Create chunk from temp file
+                        if let Err(e) = BlockFileReader::create_and_move_chunk_from_file(
+                            temp_path,
+                            chunk_num,
+                            INCREMENTAL_CHUNK_SIZE
+                        ) {
+                            eprintln!("   ⚠️  Error creating chunk {}: {}", chunk_num, e);
+                        } else {
+                            println!("   ✅ Chunk {} created successfully", chunk_num);
+                            
+                            // Truncate temp file for next chunk
+                            if let Ok(mut file) = std::fs::OpenOptions::new()
+                                .write(true)
+                                .truncate(true)
+                                .open(temp_path) {
+                                let _ = file.set_len(0);
+                            }
+                            
+                            // Recreate temp writer for next chunk
+                            match std::fs::File::create(temp_path) {
+                                Ok(file) => {
+                                    self.temp_writer = Some(std::io::BufWriter::with_capacity(IO_BUFFER_SIZE, file));
+                                }
+                                Err(e) => {
+                                    eprintln!("   ⚠️  Error recreating temp file after chunking: {}", e);
+                                }
+                            }
+                        }
                     }
                 }
                 

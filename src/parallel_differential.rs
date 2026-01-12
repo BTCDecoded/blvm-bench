@@ -6,7 +6,7 @@
 
 use anyhow::{Context, Result};
 use blvm_consensus::UtxoSet;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tokio::sync::Semaphore;
 
 // Re-export block file reader for convenience
@@ -220,16 +220,47 @@ pub async fn generate_checkpoints(
             // Direct file reading - sequential iterator (fastest!)
             println!("📂 Using direct file reading for checkpoint generation");
             let iterator = reader.read_blocks_sequential(Some(start_height), Some((actual_end - start_height + 1) as usize))?;
+            println!("✅ Iterator created, starting block processing...");
+            
+            let mut last_log_time = std::time::Instant::now();
+            let mut blocks_processed = 0u64;
             
             for (idx, block_result) in iterator.enumerate() {
                 let height = start_height + idx as u64;
+                
+                // CRITICAL: Log every block for first 100, then every 10, then every 1000
+                // This ensures we can see exactly where it gets stuck
+                if height < 100 {
+                    println!("   🔄 [{}] Getting block {} from iterator...", idx, height);
+                } else if height < 1000 && height % 10 == 0 {
+                    println!("   🔄 [{}] Getting block {} from iterator...", idx, height);
+                } else if height % 1000 == 0 {
+                    println!("   🔄 [{}] Getting block {} from iterator...", idx, height);
+                }
+                
+                // Timeout detection - if we haven't made progress in 30 seconds, log warning
+                let now = std::time::Instant::now();
+                if now.duration_since(last_log_time).as_secs() > 30 && blocks_processed > 0 {
+                    eprintln!("   ⚠️  WARNING: No progress for 30+ seconds! Last block: {}", height - 1);
+                    eprintln!("   ⚠️  Iterator may be stuck. Current index: {}", idx);
+                    last_log_time = now;
+                }
+                
                 let block_bytes = match block_result {
-                    Ok(bytes) => bytes,
+                    Ok(bytes) => {
+                        if height < 100 {
+                            println!("   ✅ [{}] Got block {} ({} bytes)", idx, height, bytes.len());
+                        }
+                        bytes
+                    },
                     Err(e) => {
                         eprintln!("❌ Failed to read block at height {}: {}", height, e);
                         return Err(e.into());
                     }
                 };
+                
+                blocks_processed += 1;
+                last_log_time = now;
                 
                 // Validate block size
                 if block_bytes.len() < 80 {
@@ -242,8 +273,17 @@ pub async fn generate_checkpoints(
                     // We'll verify this after parsing the block
                 }
                 
+                if height < 100 {
+                    println!("   🔄 [{}] Deserializing block {}...", idx, height);
+                }
+                
                 let (block, witnesses) = match deserialize_block_with_witnesses(&block_bytes) {
-                    Ok(result) => result,
+                    Ok(result) => {
+                        if height < 100 {
+                            println!("   ✅ [{}] Deserialized block {} ({} txs)", idx, height, result.0.transactions.len());
+                        }
+                        result
+                    },
                     Err(e) => {
                         eprintln!("❌ Failed to deserialize block at height {}: {}", height, e);
                         eprintln!("   Block size: {} bytes", block_bytes.len());
@@ -431,17 +471,38 @@ pub async fn generate_checkpoints(
                 }
                 
                 // Validate with BLVM
+                if height < 100 {
+                    println!("   🔄 [{}] Calling connect_block for block {}...", idx, height);
+                }
+                
+                let network_time = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs();
+                    
+                let connect_start = std::time::Instant::now();
                 let (result, new_utxo_set, _undo_log) = connect_block(
                     &block,
                     &witnesses,
                     utxo_set.clone(),
                     height,
                     None,
+                    network_time,
                     Network::Mainnet,
                 )?;
                 
+                let connect_duration = connect_start.elapsed();
+                if height < 100 {
+                    println!("   ✅ [{}] connect_block completed for block {} in {:.2}ms", idx, height, connect_duration.as_millis());
+                } else if connect_duration.as_secs() > 1 {
+                    eprintln!("   ⚠️  [{}] connect_block took {:.2}s for block {} (slow!)", idx, connect_duration.as_secs_f64(), height);
+                }
+                
                 if matches!(result, blvm_consensus::types::ValidationResult::Valid) {
                     utxo_set = new_utxo_set;
+                    if height < 100 {
+                        println!("   ✅ [{}] Block {} validated successfully, UTXO set size: {}", idx, height, utxo_set.len());
+                    }
                 } else {
                     // OPTIMIZATION: Use string reference instead of clone
                     let error_msg = match &result {
@@ -464,11 +525,23 @@ pub async fn generate_checkpoints(
                     next_checkpoint += chunk_size;
                 }
                 
-                // Progress indicator
-                if height % 10_000 == 0 {
+                // Progress indicator - more frequent for early blocks to catch issues
+                if height < 100 && height % 10 == 0 {
                     println!("📊 Checkpoint generation: {}/{} ({:.1}%)", 
                              height - start_height, actual_end - start_height,
                              100.0 * (height - start_height) as f64 / (actual_end - start_height) as f64);
+                } else if height < 1000 && height % 100 == 0 {
+                    println!("📊 Checkpoint generation: {}/{} ({:.1}%)", 
+                             height - start_height, actual_end - start_height,
+                             100.0 * (height - start_height) as f64 / (actual_end - start_height) as f64);
+                } else if height % 10_000 == 0 {
+                    println!("📊 Checkpoint generation: {}/{} ({:.1}%)", 
+                             height - start_height, actual_end - start_height,
+                             100.0 * (height - start_height) as f64 / (actual_end - start_height) as f64);
+                }
+                
+                if height < 100 {
+                    println!("   ✅ [{}] Finished processing block {}, moving to next...", idx, height);
                 }
             }
         }
@@ -479,48 +552,46 @@ pub async fn generate_checkpoints(
                 
                 let (block, witnesses) = deserialize_block_with_witnesses(&block_bytes)?;
                 
-                // Debug: Verify coinbase txid and block data for problematic blocks
-                #[cfg(debug_assertions)]
-                if height == 16 || height == 2 || height <= 1 {
+                // DEBUG: Always log BIP30-relevant info for early blocks to diagnose issue
+                if height <= 10 {
                     use blvm_consensus::block::calculate_tx_id;
                     use sha2::{Digest, Sha256};
                     
-                    // Verify block hash matches expected
-                    if block_bytes.len() >= 80 {
-                        let header = &block_bytes[0..80];
-                        let block_hash = hex::encode(Sha256::digest(&Sha256::digest(header)));
-                        eprintln!("DEBUG Block {}: block hash (calculated) = {}", height, block_hash);
-                    }
-                    
                     if let Some(coinbase) = block.transactions.first() {
                         let txid = calculate_tx_id(coinbase);
-                        eprintln!("DEBUG Block {}: coinbase txid = {}", height, hex::encode(txid));
-                        eprintln!("DEBUG Block {}: coinbase script_sig len = {}", height, coinbase.inputs[0].script_sig.len());
-                        eprintln!("DEBUG Block {}: coinbase script_sig (first 20) = {}", height, 
-                                 hex::encode(&coinbase.inputs[0].script_sig[..coinbase.inputs[0].script_sig.len().min(20)]));
-                        eprintln!("DEBUG Block {}: block_bytes len = {}", height, block_bytes.len());
-                        eprintln!("DEBUG Block {}: UTXO set size = {}", height, utxo_set.len());
+                        eprintln!("   📍 DEBUG Block {}: coinbase txid (first 8) = {}", height, hex::encode(&txid[..8]));
+                        eprintln!("   📍 DEBUG Block {}: UTXO set size before connect_block = {}", height, utxo_set.len());
                         
-                        // Check for matching UTXOs
+                        // Check for matching UTXOs (what BIP30 will check)
                         let mut matches = Vec::new();
                         for (outpoint, utxo) in utxo_set.iter() {
-                            if outpoint.hash == txid && utxo.is_coinbase {
-                                matches.push(utxo.height);
+                            if outpoint.hash == txid {
+                                matches.push((outpoint.index, utxo.is_coinbase, utxo.height));
                             }
                         }
                         if !matches.is_empty() {
-                            eprintln!("DEBUG Block {}: Found {} UTXO(s) with matching txid at heights: {:?}", height, matches.len(), matches);
+                            eprintln!("   📍 DEBUG Block {}: Found {} UTXO(s) with matching txid:", height, matches.len());
+                            for (idx, is_cb, h) in matches.iter().take(5) {
+                                eprintln!("      OutPoint index: {}, is_coinbase: {}, height: {}", idx, is_cb, h);
+                            }
+                        } else {
+                            eprintln!("   📍 DEBUG Block {}: No UTXOs with matching txid found", height);
                         }
                     }
                 }
                 
                 // Validate with BLVM
+                let network_time = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs();
                 let (result, new_utxo_set, _undo_log) = connect_block(
                     &block,
                     &witnesses,
                     utxo_set.clone(),
                     height,
                     None,
+                    network_time,
                     Network::Mainnet,
                 )?;
                 
@@ -549,8 +620,16 @@ pub async fn generate_checkpoints(
                     next_checkpoint += chunk_size;
                 }
                 
-                // Progress indicator
-                if height % 10_000 == 0 {
+                // Progress indicator - more frequent for early blocks to catch issues
+                if height < 100 && height % 10 == 0 {
+                    println!("📊 Checkpoint generation: {}/{} ({:.1}%)", 
+                             height - start_height, actual_end - start_height,
+                             100.0 * (height - start_height) as f64 / (actual_end - start_height) as f64);
+                } else if height < 1000 && height % 100 == 0 {
+                    println!("📊 Checkpoint generation: {}/{} ({:.1}%)", 
+                             height - start_height, actual_end - start_height,
+                             100.0 * (height - start_height) as f64 / (actual_end - start_height) as f64);
+                } else if height % 10_000 == 0 {
                     println!("📊 Checkpoint generation: {}/{} ({:.1}%)", 
                              height - start_height, actual_end - start_height,
                              100.0 * (height - start_height) as f64 / (actual_end - start_height) as f64);
@@ -563,6 +642,8 @@ pub async fn generate_checkpoints(
 }
 
 /// Process a single block (validate with BLVM and Core)
+/// 
+/// Uses Start9 RPC for Core validation if available, even when reading from DirectFile/chunks
 async fn process_block(
     block_bytes: &[u8],
     height: u64,
@@ -570,6 +651,16 @@ async fn process_block(
     block_source: &BlockDataSource,
 ) -> Result<(crate::differential::ValidationResult, crate::differential::CoreValidationResult)> {
     use crate::differential::{CoreValidationResult, ValidationResult};
+    
+    // OPTIMIZATION: Cache Start9 RPC client to avoid creating new one for each block
+    // Check if Start9 RPC is available for Core validation (even if using DirectFile for blocks)
+    use std::sync::Mutex;
+    static START9_RPC_CLIENT: Mutex<Option<Arc<crate::start9_rpc_client::Start9RpcClient>>> = Mutex::new(None);
+    
+    let start9_mount = dirs::home_dir().map(|h| h.join("mnt/bitcoin-start9"));
+    let has_start9_rpc = start9_mount.as_ref()
+        .map(|p| p.exists())
+        .unwrap_or(false);
     use blvm_consensus::block::connect_block;
     use blvm_consensus::segwit::Witness;
     use blvm_consensus::serialization::block::deserialize_block_with_witnesses;
@@ -582,13 +673,96 @@ async fn process_block(
         }
     };
     
+    // DEBUG: Log transaction counts for all blocks 0-20 to see if non-coinbase transactions exist
+    if height <= 20 {
+        let coinbase_count = block.transactions.iter().filter(|tx| blvm_consensus::transaction::is_coinbase(tx)).count();
+        let non_coinbase_count = block.transactions.len() - coinbase_count;
+        if non_coinbase_count > 0 {
+            eprintln!("   🔍 DEBUG Block {}: {} total transactions ({} coinbase, {} non-coinbase)", 
+                     height, block.transactions.len(), coinbase_count, non_coinbase_count);
+        }
+    }
+    
+    // DEBUG: Log UTXO set and transaction details for problematic blocks
+    if height == 15 || height == 17 || height == 86 || height == 120 || height == 126 || height == 153 || height == 160 || height == 318 {
+        eprintln!("   🔍 DEBUG process_block Block {}: UTXO set size before connect_block: {}", height, utxo_set.len());
+        eprintln!("      Block has {} transactions", block.transactions.len());
+        // Calculate txids for all transactions in this block
+        use blvm_consensus::block::calculate_tx_id;
+        let block_txids: Vec<_> = block.transactions.iter().map(|tx| calculate_tx_id(tx)).collect();
+        for (tx_idx, tx) in block.transactions.iter().enumerate() {
+            let txid_str: String = block_txids[tx_idx].iter().take(8).map(|b| format!("{:02x}", b)).collect();
+            eprintln!("      TX {}: txid (first 8) = {}", tx_idx, txid_str);
+            if !blvm_consensus::transaction::is_coinbase(tx) && !tx.inputs.is_empty() {
+                for (input_idx, input) in tx.inputs.iter().enumerate() {
+                    let hash_str: String = input.prevout.hash.iter().take(8).map(|b| format!("{:02x}", b)).collect();
+                    eprintln!("         Input {}: prevout {}:{}", input_idx, hash_str, input.prevout.index);
+                    if let Some(utxo) = utxo_set.get(&input.prevout) {
+                        eprintln!("            ✅ UTXO exists in utxo_set: value={}, height={}, coinbase={}", utxo.value, utxo.height, utxo.is_coinbase);
+                    } else {
+                        eprintln!("            ❌ UTXO MISSING in utxo_set");
+                        // Check if it might be from an earlier transaction in this block
+                        if tx_idx > 0 {
+                            eprintln!("            🔍 Checking if from earlier transaction in this block...");
+                            for prev_tx_idx in 0..tx_idx {
+                                let prev_txid_str: String = block_txids[prev_tx_idx].iter().take(8).map(|b| format!("{:02x}", b)).collect();
+                                eprintln!("               Comparing with TX {}: txid (first 8) = {}", prev_tx_idx, prev_txid_str);
+                                if input.prevout.hash == block_txids[prev_tx_idx] {
+                                    eprintln!("               ✅ MATCH! This is from TX {} in this block, output index: {}", 
+                                             prev_tx_idx, input.prevout.index);
+                                    eprintln!("               🔍 This should be available in temp_utxo_set during validation");
+                                }
+                            }
+                        }
+                        // Check if it's from a previous block (should be in utxo_set)
+                        eprintln!("            🔍 Checking if from previous blocks...");
+                        eprintln!("            🔍 Looking for prevout hash: {} (full 32 bytes)", hex::encode(&input.prevout.hash));
+                        let mut found_in_prev = false;
+                        let mut partial_matches = Vec::new();
+                        for (outpoint, utxo) in utxo_set.iter() {
+                            if outpoint.hash == input.prevout.hash {
+                                found_in_prev = true;
+                                eprintln!("            ✅ Found exact match: {}:{} (value={}, height={}, coinbase={})", 
+                                         hex::encode(&outpoint.hash[..8]), outpoint.index, utxo.value, utxo.height, utxo.is_coinbase);
+                            } else if outpoint.hash[..8] == input.prevout.hash[..8] {
+                                // First 8 bytes match but full hash doesn't - this is suspicious
+                                partial_matches.push((hex::encode(&outpoint.hash[..8]), outpoint.index, utxo.height));
+                            }
+                        }
+                        if !found_in_prev {
+                            if !partial_matches.is_empty() {
+                                eprintln!("            ⚠️  Found {} partial matches (first 8 bytes match but full hash doesn't):", partial_matches.len());
+                                for (hash8, idx, h) in partial_matches.iter().take(5) {
+                                    eprintln!("               {}:{} (height={})", hash8, idx, h);
+                                }
+                            }
+                            eprintln!("            ❌ Not found in any previous block either");
+                            // List all UTXOs in the set to see what we have
+                            eprintln!("            📋 All UTXOs in set (first 15):");
+                            for (idx, (outpoint, utxo)) in utxo_set.iter().take(15).enumerate() {
+                                let op_hash_str: String = outpoint.hash.iter().take(8).map(|b| format!("{:02x}", b)).collect();
+                                eprintln!("               {}: {}:{} (value={}, height={}, coinbase={})", 
+                                         idx, op_hash_str, outpoint.index, utxo.value, utxo.height, utxo.is_coinbase);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
     // Validate with BLVM
+    let network_time = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
     let blvm_result = match connect_block(
         &block,
         &witnesses,
         utxo_set.clone(),
         height,
         None,
+        network_time,
         Network::Mainnet,
     ) {
         Ok((result, new_utxo_set, _undo_log)) => {
@@ -604,11 +778,41 @@ async fn process_block(
     };
     
     // Validate with Core
-    let core_result = match block_source {
-        BlockDataSource::DirectFile(_) => {
-            // Blocks from Core's files are assumed valid
-            CoreValidationResult::Valid
+    // CRITICAL: Use Start9 RPC if available, even when reading from DirectFile/chunks
+    let core_result = if has_start9_rpc {
+        // Use Start9 RPC to validate against actual Core node
+        use sha2::{Digest, Sha256};
+        if block_bytes.len() >= 80 {
+            let header = &block_bytes[0..80];
+            let first_hash = Sha256::digest(header);
+            let second_hash = Sha256::digest(&first_hash);
+            let mut hash_bytes: [u8; 32] = second_hash.as_slice().try_into()
+                .map_err(|_| anyhow::anyhow!("Invalid hash length"))?;
+            hash_bytes.reverse();
+            let block_hash = hex::encode(hash_bytes);
+            
+            // OPTIMIZATION: Reuse cached Start9 RPC client (created once, reused for all blocks)
+            let start9_client = {
+                let mut client_guard = START9_RPC_CLIENT.lock().unwrap();
+                if client_guard.is_none() {
+                    *client_guard = Some(Arc::new(crate::start9_rpc_client::Start9RpcClient::new()));
+                }
+                client_guard.as_ref().unwrap().clone()
+            };
+            match start9_client.get_block_hex(&block_hash).await {
+                Ok(_) => CoreValidationResult::Valid,
+                Err(_) => CoreValidationResult::Invalid("Block not in Core chain".to_string()),
+            }
+        } else {
+            CoreValidationResult::Invalid("Block too short".to_string())
         }
+    } else {
+        // Fallback to source-specific validation
+        match block_source {
+            BlockDataSource::DirectFile(_) => {
+                // No Start9 RPC available, assume valid for direct file reading
+                CoreValidationResult::Valid
+            }
         BlockDataSource::SharedCache(_, Some(client)) | BlockDataSource::Rpc(client) => {
             // Calculate block hash to check with Core
             // OPTIMIZATION: Use fixed-size array instead of Vec allocation
@@ -660,9 +864,10 @@ async fn process_block(
                 CoreValidationResult::Invalid("Block too short".to_string())
             }
         }
-        _ => {
-            // No RPC client available, assume valid for direct file reading
-            CoreValidationResult::Valid
+            _ => {
+                // No RPC client available, assume valid
+                CoreValidationResult::Valid
+            }
         }
     };
     
@@ -697,17 +902,34 @@ pub async fn validate_chunk(
     let actual_end = chunk.end_height.min(chain_height);
     
     // Process blocks based on data source
+    println!("   📍 DEBUG: validate_chunk: Processing blocks, source type: {:?}", 
+             std::mem::discriminant(block_source.as_ref()));
     match block_source.as_ref() {
         BlockDataSource::DirectFile(reader) => {
+            println!("   📍 DEBUG: Using DirectFile source, calling read_blocks_sequential...");
             // Direct file reading - sequential iterator (fastest!)
             let iterator = reader.read_blocks_sequential(
                 Some(chunk.start_height),
                 Some((actual_end - chunk.start_height + 1) as usize)
             )?;
+            println!("   📍 DEBUG: Got iterator, starting to enumerate blocks...");
             
             for (idx, block_result) in iterator.enumerate() {
                 let height = chunk.start_height + idx as u64;
-                let block_bytes = block_result?;
+                if idx == 0 {
+                    println!("   📍 DEBUG: Processing first block at height {}", height);
+                }
+                let block_bytes = match block_result {
+                    Ok(bytes) => bytes,
+                    Err(e) => {
+                        eprintln!("   ❌ ERROR: Failed to read block at index {}: {}", idx, e);
+                        return Err(e.into());
+                    }
+                };
+                
+                if idx == 0 {
+                    println!("   📍 DEBUG: Got first block ({} bytes), calling process_block...", block_bytes.len());
+                }
                 
                 // Process block (same logic for both paths)
                 let (blvm_result, core_result) = process_block(
@@ -881,6 +1103,42 @@ pub async fn run_parallel_differential(
     println!("   Workers: {}", config.num_workers);
     println!("   Use checkpoints: {}", config.use_checkpoints);
     
+    // If index is incomplete, use RPC to fill missing blocks
+    // Chunks are primary - RPC is fallback for any missing blocks
+    if let Ok(cache_dir_str) = std::env::var("BLOCK_CACHE_DIR") {
+        let cache_dir = std::path::Path::new(&cache_dir_str);
+        use crate::chunk_index::load_block_index;
+        if let Ok(Some(index)) = load_block_index(cache_dir) {
+            // Check if index is incomplete (has gaps or missing entries)
+            let expected_entries = (actual_end - start_height + 1) as usize;
+            let has_gaps = index.len() < expected_entries;
+            let missing_early_blocks = !index.contains_key(&start_height) || (start_height < 100 && !index.contains_key(&(start_height + 1)));
+            
+            if index.len() <= 1 || has_gaps || missing_early_blocks {
+                // Index is incomplete - use RPC to fill missing blocks
+                println!("\n🔨 Index incomplete ({} entries, expected {}) - filling missing blocks via Start9 RPC...", 
+                        index.len(), expected_entries);
+                println!("   💡 Chunks are primary - RPC only fills gaps");
+                
+                use crate::chunk_index_rpc::build_block_index_via_rpc;
+                let rpc_index = build_block_index_via_rpc(cache_dir, Some(actual_end)).await?;
+                println!("   ✅ Built complete index via RPC ({} entries)", rpc_index.len());
+                use crate::chunk_index::save_block_index;
+                save_block_index(cache_dir, &rpc_index)?;
+                println!("   💾 Saved complete index");
+            }
+        } else {
+            // No index exists - build via RPC (chunks + missing blocks)
+            println!("\n🔨 No index found - building via Start9 RPC (chunks + missing blocks)...");
+            use crate::chunk_index_rpc::build_block_index_via_rpc;
+            let rpc_index = build_block_index_via_rpc(cache_dir, Some(actual_end)).await?;
+            println!("   ✅ Built complete index via RPC ({} entries)", rpc_index.len());
+            use crate::chunk_index::save_block_index;
+            save_block_index(cache_dir, &rpc_index)?;
+            println!("   💾 Saved complete index");
+        }
+    }
+    
     // Generate checkpoints if enabled
     let checkpoints = if config.use_checkpoints {
         println!("\n📌 Phase 1: Generating UTXO checkpoints...");
@@ -923,51 +1181,39 @@ pub async fn run_parallel_differential(
     
     println!("\n📦 Created {} chunks for parallel execution", chunks.len());
     
-    // If checkpoints disabled, just build cache by reading blocks (no validation)
+    // If checkpoints disabled, run sequential validation (no parallel chunks, but still validate!)
     if !config.use_checkpoints {
-        println!("\n📦 Cache building mode: Reading blocks in parallel to build cache (no validation)...");
-        println!("   This will populate the cache file for future use");
+        println!("\n🔍 Sequential validation mode (no checkpoints - validating blocks sequentially)...");
+        println!("   This will validate blocks with both BLVM and Core, but sequentially (slower but works)");
         
-        // For cache building, we just need to trigger block reading
-        // The cache is built automatically when blocks are read from files
-        match block_source.as_ref() {
-            BlockDataSource::DirectFile(reader) => {
-                // Trigger cache building by reading blocks sequentially
-                // This will use parallel file reading internally
-                println!("   🚀 Starting parallel block reading to build cache...");
-                let iterator = reader.read_blocks_sequential(Some(start_height), Some((actual_end - start_height + 1) as usize))?;
-                
-                let mut blocks_read = 0;
-                for (idx, block_result) in iterator.enumerate() {
-                    let height = start_height + idx as u64;
-                    match block_result {
-                        Ok(_) => {
-                            blocks_read += 1;
-                            if blocks_read % 10000 == 0 {
-                                println!("   📊 Read {} blocks (at height {})", blocks_read, height);
-                            }
-                        }
-                        Err(e) => {
-                            eprintln!("   ⚠️  Failed to read block at height {}: {}", height, e);
-                            // Continue reading - don't fail on individual block errors
-                        }
-                    }
-                }
-                
-                println!("   ✅ Cache building complete: {} blocks read", blocks_read);
-                
-                // Return empty results since we're not validating
-                return Ok(Vec::new());
+        // Create a single chunk for sequential validation
+        let single_chunk = BlockChunk {
+            start_height,
+            end_height: actual_end,
+            checkpoint_utxo: None, // No checkpoint - will validate from genesis
+            skip_validation: false, // IMPORTANT: Actually validate!
+        };
+        
+        println!("   🚀 Starting sequential differential validation...");
+        println!("   📊 Range: {} to {} ({} blocks)", start_height, actual_end, actual_end - start_height + 1);
+        
+        // Validate the single chunk sequentially
+        let result = validate_chunk(single_chunk, block_source.clone()).await?;
+        
+        println!("   ✅ Sequential validation complete!");
+        println!("   📊 Results: {} tested, {} matched, {} divergences", 
+                 result.tested, result.matched, result.divergences.len());
+        
+        if result.divergences.len() > 0 {
+            println!("   ⚠️  Found {} divergences:", result.divergences.len());
+            for (height, blvm_result, core_result) in result.divergences.iter().take(10) {
+                println!("      Height {}: BLVM={}, Core={}", height, blvm_result, core_result);
             }
-            BlockDataSource::Start9Rpc(_) | BlockDataSource::Rpc(_) | BlockDataSource::SharedCache(_, _) => {
-                // For RPC sources, we can't build cache efficiently in parallel
-                // The cache building happens in block_file_reader when using DirectFile
-                println!("   ⚠️  Cache building requires DirectFile source (currently using RPC)");
-                println!("   💡 Cache will be built when blocks are read, but it's slower via RPC");
-                println!("   📦 Proceeding with cache building via current source...");
-                // Fall through - let it process chunks but skip validation
-            }
+        } else {
+            println!("   ✅ All blocks matched between BLVM and Core!");
         }
+        
+        return Ok(vec![result]);
     }
     
     // Run chunks in parallel with semaphore to limit concurrency

@@ -4,8 +4,8 @@
 mod helpers {
     //! Test helpers for differential testing
 
-    use bllvm_consensus::types::Network;
-    use bllvm_consensus::{
+    use blvm_consensus::types::Network;
+    use blvm_consensus::{
         tx_inputs, tx_outputs, Block, BlockHeader, OutPoint, Transaction, TransactionInput,
         TransactionOutput,
     };
@@ -104,16 +104,20 @@ mod helpers {
         block: &Block,
         height: u64,
         network: Network,
-    ) -> bllvm_consensus::types::ValidationResult {
-        use bllvm_consensus::block::connect_block;
-        use bllvm_consensus::segwit::Witness;
-        use bllvm_consensus::UtxoSet;
+    ) -> blvm_consensus::types::ValidationResult {
+        use blvm_consensus::block::connect_block;
+        use blvm_consensus::segwit::Witness;
+        use blvm_consensus::UtxoSet;
 
         let witnesses: Vec<Witness> = block.transactions.iter().map(|_| Vec::new()).collect();
         let utxo_set = UtxoSet::new();
-        match connect_block(block, &witnesses, utxo_set, height, None, network) {
-            Ok((result, _)) => result,
-            Err(e) => bllvm_consensus::types::ValidationResult::Invalid(format!("{:?}", e)),
+        let network_time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        match connect_block(block, &witnesses, utxo_set, height, None, network_time, network) {
+            Ok((result, _, _)) => result,
+            Err(e) => blvm_consensus::types::ValidationResult::Invalid(format!("{:?}", e)),
         }
     }
 }
@@ -126,8 +130,8 @@ use helpers::*;
 async fn create_rpc_client(
     preferred_network: Option<BitcoinNetwork>,
 ) -> Result<(CoreRpcClient, BitcoinNetwork)> {
-    use bllvm_bench::core_builder::CoreBuilder;
-    use bllvm_bench::core_rpc_client::NodeDiscovery;
+    use blvm_bench::core_builder::CoreBuilder;
+    use blvm_bench::core_rpc_client::NodeDiscovery;
 
     // Check if auto-discovery is disabled (explicit config takes precedence)
     let auto_discover = std::env::var("BITCOIN_AUTO_DISCOVER")
@@ -175,7 +179,7 @@ async fn create_rpc_client(
 async fn create_rpc_client_local(
     preferred_network: Option<BitcoinNetwork>,
 ) -> Result<(CoreRpcClient, BitcoinNetwork)> {
-    use bllvm_bench::core_builder::CoreBuilder;
+    use blvm_bench::core_builder::CoreBuilder;
 
     // Try to find local node or start regtest
     let builder = CoreBuilder::new();
@@ -202,17 +206,17 @@ async fn create_rpc_client_local(
 #[cfg(feature = "differential")]
 use anyhow::Result;
 #[cfg(feature = "differential")]
-use bllvm_bench::core_builder::CoreBuilder;
+use blvm_bench::core_builder::CoreBuilder;
 #[cfg(feature = "differential")]
-use bllvm_bench::core_rpc_client::BitcoinNetwork;
+use blvm_bench::core_rpc_client::BitcoinNetwork;
 #[cfg(feature = "differential")]
-use bllvm_bench::core_rpc_client::{CoreRpcClient, RpcConfig};
+use blvm_bench::core_rpc_client::{CoreRpcClient, RpcConfig};
 #[cfg(feature = "differential")]
-use bllvm_bench::differential::{compare_block_validation, format_comparison_result};
+use blvm_bench::differential::{compare_block_validation, format_comparison_result};
 #[cfg(feature = "differential")]
-use bllvm_bench::regtest_node::RegtestNode;
+use blvm_bench::regtest_node::RegtestNode;
 #[cfg(feature = "differential")]
-use bllvm_consensus::types::Network;
+use blvm_consensus::types::Network;
 #[cfg(feature = "differential")]
 use std::sync::{Arc, Mutex};
 #[cfg(feature = "differential")]
@@ -353,8 +357,8 @@ async fn test_bip30_differential() -> Result<()> {
     // Validate with BLLVM
     let bllvm_result = validate_bllvm_block(&block, height, network);
     let bllvm_validation = match bllvm_result {
-        bllvm_consensus::types::ValidationResult::Valid => ValidationResult::Valid,
-        bllvm_consensus::types::ValidationResult::Invalid(msg) => ValidationResult::Invalid(msg),
+        blvm_consensus::types::ValidationResult::Valid => ValidationResult::Valid,
+        blvm_consensus::types::ValidationResult::Invalid(msg) => ValidationResult::Invalid(msg),
     };
 
     // Compare with Core
@@ -370,7 +374,7 @@ async fn test_bip30_differential() -> Result<()> {
     println!("{}", format_comparison_result(&comparison));
 
     // Record test result
-    use bllvm_bench::differential::{CoreValidationResult, ValidationResult};
+    use blvm_bench::differential::{CoreValidationResult, ValidationResult};
     let bllvm_result_str = match &bllvm_validation {
         ValidationResult::Valid => "Valid".to_string(),
         ValidationResult::Invalid(msg) => format!("Invalid({})", msg),
@@ -434,8 +438,8 @@ async fn test_bip34_differential() -> Result<()> {
     // Validate with BLLVM
     let bllvm_result = validate_bllvm_block(&block, height, network);
     let bllvm_validation = match bllvm_result {
-        bllvm_consensus::types::ValidationResult::Valid => ValidationResult::Valid,
-        bllvm_consensus::types::ValidationResult::Invalid(msg) => ValidationResult::Invalid(msg),
+        blvm_consensus::types::ValidationResult::Valid => ValidationResult::Valid,
+        blvm_consensus::types::ValidationResult::Invalid(msg) => ValidationResult::Invalid(msg),
     };
 
     // Compare with Core
@@ -451,7 +455,7 @@ async fn test_bip34_differential() -> Result<()> {
     println!("{}", format_comparison_result(&comparison));
 
     // Record test result
-    use bllvm_bench::differential::{CoreValidationResult, ValidationResult};
+    use blvm_bench::differential::{CoreValidationResult, ValidationResult};
     let bllvm_result_str = match &bllvm_validation {
         ValidationResult::Valid => "Valid".to_string(),
         ValidationResult::Invalid(msg) => format!("Invalid({})", msg),
@@ -515,8 +519,8 @@ async fn test_bip90_differential() -> Result<()> {
     // Validate with BLLVM
     let bllvm_result = validate_bllvm_block(&block, height, network);
     let bllvm_validation = match bllvm_result {
-        bllvm_consensus::types::ValidationResult::Valid => ValidationResult::Valid,
-        bllvm_consensus::types::ValidationResult::Invalid(msg) => ValidationResult::Invalid(msg),
+        blvm_consensus::types::ValidationResult::Valid => ValidationResult::Valid,
+        blvm_consensus::types::ValidationResult::Invalid(msg) => ValidationResult::Invalid(msg),
     };
 
     // Compare with Core
@@ -532,7 +536,7 @@ async fn test_bip90_differential() -> Result<()> {
     println!("{}", format_comparison_result(&comparison));
 
     // Record test result
-    use bllvm_bench::differential::{CoreValidationResult, ValidationResult};
+    use blvm_bench::differential::{CoreValidationResult, ValidationResult};
     let bllvm_result_str = match &bllvm_validation {
         ValidationResult::Valid => "Valid".to_string(),
         ValidationResult::Invalid(msg) => format!("Invalid({})", msg),
@@ -596,8 +600,8 @@ async fn test_valid_block_accepted() -> Result<()> {
     // Validate with BLLVM
     let bllvm_result = validate_bllvm_block(&block, height, network);
     let bllvm_validation = match bllvm_result {
-        bllvm_consensus::types::ValidationResult::Valid => ValidationResult::Valid,
-        bllvm_consensus::types::ValidationResult::Invalid(msg) => ValidationResult::Invalid(msg),
+        blvm_consensus::types::ValidationResult::Valid => ValidationResult::Valid,
+        blvm_consensus::types::ValidationResult::Invalid(msg) => ValidationResult::Invalid(msg),
     };
 
     // Compare with Core
@@ -613,7 +617,7 @@ async fn test_valid_block_accepted() -> Result<()> {
     println!("{}", format_comparison_result(&comparison));
 
     // Record test result
-    use bllvm_bench::differential::{CoreValidationResult, ValidationResult};
+    use blvm_bench::differential::{CoreValidationResult, ValidationResult};
     let bllvm_result_str = match &bllvm_validation {
         ValidationResult::Valid => "Valid".to_string(),
         ValidationResult::Invalid(msg) => format!("Invalid({})", msg),
@@ -642,22 +646,35 @@ async fn test_valid_block_accepted() -> Result<()> {
 
 /// Test historical blocks: Validate real blockchain blocks
 /// This is TRUE differential testing - comparing BLLVM vs Core on actual historical blocks
+/// Uses parallel differential testing with chunks when RPC is unavailable
 #[tokio::test]
 #[cfg(feature = "differential")]
 async fn test_historical_blocks_differential() -> Result<()> {
-    use bllvm_bench::differential::{CoreValidationResult, ValidationResult};
-    use bllvm_consensus::block::connect_block;
-    use bllvm_consensus::segwit::Witness;
-    use bllvm_consensus::serialization::block::deserialize_block_with_witnesses;
-    use bllvm_consensus::UtxoSet;
+    use blvm_bench::differential::{CoreValidationResult, ValidationResult};
+    use blvm_consensus::block::connect_block;
+    use blvm_consensus::segwit::Witness;
+    use blvm_consensus::serialization::block::deserialize_block_with_witnesses;
+    use blvm_consensus::UtxoSet;
+    use std::sync::Arc;
+
+    // Check if we should use parallel differential with chunks (when RPC unavailable or BLOCK_CACHE_DIR is set)
+    let use_parallel = std::env::var("BLOCK_CACHE_DIR").is_ok() || 
+                       std::env::var("HISTORICAL_BLOCK_END").is_ok() && 
+                       std::env::var("HISTORICAL_BLOCK_END").unwrap().parse::<u64>().unwrap_or(0) > 1000;
+    
+    if use_parallel {
+        // Use parallel differential testing with chunks
+        return test_historical_blocks_parallel_fallback().await;
+    }
 
     // Create RPC client (supports both local and remote nodes)
     let (rpc_client, network) = match create_rpc_client(Some(BitcoinNetwork::Mainnet)).await {
         Ok((client, net)) => (client, net),
         Err(e) => {
             eprintln!("⚠️  Failed to connect to Bitcoin Core node: {}", e);
-            eprintln!("💡 Tip: Set BITCOIN_RPC_HOST to connect to a remote node");
-            return Ok(());
+            eprintln!("💡 Tip: Set BITCOIN_RPC_HOST to connect to a remote node, or set BLOCK_CACHE_DIR to use chunks");
+            // Fallback to parallel differential with chunks
+            return test_historical_blocks_parallel_fallback().await;
         }
     };
 
@@ -788,19 +805,24 @@ async fn test_historical_blocks_differential() -> Result<()> {
         };
 
         // Validate with BLLVM
+        let network_time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
         let bllvm_result = match connect_block(
             &block,
             &witnesses,
             utxo_set.clone(),
             height,
             None,
+            network_time,
             Network::Mainnet,
         ) {
-            Ok((result, new_utxo_set)) => {
+            Ok((result, new_utxo_set, _undo_log)) => {
                 utxo_set = new_utxo_set; // Update UTXO set for next block
                 match result {
-                    bllvm_consensus::types::ValidationResult::Valid => ValidationResult::Valid,
-                    bllvm_consensus::types::ValidationResult::Invalid(msg) => {
+                    blvm_consensus::types::ValidationResult::Valid => ValidationResult::Valid,
+                    blvm_consensus::types::ValidationResult::Invalid(msg) => {
                         ValidationResult::Invalid(msg)
                     }
                 }
@@ -895,6 +917,125 @@ async fn test_historical_blocks_differential() -> Result<()> {
     // For now, don't fail on divergences - just report them
     // This allows us to identify issues without breaking CI
     // TODO: Make this configurable (fail on divergence vs just report)
+
+    Ok(())
+}
+
+/// Fallback to parallel differential testing with chunks when RPC is unavailable
+#[cfg(feature = "differential")]
+async fn test_historical_blocks_parallel_fallback() -> Result<()> {
+    use blvm_bench::parallel_differential::{ParallelConfig, run_parallel_differential};
+    use std::sync::Arc;
+
+    println!("🔄 Using parallel differential testing with chunks (no RPC required)");
+
+    // Get configuration from environment
+    let start_height: u64 = std::env::var("HISTORICAL_BLOCK_START")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
+    let end_height: u64 = std::env::var("HISTORICAL_BLOCK_END")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(124_999); // Default to first chunk
+
+    let num_workers: usize = std::env::var("PARALLEL_WORKERS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or_else(|| num_cpus::get().min(4)); // Limit to 4 workers for safety
+    
+    let chunk_size: u64 = std::env::var("CHUNK_SIZE")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(125_000);
+
+    let config = ParallelConfig {
+        num_workers,
+        chunk_size,
+        use_checkpoints: std::env::var("USE_CHECKPOINTS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(false),
+    };
+
+    println!("🔧 Configuration:");
+    println!("   Start height: {}", start_height);
+    println!("   End height: {}", end_height);
+    println!("   Workers: {}", config.num_workers);
+    println!("   Chunk size: {}", config.chunk_size);
+    println!("   Use checkpoints: {}", config.use_checkpoints);
+
+    // Create optimized block data source (tries direct file reading first, then cache, then RPC)
+    let cache_dir = std::env::var("BLOCK_CACHE_DIR")
+        .ok()
+        .map(std::path::PathBuf::from);
+    
+    // Try to get RPC client (optional)
+    let rpc_client = match create_rpc_client(Some(BitcoinNetwork::Mainnet)).await {
+        Ok((client, net)) => {
+            println!("📡 RPC available for comparison: {}", net.as_str());
+            Some(Arc::new(client))
+        }
+        Err(_) => {
+            println!("💡 No RPC - using direct file reading/chunks only");
+            None
+        }
+    };
+    
+    let block_source = blvm_bench::parallel_differential::create_block_data_source(
+        blvm_bench::parallel_differential::BlockFileNetwork::Mainnet,
+        cache_dir.as_deref(),
+        rpc_client,
+    )?;
+    
+    // Log what data source we're using
+    match &block_source {
+        blvm_bench::parallel_differential::BlockDataSource::DirectFile(_) => {
+            println!("✅ Using direct file reading (fastest - 10-50x faster than RPC)");
+        }
+        blvm_bench::parallel_differential::BlockDataSource::SharedCache(_, _) => {
+            println!("✅ Using shared cache (fast - 5-10x faster than RPC)");
+        }
+        blvm_bench::parallel_differential::BlockDataSource::Rpc(_) => {
+            println!("✅ Using RPC (slower but works everywhere)");
+        }
+        blvm_bench::parallel_differential::BlockDataSource::Start9Rpc(_) => {
+            println!("✅ Using Start9 RPC (for encrypted files)");
+        }
+    }
+    
+    // Run parallel differential test
+    println!("🚀 Starting parallel differential validation...");
+    let results = run_parallel_differential(
+        start_height,
+        end_height,
+        config,
+        Arc::new(block_source),
+    )
+    .await?;
+
+    // Check for divergences
+    let total_tested: usize = results.iter().map(|r| r.tested).sum();
+    let total_matched: usize = results.iter().map(|r| r.matched).sum();
+    let total_divergences: usize = results.iter().map(|r| r.divergences.len()).sum();
+    
+    println!("📊 Results:");
+    println!("   Blocks tested: {}", total_tested);
+    println!("   Blocks matched: {}", total_matched);
+    println!("   Divergences: {}", total_divergences);
+    
+    if total_divergences > 0 {
+        eprintln!("❌ Found {} divergences!", total_divergences);
+        for result in &results {
+            for (height, blvm_result, core_result) in &result.divergences {
+                eprintln!("   Height {}: BLVM={}, Core={}", height, blvm_result, core_result);
+            }
+        }
+        // Don't fail the test - just report divergences
+        // This allows us to identify issues without breaking CI
+    } else {
+        println!("✅ All blocks matched between BLVM and Core!");
+    }
 
     Ok(())
 }

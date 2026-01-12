@@ -25,10 +25,17 @@ pub mod regtest_node;
 pub mod parallel_differential;
 #[cfg(feature = "differential")]
 pub mod block_file_reader;
+pub mod chunk_protection;
 #[cfg(feature = "differential")]
 pub mod start9_rpc_client;
 #[cfg(feature = "differential")]
 pub mod chunked_cache;
+#[cfg(feature = "differential")]
+pub mod chunk_index;
+#[cfg(feature = "differential")]
+pub mod chunk_index_rpc;
+#[cfg(feature = "differential")]
+pub mod missing_blocks;
 #[cfg(feature = "differential")]
 pub mod collect_only;
 

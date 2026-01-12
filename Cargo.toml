@@ -42,6 +42,7 @@ secp256k1 = "0.28"
 # For CLI tool to run shell benchmarks
 clap = { version = "4.4", features = ["derive"] }
 tokio = { version = "1.35", features = ["full"] }
+futures = "0.3"
 
 # HTTP client for RPC calls (with HTTPS/TLS support)
 reqwest = { version = "0.11", features = ["json", "rustls-tls"] }
@@ -52,6 +53,8 @@ which = "5.0"
 dirs = "5.0"
 # For hex encoding/decoding
 hex = "0.4"
+# For binary serialization (block index)
+bincode = "1.3"
 # For CPU count detection
 num_cpus = "1.16"
 # For fast pattern searching
@@ -206,6 +209,26 @@ debug = false
 strip = false
 lto = "thin"
 codegen-units = 16
+
+[[bin]]
+name = "rebuild_missing_metadata"
+path = "src/bin/rebuild_missing_metadata.rs"
+
+[[bin]]
+name = "verify_missing_blocks"
+path = "src/bin/verify_missing_blocks.rs"
+
+[[bin]]
+name = "fix_missing_blocks_index"
+path = "src/bin/fix_missing_blocks_index.rs"
+
+[[bin]]
+name = "rebuild_index_properly"
+path = "src/bin/rebuild_index_properly.rs"
+
+[[bin]]
+name = "rebuild_hashmap"
+path = "src/bin/rebuild_hashmap.rs"
 
 [profile.release]
 # When running with --release, use production-like optimizations
