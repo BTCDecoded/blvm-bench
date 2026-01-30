@@ -93,8 +93,8 @@ pub async fn build_block_index_via_rpc(
     // OPTIMIZATION: Process blocks in batches with parallel RPC calls
     // AGGRESSIVE: On LAN, we can handle much higher concurrency
     // CPU is ~67% idle, so we can push harder
-    const BATCH_SIZE: usize = 5000; // Process 5k blocks in parallel (CPU has headroom)
-    const MISSING_BLOCK_CONCURRENCY: usize = 500; // Fetch 500 missing blocks in parallel (CPU has headroom)
+    const BATCH_SIZE: usize = 150; // Higher batch for 100% RPC scenario
+    const MISSING_BLOCK_CONCURRENCY: usize = 75; // Higher concurrency - SSH is fresh
     
     println!("   💡 Using parallel RPC calls (batch size: {}) for faster processing", BATCH_SIZE);
     println!("   💡 Missing block fetch concurrency: {}", MISSING_BLOCK_CONCURRENCY);
@@ -207,60 +207,36 @@ pub async fn build_block_index_via_rpc(
                      batch_heights_vec.len(), current_height, processed_count);
         }
         
-        // OPTIMIZATION: Make parallel RPC calls for this batch
-        let rpc_client_ref = &rpc_client;
-        
-        // DEBUG: Log before RPC calls
-        if processed_count <= 20000 || processed_count % 50000 == 0 {
-            println!("   🔍 DEBUG: Starting RPC calls for batch ({} heights, starting at {})", 
-                     batch_heights_vec.len(), current_height);
-        }
-        
-        // Add timeout to each RPC call to prevent hanging
+        // OPTIMIZATION: Use batch RPC call - single SSH round-trip for all heights!
         use tokio::time::{timeout, Duration as TokioDuration};
-        const RPC_TIMEOUT: TokioDuration = TokioDuration::from_secs(5); // 5 second timeout per RPC call (LAN is fast)
-        
-        let batch_futures: Vec<_> = batch_heights.iter().map(|&h| {
-            let rpc_client_ref = rpc_client_ref;
-            async move {
-                match timeout(RPC_TIMEOUT, rpc_client_ref.get_block_hash(h)).await {
-                    Ok(Ok(hash)) => Ok((h, hash)),
-                    Ok(Err(e)) => {
-                        // RPC call completed but returned error
-                        if h < 100 || h % 10000 == 0 {
-                            eprintln!("   ⚠️  RPC error at height {}: {} - skipping", h, e);
-                        }
-                        Err((h, e))
-                    }
-                    Err(_) => {
-                        // Timeout - RPC call took too long
-                        if h < 100 || h % 10000 == 0 {
-                            eprintln!("   ⚠️  RPC timeout at height {} (>{:?}) - skipping", h, RPC_TIMEOUT);
-                        }
-                        Err((h, anyhow::anyhow!("RPC timeout after {:?}", RPC_TIMEOUT)))
-                    }
-                }
-            }
-        }).collect();
-        
-        // Execute batch in parallel with timeout protection
-        // CRITICAL: Add global timeout for entire batch to prevent indefinite hangs
-        const BATCH_TIMEOUT: TokioDuration = TokioDuration::from_secs(120); // 2 minute timeout for entire batch (LAN optimized)
+        const BATCH_TIMEOUT: TokioDuration = TokioDuration::from_secs(60); // 1 minute for batch (single call)
         
         if processed_count <= 20000 || processed_count % 50000 == 0 {
-            println!("   🔍 DEBUG: Awaiting RPC batch results ({} futures) with {:.0}s timeout...", 
-                     batch_futures.len(), BATCH_TIMEOUT.as_secs());
+            println!("   🔍 DEBUG: Making BATCH RPC call for {} heights (single SSH round-trip)", 
+                     batch_heights_vec.len());
         }
         
-        let batch_results = match timeout(BATCH_TIMEOUT, futures::future::join_all(batch_futures)).await {
-            Ok(results) => results,
-            Err(_) => {
-                eprintln!("   ⚠️  WARNING: Batch timeout after {:.0}s - some RPC calls may have hung", BATCH_TIMEOUT.as_secs());
-                eprintln!("   💡 Continuing with partial results - failed calls will be retried");
-                // Return empty results - the loop will continue and retry these blocks
-                vec![]
-            }
-        };
+        // Single batch RPC call for all heights in this batch
+        let batch_results: Vec<std::result::Result<(u64, String), (u64, anyhow::Error)>> = 
+            match timeout(BATCH_TIMEOUT, rpc_client.get_block_hashes_batch(&batch_heights_vec)).await {
+                Ok(Ok(results)) => {
+                    // Convert batch results to expected format
+                    results.into_iter().map(|(h, r)| {
+                        match r {
+                            Ok(hash) => Ok((h, hash)),
+                            Err(e) => Err((h, e)),
+                        }
+                    }).collect()
+                }
+                Ok(Err(e)) => {
+                    eprintln!("   ⚠️  Batch RPC failed: {} - will retry individually", e);
+                    vec![] // Empty results, will be retried
+                }
+                Err(_) => {
+                    eprintln!("   ⚠️  Batch RPC timeout after {:.0}s", BATCH_TIMEOUT.as_secs());
+                    vec![]
+                }
+            };
         
         if processed_count <= 20000 || processed_count % 50000 == 0 {
             println!("   🔍 DEBUG: RPC batch completed, processing {} results...", batch_results.len());

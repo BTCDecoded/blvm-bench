@@ -18,7 +18,7 @@ fn find_block1_quick() -> Result<()> {
     println!("🔍 Searching for block 1 in chunks at: {:?}", chunks_dir);
     
     // Build index - this will show us if block 1 is found
-    let index = build_block_index(&chunks_dir)?;
+    let (index, _hash_map) = build_block_index(&chunks_dir)?;
     
     println!("✅ Index built with {} entries", index.len());
     
@@ -34,6 +34,13 @@ fn find_block1_quick() -> Result<()> {
     
     Ok(())
 }
+
+
+
+
+
+
+
 
 
 

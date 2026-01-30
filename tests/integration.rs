@@ -924,10 +924,18 @@ async fn test_historical_blocks_differential() -> Result<()> {
 /// Fallback to parallel differential testing with chunks when RPC is unavailable
 #[cfg(feature = "differential")]
 async fn test_historical_blocks_parallel_fallback() -> Result<()> {
-    use blvm_bench::parallel_differential::{ParallelConfig, run_parallel_differential};
+    use blvm_bench::parallel_differential::{ParallelConfig, run_parallel_differential, 
+        ResumableConfig, run_differential_with_resume};
     use std::sync::Arc;
 
-    println!("🔄 Using parallel differential testing with chunks (no RPC required)");
+    // Check if RESUMABLE mode is enabled (recommended for large tests)
+    let use_resumable = std::env::var("RESUMABLE")
+        .ok()
+        .and_then(|s| s.parse::<bool>().ok())
+        .unwrap_or(true); // Default to resumable for safety
+
+    println!("🔄 Using {} differential testing with chunks", 
+             if use_resumable { "RESUMABLE" } else { "parallel" });
 
     // Get configuration from environment
     let start_height: u64 = std::env::var("HISTORICAL_BLOCK_START")
@@ -948,22 +956,21 @@ async fn test_historical_blocks_parallel_fallback() -> Result<()> {
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(125_000);
-
-    let config = ParallelConfig {
-        num_workers,
-        chunk_size,
-        use_checkpoints: std::env::var("USE_CHECKPOINTS")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(false),
-    };
+    
+    let checkpoint_interval: u64 = std::env::var("CHECKPOINT_INTERVAL")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(25_000); // Save UTXO every 25k blocks
 
     println!("🔧 Configuration:");
     println!("   Start height: {}", start_height);
     println!("   End height: {}", end_height);
-    println!("   Workers: {}", config.num_workers);
-    println!("   Chunk size: {}", config.chunk_size);
-    println!("   Use checkpoints: {}", config.use_checkpoints);
+    println!("   Workers: {}", num_workers);
+    println!("   Chunk size: {}", chunk_size);
+    if use_resumable {
+        println!("   Checkpoint interval: {} blocks", checkpoint_interval);
+        println!("   💡 Test can be interrupted and resumed!");
+    }
 
     // Create optimized block data source (tries direct file reading first, then cache, then RPC)
     let cache_dir = std::env::var("BLOCK_CACHE_DIR")
@@ -1004,15 +1011,49 @@ async fn test_historical_blocks_parallel_fallback() -> Result<()> {
         }
     }
     
-    // Run parallel differential test
-    println!("🚀 Starting parallel differential validation...");
-    let results = run_parallel_differential(
-        start_height,
-        end_height,
-        config,
-        Arc::new(block_source),
-    )
-    .await?;
+    let block_source = Arc::new(block_source);
+    
+    // Run differential test (resumable or parallel)
+    println!("🚀 Starting differential validation...");
+    
+    let results = if use_resumable {
+        let config = ResumableConfig {
+            parallel_config: ParallelConfig {
+                num_workers,
+                chunk_size,
+                use_checkpoints: false, // Resumable mode handles checkpoints differently
+            },
+            checkpoint_interval,
+            progress_save_interval: std::env::var("PROGRESS_SAVE_INTERVAL")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(10000), // Save progress every 10k blocks (default, was 1k)
+            checkpoint_dir: cache_dir,
+        };
+        
+        run_differential_with_resume(
+            start_height,
+            end_height,
+            config,
+            block_source,
+        ).await?
+    } else {
+        let config = ParallelConfig {
+            num_workers,
+            chunk_size,
+            use_checkpoints: std::env::var("USE_CHECKPOINTS")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(false),
+        };
+        
+        run_parallel_differential(
+            start_height,
+            end_height,
+            config,
+            block_source,
+        ).await?
+    };
 
     // Check for divergences
     let total_tested: usize = results.iter().map(|r| r.tested).sum();

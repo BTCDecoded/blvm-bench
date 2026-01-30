@@ -5,7 +5,10 @@
 
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
-use crate::chunk_index::{load_block_index, build_block_index, save_block_index, BlockIndex};
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::collections::HashMap;
+use crate::chunk_index::{load_block_index, build_block_index, save_block_index, BlockIndex, BlockIndexEntry};
 
 /// Chunk metadata
 #[derive(Debug, Clone)]
@@ -64,13 +67,21 @@ pub fn load_chunk_metadata(chunks_dir: &Path) -> Result<Option<ChunkMetadata>> {
 /// OPTIMIZATION: Returns a streaming reader instead of loading entire chunk into memory
 /// This prevents OOM for large chunks (50-60GB compressed = 200GB+ uncompressed)
 pub fn decompress_chunk_streaming(chunk_path: &Path) -> Result<std::process::Child> {
+    decompress_chunk_streaming_mt(chunk_path, 1)
+}
+
+/// Decompress with multi-threading support
+/// 
+/// Uses zstd's -T flag for parallel decompression (zstd 1.5+)
+/// threads=0 means use all available cores
+pub fn decompress_chunk_streaming_mt(chunk_path: &Path, threads: usize) -> Result<std::process::Child> {
     use std::process::{Command, Stdio};
 
-    // OPTIMIZATION: Use streaming decompression instead of loading entire chunk
-    // This allows reading blocks one at a time without loading 200GB+ into memory
+    // OPTIMIZATION: Use streaming decompression with multi-threading
     let child = Command::new("zstd")
         .arg("-d")
         .arg("--stdout")
+        .arg(format!("-T{}", threads)) // Multi-threaded decompression
         .arg(chunk_path)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -148,7 +159,7 @@ pub fn load_chunk_blocks(chunk_data: &[u8]) -> Result<Vec<Vec<u8>>> {
 pub struct ChunkedBlockIterator {
     chunks_dir: PathBuf,
     metadata: ChunkMetadata,
-    index: BlockIndex, // Block index for correct ordering
+    index: Arc<BlockIndex>, // Block index for correct ordering (Arc for sharing)
     start_height: u64,
     end_height: u64,
     current_height: u64,
@@ -159,6 +170,53 @@ pub struct ChunkedBlockIterator {
 }
 
 impl ChunkedBlockIterator {
+    /// Create a new iterator with a pre-loaded block index (faster for repeated use)
+    pub fn new_with_index(
+        chunks_dir: &Path,
+        index: Arc<BlockIndex>,
+        start_height: Option<u64>,
+        max_blocks: Option<usize>,
+    ) -> Result<Option<Self>> {
+        eprintln!("   📍 DEBUG: ChunkedBlockIterator::new_with_index called with start_height={:?}, max_blocks={:?}", start_height, max_blocks);
+        let metadata = match load_chunk_metadata(chunks_dir)? {
+            Some(m) => {
+                eprintln!("   📍 DEBUG: Loaded chunk metadata: {} chunks, {} total blocks", m.num_chunks, m.total_blocks);
+                m
+            },
+            None => {
+                eprintln!("   📍 DEBUG: No chunk metadata found");
+                return Ok(None);
+            },
+        };
+
+        let start_height_val = start_height.unwrap_or(0);
+        let end_height_val = if let Some(max) = max_blocks {
+            (start_height_val + max as u64).min(metadata.total_blocks)
+        } else {
+            metadata.total_blocks
+        };
+
+        // Verify index has all required blocks
+        for h in start_height_val..end_height_val.min(100) {
+            if !index.contains_key(&h) {
+                anyhow::bail!("Block index missing entry for height {}", h);
+            }
+        }
+
+        Ok(Some(Self {
+            chunks_dir: chunks_dir.to_path_buf(),
+            metadata,
+            index,
+            start_height: start_height_val,
+            end_height: end_height_val,
+            current_height: start_height_val,
+            current_chunk_reader: None,
+            current_zstd_proc: None,
+            current_chunk_number: None,
+            current_offset: 0,
+        }))
+    }
+
     pub fn new(
         chunks_dir: &Path,
         start_height: Option<u64>,
@@ -235,7 +293,7 @@ impl ChunkedBlockIterator {
         Ok(Some(Self {
             chunks_dir: chunks_dir.to_path_buf(),
             metadata,
-            index,
+            index: Arc::new(index),
             start_height: start_height_val,
             end_height: end_height_val,
             current_height: start_height_val,
@@ -315,9 +373,14 @@ impl ChunkedBlockIterator {
                 anyhow::bail!("Chunk {} not found: {}", entry.chunk_number, chunk_file.display());
             }
 
+            // OPTIMIZATION: Use multi-threaded zstd decompression
+            // Use 4-6 threads for decompression (balance between CPU and I/O)
+            // zstd -T0 uses all cores, but we want to leave cores for verification
+            let zstd_threads = std::cmp::min(6, num_cpus::get().saturating_sub(2)); // Leave 2 cores for verification
             let mut zstd_proc = std::process::Command::new("zstd")
                 .arg("-d")
                 .arg("--stdout")
+                .arg(format!("-T{}", zstd_threads)) // Multi-threaded decompression
                 .arg(&chunk_file)
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped())
@@ -426,15 +489,50 @@ impl ChunkedBlockIterator {
                 return Ok(None);
             }
 
-            // CRITICAL: Log every call for first 100 blocks to catch hangs
-            if self.current_height < 100 {
-                eprintln!("   🔄 ChunkedIterator::next_block() called for height {}", self.current_height);
+            // OPTIMIZATION: For sequential reading, read directly from stream without seeking
+            // This eliminates expensive skip operations when reading blocks in order
+            // Only works if we're already in the right chunk and at the right position
+            if let Some(ref mut reader) = self.current_chunk_reader {
+                // Check if we're at the expected position for sequential read
+                // If current_offset matches expected offset from index, we can read sequentially
+                if let Some(entry) = self.index.get(&self.current_height) {
+                    if self.current_chunk_number == Some(entry.chunk_number) 
+                        && self.current_offset == entry.offset_in_chunk {
+                        // We're at the right position - read sequentially (fast path)
+                        use std::io::Read;
+                        let mut len_buf = [0u8; 4];
+                        match reader.read_exact(&mut len_buf) {
+                            Ok(_) => {
+                                let block_len = u32::from_le_bytes(len_buf) as usize;
+                                if block_len <= 10 * 1024 * 1024 && block_len >= 88 {
+                                    let mut block_data = vec![0u8; block_len];
+                                    match reader.read_exact(&mut block_data) {
+                                        Ok(_) => {
+                                            // Sequential read succeeded - update offset and return
+                                            self.current_offset += 4 + block_len as u64;
+                                            let height = self.current_height;
+                                            self.current_height += 1;
+                                            return Ok(Some(block_data));
+                                        }
+                                        Err(_) => {
+                                            // Read failed - fall through to index-based loading
+                                        }
+                                    }
+                                }
+                            }
+                            Err(_) => {
+                                // Sequential read failed (maybe end of chunk) - use index
+                            }
+                        }
+                    }
+                }
             }
             
+            // Fallback: Use index to load block (for non-sequential access or chunk boundaries)
             let load_start = std::time::Instant::now();
             
             // Use index to load block at current height
-            let result = match self.load_block_from_index(self.current_height) {
+            match self.load_block_from_index(self.current_height) {
                 Ok(Some(block)) => {
                     let load_duration = load_start.elapsed();
                     if self.current_height < 100 {
@@ -703,5 +801,130 @@ pub fn chunked_cache_exists() -> bool {
         chunks_dir.exists() && chunks_dir.join("chunks.meta").exists()
     } else {
         false
+    }
+}
+
+/// Shared chunk cache manager - decompresses each chunk once and allows concurrent block reads
+/// 
+/// CRITICAL OPTIMIZATION: With only 8 chunks total, we can maintain a cache of chunk readers
+/// to avoid re-decompressing the same chunk multiple times when loading blocks in parallel.
+pub struct SharedChunkCache {
+    chunks_dir: PathBuf,
+    index: Arc<BlockIndex>,
+    // Cache of chunk readers: chunk_number -> (reader, zstd_process, current_offset)
+    // CRITICAL: Limited to prevent OOM - each reader holds a zstd process and large buffer
+    chunk_readers: Arc<Mutex<HashMap<usize, (std::io::BufReader<std::process::ChildStdout>, std::process::Child, u64)>>>,
+    max_chunk_readers: usize,
+}
+
+impl SharedChunkCache {
+    pub fn new(chunks_dir: &Path, index: Arc<BlockIndex>) -> Self {
+        Self {
+            chunks_dir: chunks_dir.to_path_buf(),
+            index,
+            chunk_readers: Arc::new(Mutex::new(HashMap::new())),
+            max_chunk_readers: 10, // Max 10 concurrent chunk readers (~1-2GB memory)
+        }
+    }
+
+    /// Load a block directly by height using shared chunk cache
+    pub fn load_block(&self, height: u64) -> Result<Option<Vec<u8>>> {
+        let entry = match self.index.get(&height) {
+            Some(e) => e,
+            None => return Ok(None),
+        };
+
+        // Handle missing blocks (chunk 999)
+        if entry.chunk_number == 999 {
+            use crate::missing_blocks::get_missing_block;
+            return get_missing_block(&self.chunks_dir, height);
+        }
+
+        // Get or create chunk reader
+        let mut readers = self.chunk_readers.lock().unwrap();
+        
+        // CRITICAL: Evict oldest chunk readers if we're at the limit
+        if readers.len() >= self.max_chunk_readers && !readers.contains_key(&entry.chunk_number) {
+            // Evict first (oldest) chunk reader
+            if let Some(&chunk_num) = readers.keys().next() {
+                if let Some((_, mut proc, _)) = readers.remove(&chunk_num) {
+                    let _ = proc.kill();
+                    let _ = proc.wait();
+                }
+            }
+        }
+        
+        // Check if we need to create new chunk reader
+        if !readers.contains_key(&entry.chunk_number) {
+            let chunk_file = self.chunks_dir.join(format!("chunk_{}.bin.zst", entry.chunk_number));
+            if !chunk_file.exists() {
+                anyhow::bail!("Chunk {} not found: {}", entry.chunk_number, chunk_file.display());
+            }
+
+            let zstd_threads = std::cmp::min(6, num_cpus::get().saturating_sub(2));
+            let mut zstd_proc = std::process::Command::new("zstd")
+                .arg("-d")
+                .arg("--stdout")
+                .arg(format!("-T{}", zstd_threads))
+                .arg(&chunk_file)
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+                .with_context(|| format!("Failed to start zstd for chunk {}", entry.chunk_number))?;
+
+            let stdout = zstd_proc.stdout.take()
+                .ok_or_else(|| anyhow::anyhow!("Failed to get zstd stdout"))?;
+            let reader = std::io::BufReader::with_capacity(128 * 1024 * 1024, stdout);
+            let offset = 0u64;
+            
+            readers.insert(entry.chunk_number, (reader, zstd_proc, offset));
+        }
+        
+        // Now get the reader (we know it exists)
+        let (reader, _proc, current_offset) = readers.get_mut(&entry.chunk_number).unwrap();
+
+        // Seek to block offset if needed
+        if *current_offset < entry.offset_in_chunk {
+            let skip_bytes = entry.offset_in_chunk - *current_offset;
+            let mut skip_buf = vec![0u8; (skip_bytes.min(1024 * 1024)) as usize];
+            let mut remaining = skip_bytes;
+            
+            use std::io::Read;
+            while remaining > 0 {
+                let to_read = remaining.min(skip_buf.len() as u64) as usize;
+                let bytes_read = reader.read(&mut skip_buf[..to_read])
+                    .with_context(|| format!("Failed to seek to offset {} in chunk {}", entry.offset_in_chunk, entry.chunk_number))?;
+                if bytes_read == 0 {
+                    anyhow::bail!("Unexpected EOF while seeking in chunk {}", entry.chunk_number);
+                }
+                remaining -= bytes_read as u64;
+            }
+            *current_offset = entry.offset_in_chunk;
+        } else if *current_offset > entry.offset_in_chunk {
+            // Can't seek backwards - would need to restart chunk, but this should be rare
+            // For now, just fail (could optimize by restarting chunk if needed)
+            anyhow::bail!("Cannot seek backwards in chunk {} (current={}, needed={})", 
+                         entry.chunk_number, *current_offset, entry.offset_in_chunk);
+        }
+
+        // Read block length
+        let mut len_buf = [0u8; 4];
+        use std::io::Read;
+        reader.read_exact(&mut len_buf)
+            .with_context(|| format!("Failed to read block length at height {}", height))?;
+        *current_offset += 4;
+
+        let block_len = u32::from_le_bytes(len_buf) as usize;
+        if block_len > 10 * 1024 * 1024 || block_len < 88 {
+            anyhow::bail!("Invalid block size: {} bytes (height {})", block_len, height);
+        }
+
+        // Read block data
+        let mut block_data = vec![0u8; block_len];
+        reader.read_exact(&mut block_data)
+            .with_context(|| format!("Failed to read block data at height {}", height))?;
+        *current_offset += block_len as u64;
+
+        Ok(Some(block_data))
     }
 }

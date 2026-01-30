@@ -76,15 +76,50 @@ pub fn load_block_index(chunks_dir: &Path) -> Result<Option<BlockIndex>> {
 
 /// Save block index to file
 /// CRITICAL: Uses atomic write (write to temp file, then rename) to prevent corruption
+/// SAFEGUARD: Never overwrites with a smaller index unless forced
 pub fn save_block_index(chunks_dir: &Path, index: &BlockIndex) -> Result<()> {
+    save_block_index_with_options(chunks_dir, index, false)
+}
+
+/// Save block index with option to force overwrite even if smaller
+pub fn save_block_index_with_options(chunks_dir: &Path, index: &BlockIndex, force: bool) -> Result<()> {
     let index_file = chunks_dir.join("chunks.index");
     let temp_file = chunks_dir.join("chunks.index.tmp");
+    
+    // SAFEGUARD: Check if existing index is larger - refuse to overwrite unless forced
+    if index_file.exists() && !force {
+        if let Ok(existing_data) = std::fs::read(&index_file) {
+            if let Ok(existing_index) = bincode::deserialize::<BlockIndex>(&existing_data) {
+                if existing_index.len() > index.len() {
+                    eprintln!("   ⚠️  SAFEGUARD: Refusing to overwrite {} entries with {} entries!", 
+                             existing_index.len(), index.len());
+                    eprintln!("   💡 Use save_block_index_with_options(..., force=true) to override");
+                    anyhow::bail!("Refusing to overwrite larger index ({} entries) with smaller one ({} entries)", 
+                                 existing_index.len(), index.len());
+                }
+            }
+        }
+    }
+    
+    // SAFEGUARD: Create timestamped backup before saving
+    if index_file.exists() {
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let backup_file = chunks_dir.join(format!("chunks.index.backup.{}", timestamp));
+        if let Err(e) = std::fs::copy(&index_file, &backup_file) {
+            eprintln!("   ⚠️  Warning: Failed to create timestamped backup: {}", e);
+        } else {
+            eprintln!("   💾 Created backup: {}", backup_file.display());
+        }
+    }
     
     let data = bincode::serialize(index)
         .with_context(|| "Failed to serialize block index")?;
     
     // CRITICAL FIX: Write to temp file first, then atomically rename to prevent corruption
-    std::fs::write(&temp_file, data)
+    std::fs::write(&temp_file, &data)
         .with_context(|| format!("Failed to write temp index file: {}", temp_file.display()))?;
     
     // Atomically replace the index file

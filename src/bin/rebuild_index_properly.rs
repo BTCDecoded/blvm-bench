@@ -46,7 +46,8 @@ async fn main() -> Result<()> {
     }
     use blvm_bench::chunk_index_rpc::build_block_index_via_rpc;
     
-    let index = match build_block_index_via_rpc(&chunks_dir, Some(249999)).await {
+    // Index all 912,723 blocks in our chunks
+    let index = match build_block_index_via_rpc(&chunks_dir, Some(912722)).await {
         Ok(idx) => {
             println!("\n✅ Index rebuilt successfully!");
             idx

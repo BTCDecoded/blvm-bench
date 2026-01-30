@@ -69,8 +69,8 @@ pub fn save_missing_blocks_meta(chunks_dir: &Path, meta: &MissingBlocksMeta) -> 
 pub fn add_missing_block(chunks_dir: &Path, block_data: &[u8]) -> Result<u64> {
     let missing_path = missing_blocks_path(chunks_dir);
     
-    // Load existing metadata
-    let meta = load_missing_blocks_meta(chunks_dir)?
+    // Load existing metadata (not used after optimization, but kept for potential future use)
+    let _meta = load_missing_blocks_meta(chunks_dir)?
         .unwrap_or_else(|| MissingBlocksMeta {
             blocks: HashMap::new(),
             count: 0,

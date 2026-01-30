@@ -66,3 +66,6 @@ src/ssh_block_reader.rs
 *.md
 .cursorrules
 *.rlib
+
+# Archive directory (temporal files, not for repo)
+archive/

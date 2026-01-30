@@ -21,8 +21,9 @@ pub mod core_rpc_client;
 pub mod differential;
 #[cfg(any(feature = "differential", feature = "benchmark-helpers"))]
 pub mod regtest_node;
-#[cfg(feature = "differential")]
-pub mod parallel_differential;
+// Archived: parallel_differential - not used in final sort-merge approach
+// #[cfg(feature = "differential")]
+// pub mod parallel_differential;
 #[cfg(feature = "differential")]
 pub mod block_file_reader;
 pub mod chunk_protection;
@@ -38,6 +39,14 @@ pub mod chunk_index_rpc;
 pub mod missing_blocks;
 #[cfg(feature = "differential")]
 pub mod collect_only;
+// Archived: checkpoint_persistence - not used in sort-merge approach
+// #[cfg(feature = "differential")]
+// pub mod checkpoint_persistence;
+// Archived: two_phase - abandoned in favor of sort-merge approach
+// #[cfg(feature = "differential")]
+// pub mod two_phase;
+#[cfg(feature = "differential")]
+pub mod sort_merge;
 
 use anyhow::Result;
 

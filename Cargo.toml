@@ -61,6 +61,8 @@ num_cpus = "1.16"
 memchr = "2.7"
 # For parallel processing
 rayon = "1.8"
+# For timestamps in checkpoints
+chrono = "0.4"
 # For memory-mapped file access (faster random access for large files)
 memmap2 = "0.9"
 
@@ -219,6 +221,38 @@ name = "verify_missing_blocks"
 path = "src/bin/verify_missing_blocks.rs"
 
 [[bin]]
+name = "check_prevout_in_outputs"
+path = "src/bin/check_prevout_in_outputs.rs"
+
+[[bin]]
+name = "sample_check_prevouts"
+path = "src/bin/sample_check_prevouts.rs"
+
+[[bin]]
+name = "verify_txid_match"
+path = "src/bin/verify_txid_match.rs"
+
+[[bin]]
+name = "debug_prevouts"
+path = "src/bin/debug_prevouts.rs"
+
+[[bin]]
+name = "check_missing_prevout_source"
+path = "src/bin/check_missing_prevout_source.rs"
+
+[[bin]]
+name = "analyze_missing_prevout"
+path = "src/bin/analyze_missing_prevout.rs"
+
+[[bin]]
+name = "verify_txid_consistency"
+path = "src/bin/verify_txid_consistency.rs"
+
+[[bin]]
+name = "check_last_outputs"
+path = "src/bin/check_last_outputs.rs"
+
+[[bin]]
 name = "fix_missing_blocks_index"
 path = "src/bin/fix_missing_blocks_index.rs"
 
@@ -229,6 +263,26 @@ path = "src/bin/rebuild_index_properly.rs"
 [[bin]]
 name = "rebuild_hashmap"
 path = "src/bin/rebuild_hashmap.rs"
+
+[[bin]]
+name = "build_hashmap_only"
+path = "src/bin/build_hashmap_only.rs"
+
+[[bin]]
+name = "fill_missing_from_files"
+path = "src/bin/fill_missing_from_files.rs"
+
+[[bin]]
+name = "recollect_blocks"
+path = "src/bin/recollect_blocks.rs"
+
+[[bin]]
+name = "diagnose_chunks"
+path = "src/bin/diagnose_chunks.rs"
+
+[[bin]]
+name = "collect_chunks_rpc"
+path = "src/bin/collect_chunks_rpc.rs"
 
 [profile.release]
 # When running with --release, use production-like optimizations

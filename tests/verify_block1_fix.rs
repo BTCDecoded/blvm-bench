@@ -28,7 +28,7 @@ fn verify_block1_fix() -> Result<()> {
     println!("   Chunks directory: {:?}", chunks_dir);
     
     // Build the index directly
-    let index = build_block_index(&chunks_dir)?;
+    let (index, _hash_map) = build_block_index(&chunks_dir)?;
     
     // Check if block 1 is in the index
     if let Some(block1_entry) = index.get(&1) {
@@ -69,6 +69,13 @@ fn verify_block1_fix() -> Result<()> {
         anyhow::bail!("Block 1 not found in index");
     }
 }
+
+
+
+
+
+
+
 
 
 
