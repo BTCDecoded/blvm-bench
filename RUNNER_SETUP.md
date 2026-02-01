@@ -79,17 +79,27 @@ The runner should have these environment variables set (or they will be set by t
 
 2. **Rust/OpenSSL builds**: OpenSSL's build scripts fail when `CC=ccache` because they try to use ccache as the compiler directly. The workflow unsets `CC`/`CXX` for Rust builds.
 
-If you want to use ccache on the runner, configure it properly:
+**Required Configuration** (run on runner):
 
 ```bash
-# Use ccache as a launcher, not as CC/CXX
-export CC="gcc"
-export CXX="g++"
-export CMAKE_C_COMPILER_LAUNCHER="ccache"
-export CMAKE_CXX_COMPILER_LAUNCHER="ccache"
+# 1. Fix ccache interference (CRITICAL - prevents OpenSSL build errors)
+unset CC CXX
+export CMAKE_C_COMPILER_LAUNCHER=ccache
+export CMAKE_CXX_COMPILER_LAUNCHER=ccache
+
+# 2. Make permanent (add to ~/.bashrc)
+cat >> ~/.bashrc << 'EOF'
+unset CC CXX
+export CMAKE_C_COMPILER_LAUNCHER=ccache
+export CMAKE_CXX_COMPILER_LAUNCHER=ccache
+EOF
+source ~/.bashrc
 ```
 
-Or unset CC/CXX entirely and let the build systems find compilers automatically.
+**Why:**
+- `ccache` in `CC/CXX` breaks Rust's OpenSSL build scripts
+- Using ccache as a launcher allows CMake to use the real compiler while still benefiting from caching
+- Workflow handles package installation and OpenSSL paths
 
 ## perf_event_paranoid (for Deep Analysis)
 

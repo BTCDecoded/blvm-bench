@@ -49,6 +49,7 @@ See [.github/workflows/README.md](.github/workflows/README.md) for setup instruc
 ## Documentation
 
 - [README_BENCHMARKING.md](README_BENCHMARKING.md) - Full benchmarking guide
+- [README_DIFFERENTIAL_TESTING.md](README_DIFFERENTIAL_TESTING.md) - Differential testing guide
 - [TROUBLESHOOTING.md](TROUBLESHOOTING.md) - Common issues and solutions
 - [docs/REGRESSION_DETECTION.md](docs/REGRESSION_DETECTION.md) - Regression detection & historical tracking
 - [docs/](docs/) - Additional documentation

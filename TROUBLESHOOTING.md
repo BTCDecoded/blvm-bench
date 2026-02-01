@@ -116,6 +116,47 @@ make bench
 
 3. Re-run the specific benchmark
 
+### Benchmark Execution Failures
+
+**Symptoms:**
+- Benchmarks showing `"error": "Benchmark execution failed"` with empty `benchmarks` arrays
+- Commons benchmarks failing to run
+
+**Likely Causes:**
+1. **Compilation Errors**: `cargo bench` is failing to compile the benchmarks
+2. **Missing Dependencies**: Path dependencies (bllvm-consensus, bllvm-node) not found
+3. **Wrong Benchmark Names**: Scripts trying non-existent benchmarks
+4. **Feature Flags**: `--features production` causing compilation issues
+
+**How to Debug:**
+1. **Check log files** (mentioned in JSON):
+   - `/tmp/block_validation_bench.log`
+   - `/tmp/commons-mempool.log`
+   - `/tmp/commons-tx-validation.log`
+
+2. **Run a benchmark manually**:
+   ```bash
+   cd /path/to/bllvm-bench
+   cargo bench --bench block_validation_realistic
+   ```
+
+3. **Check if dependencies exist**:
+   ```bash
+   ls -la ../bllvm-consensus/Cargo.toml
+   ls -la ../bllvm-node/Cargo.toml
+   ```
+
+4. **List available benchmarks**:
+   ```bash
+   cargo bench --list
+   ```
+
+**Fixes Applied:**
+- Fixed `CRITERION_DIR` used before definition in `block-validation-bench.sh`
+- Removed non-existent `connect_block` benchmark name
+- Made scripts try without `--features production` first, then with it as fallback
+- Updated benchmark names to match `Cargo.toml` exactly
+
 ## Performance Issues
 
 ### Benchmarks running very slowly
