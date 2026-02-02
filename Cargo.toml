@@ -19,9 +19,9 @@ rust-version = "1.83"
 criterion = "0.5"
 
 # Bitcoin Commons dependencies for benchmarking
-blvm-consensus = { version = "0.1.6", features = ["production", "utxo-commitments"] }
-blvm-protocol = "0.1.3"
-blvm-node = { version = "0.1.0", features = ["dandelion"] }
+blvm-consensus = { version = "0.1.6", features = ["production", "local-spec-lock", "smallvec"] }  # utxo-commitments disabled due to compilation errors
+# blvm-protocol = "0.1.3"  # Not needed for differential testing
+# blvm-node = { version = "0.1.0", features = ["dandelion"] }  # Not needed for differential testing
 
 # Utilities
 serde = { version = "1.0", features = ["derive"] }
@@ -34,6 +34,7 @@ thiserror = "1.0"
 
 # Additional dependencies for benchmarks
 rand = "0.8"
+getrandom = "=0.2.17"  # Force version to match blvm-protocol
 sha2 = "0.10"
 tempfile = "3.8"
 ripemd = "0.1"
@@ -283,6 +284,18 @@ path = "src/bin/diagnose_chunks.rs"
 [[bin]]
 name = "collect_chunks_rpc"
 path = "src/bin/collect_chunks_rpc.rs"
+
+[[bin]]
+name = "check_divergences"
+path = "src/bin/check_divergences.rs"
+
+[[bin]]
+name = "prepare_divergence_check"
+path = "src/bin/prepare_divergence_check.rs"
+
+[[bin]]
+name = "extract_failure_txs"
+path = "src/bin/extract_failure_txs.rs"
 
 [profile.release]
 # When running with --release, use production-like optimizations

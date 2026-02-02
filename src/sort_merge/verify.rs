@@ -15,6 +15,7 @@ use std::collections::HashMap;
 use rayon::prelude::*;
 
 use blvm_consensus::serialization::block::{deserialize_block_with_witnesses, deserialize_block_header};
+use blvm_consensus::serialization::transaction::serialize_transaction;
 use blvm_consensus::transaction::is_coinbase;
 use blvm_consensus::types::{Network, TransactionOutput, ByteString, BlockHeader};
 use blvm_consensus::script::{verify_script_with_context_full, SigVersion};
@@ -242,7 +243,7 @@ pub fn verify_scripts(
             .truncate(true)  // CRITICAL FIX: Clear log on restart, don't append
             .open(&failures_file)?
     );
-    writeln!(failures_writer, "# Block Height | Error Type | Details")?;
+    writeln!(failures_writer, "# Block Height | Error Type | Details | TX Hex")?;
     
     let mut height = start_height;
     let mut last_report = Instant::now();
@@ -659,7 +660,10 @@ pub fn verify_scripts(
                         if failure_type == "Script error" { "error" } else { "returned false" },
                         tx_idx, input_idx);
                     
-                    writeln!(failures_writer, "{} | {} | {}", height, failure_type, full_msg)?;
+                    // Include tx hex for divergence checking (avoids re-reading blocks later)
+                    let tx_hex = hex::encode(serialize_transaction(&block.transactions[tx_idx]));
+                    
+                    writeln!(failures_writer, "{} | {} | {} | {}", height, failure_type, full_msg, tx_hex)?;
                     failures_writer.flush()?;
                 }
                 

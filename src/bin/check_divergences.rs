@@ -1,354 +1,251 @@
 //! Check if BLVM failures are divergences from Bitcoin Core
-//! For each failure in failures.log, verify with Bitcoin Core to see if it's a divergence
-//! OPTIMIZED: Groups by transaction, batches RPC calls, caches results
+//! BATCHED VERSION: Sends multiple txs per RPC call for speed
 
-use anyhow::{Context, Result};
-use blvm_bench::chunked_cache::{ChunkedBlockIterator, SharedChunkCache};
-use blvm_bench::chunk_index::load_block_index;
+use anyhow::Result;
 use blvm_bench::start9_rpc_client::Start9RpcClient;
-use blvm_consensus::serialization::block::deserialize_block_with_witnesses;
-use blvm_consensus::serialization::transaction::serialize_transaction;
-use blvm_consensus::block::calculate_tx_id;
 use std::path::PathBuf;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
-use std::sync::Arc;
-use std::collections::{HashMap, BTreeMap};
+use std::collections::HashSet;
+use std::time::Instant;
+
+const BATCH_SIZE: usize = 25; // Txs per RPC call
+
+#[derive(Clone)]
+struct FailureEntry {
+    block_height: u64,
+    tx_idx: usize,
+    tx_hex: String,
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let failures_file = PathBuf::from("/run/media/acolyte/Extra/blockchain/sort_merge_data/failures.log");
-    let chunks_dir = PathBuf::from("/run/media/acolyte/Extra/blockchain");
+    let args: Vec<String> = std::env::args().collect();
+    let limit: Option<usize> = args.iter()
+        .position(|a| a == "--limit")
+        .and_then(|i| args.get(i + 1))
+        .and_then(|s| s.parse().ok());
     
-    println!("🔍 Optimized Divergence Investigation");
-    println!("  Reading failures from: {}", failures_file.display());
-    println!("");
+    // Try the pre-processed file first (has tx hex), fall back to original
+    let hex_file = PathBuf::from("/run/media/acolyte/Extra/blockchain/sort_merge_data/failures_with_hex.log");
+    let original_file = PathBuf::from("/run/media/acolyte/Extra/blockchain/sort_merge_data/failures.log");
+    let failures_file = if hex_file.exists() { hex_file } else { original_file };
     
+    println!("🔍 Divergence Checker (BATCHED TX HEX MODE)");
+    println!("  Batch size: {} txs/call", BATCH_SIZE);
+    if let Some(l) = limit { println!("  Limit: {} failures", l); }
+    println!("  File: {}", failures_file.display());
+    println!();
+    
+    // Initialize RPC
+    println!("Initializing...");
+    let rpc_client = Start9RpcClient::new();
+    if let Ok(r) = rpc_client.call("getblockcount", serde_json::json!([])).await {
+        println!("  ✅ Core at block {}", r.get("result").and_then(|v| v.as_u64()).unwrap_or(0));
+    }
+    
+    // Read and parse failures
     let file = File::open(&failures_file)?;
     let reader = BufReader::new(file);
     
-    // Get all "Script returned false" failures
-    let lines: Vec<String> = reader.lines().collect::<Result<_, _>>()?;
-    let script_failures: Vec<&String> = lines.iter()
-        .filter(|line| line.contains("Script returned false"))
-        .collect();
+    let mut failures: Vec<FailureEntry> = Vec::new();
+    let mut total_failures = 0usize;
+    let mut missing_hex = 0usize;
     
-    println!("Found {} script failures to investigate", script_failures.len());
-    println!("Loading block index once (this may take a minute)...");
-    
-    // CRITICAL OPTIMIZATION: Load block index ONCE and reuse it via Arc
-    let block_index = Arc::new(match load_block_index(&chunks_dir)? {
-        Some(idx) => {
-            println!("✅ Loaded block index ({} entries)", idx.len());
-            idx
-        },
-        None => {
-            anyhow::bail!("Block index not found - cannot load blocks efficiently");
-        }
-    });
-    println!();
-    
-    // Parse all failures first
-    #[derive(Debug, Clone)]
-    struct Failure {
-        block_height: u64,
-        tx_idx: usize,
-        input_idx: usize,
-        line_num: usize,
-    }
-    
-    let mut failures = Vec::new();
-    for (line_num, line) in script_failures.iter().enumerate() {
+    for line in reader.lines().filter_map(|l| l.ok()) {
+        if !line.contains("Script returned false") { continue; }
+        total_failures += 1;
+        
         let parts: Vec<&str> = line.split('|').collect();
-        if parts.len() < 3 {
+        if parts.len() < 4 {
+            missing_hex += 1;
             continue;
         }
         
         let block_height: u64 = match parts[0].trim().parse() {
-            Ok(h) => h,
-            Err(_) => continue,
+            Ok(h) if h > 0 => h,
+            _ => continue,
         };
         
         let msg = parts[2].trim();
-        let tx_idx = if let Some(start) = msg.find("tx ") {
-            if let Some(end) = msg[start+3..].find(',') {
-                msg[start+3..start+3+end].trim().parse::<usize>().ok()
-            } else {
-                None
-            }
-        } else {
-            None
+        let tx_idx: usize = match msg.find("tx ").and_then(|s| {
+            msg[s+3..].find(',').and_then(|e| msg[s+3..s+3+e].trim().parse().ok())
+        }) {
+            Some(t) => t,
+            None => continue,
         };
         
-        let input_idx = if let Some(start) = msg.find("input ") {
-            msg[start+6..].trim().parse::<usize>().ok()
-        } else {
-            None
-        };
-        
-        if let (Some(t), Some(i)) = (tx_idx, input_idx) {
-            failures.push(Failure {
-                block_height,
-                tx_idx: t,
-                input_idx: i,
-                line_num: line_num + 1,
-            });
+        let tx_hex = parts[3].trim().to_string();
+        if tx_hex.len() < 20 { 
+            missing_hex += 1;
+            continue; 
         }
+        
+        failures.push(FailureEntry { block_height, tx_idx, tx_hex });
     }
     
-    // OPTIMIZATION 1: Group failures by block first, then by transaction
-    // This allows us to load each block only once and process all transactions from it
-    use std::collections::BTreeMap;
-    let mut failures_by_block: BTreeMap<u64, BTreeMap<usize, Vec<Failure>>> = BTreeMap::new();
-    for failure in failures {
-        failures_by_block
-            .entry(failure.block_height)
-            .or_insert_with(BTreeMap::new)
-            .entry(failure.tx_idx)
-            .or_insert_with(Vec::new)
-            .push(failure);
+    println!("  Total script failures: {}", total_failures);
+    println!("  With TX hex: {}", failures.len());
+    if missing_hex > 0 {
+        println!("  ⚠️ Missing hex: {}", missing_hex);
     }
     
-    // Count unique transactions
-    let unique_txs: usize = failures_by_block.values()
-        .map(|tx_map| tx_map.len())
-        .sum();
+    if failures.is_empty() {
+        println!("\n❌ No failures with TX hex found!");
+        return Ok(());
+    }
     
-    println!("Grouped into {} blocks, {} unique transactions (from {} failures)", 
-            failures_by_block.len(), unique_txs, script_failures.len());
-    println!("Processing with batched RPC calls and parallel block loading...\n");
+    let process_limit = limit.unwrap_or(failures.len()).min(failures.len());
+    let num_batches = (process_limit + BATCH_SIZE - 1) / BATCH_SIZE;
+    println!("\nProcessing {} failures in ~{} batches...\n", process_limit, num_batches);
     
-    // Shared state
-    let rpc_client = Arc::new(Start9RpcClient::new());
-    let divergences = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    // Stats
+    let mut divergences = 0u64;
+    let mut core_rejects = 0usize;
+    let mut skipped_missing = 0usize;
+    let mut rpc_errors = 0usize;
+    let mut processed = 0usize;
+    let mut rpc_calls = 0usize;
+    let mut checked_keys: HashSet<String> = HashSet::new();
     
-    // CRITICAL: Limit block cache to prevent memory exhaustion
-    const MAX_CACHE_SIZE: usize = 1000;
-    let mut block_cache: HashMap<u64, Arc<Vec<u8>>> = HashMap::with_capacity(MAX_CACHE_SIZE);
-    let cache_lock = Arc::new(tokio::sync::Mutex::new(block_cache));
+    let start = Instant::now();
     
-    // CRITICAL OPTIMIZATION: Shared chunk cache - decompresses each chunk only once
-    let chunk_cache = Arc::new(SharedChunkCache::new(&chunks_dir, Arc::clone(&block_index)));
+    println!("================================================================================");
     
-    // OPTIMIZATION: Cache RPC results by txid (32 bytes) instead of hex string (saves memory)
-    // CRITICAL: Limit cache size to prevent OOM - use LRU eviction
-    const MAX_RPC_CACHE_SIZE: usize = 10000; // Max 10k cached results (~10-20MB)
-    let rpc_cache: HashMap<[u8; 32], (bool, Option<String>)> = HashMap::with_capacity(MAX_RPC_CACHE_SIZE);
-    let rpc_cache_lock = Arc::new(tokio::sync::Mutex::new(rpc_cache));
+    // Process in batches
+    let mut batch: Vec<&FailureEntry> = Vec::with_capacity(BATCH_SIZE);
     
-    // Process in batches - group by block for better cache utilization
-    const BLOCKS_PER_BATCH: usize = 10; // Process 10 blocks at a time
-    const RPC_BATCH_SIZE: usize = 20; // Transactions per RPC batch
-    let mut processed_blocks = 0;
-    let total_blocks = failures_by_block.len();
-    
-    // CRITICAL: Process block entries in smaller chunks to avoid loading all 127k blocks into memory
-    // Convert to iterator and process in chunks of 1000 blocks at a time
-    let block_entries_iter: Vec<_> = failures_by_block.into_iter().collect();
-    const BLOCK_ENTRIES_CHUNK_SIZE: usize = 1000; // Process 1000 blocks at a time instead of all 127k
-    
-    for block_entries_chunk in block_entries_iter.chunks(BLOCK_ENTRIES_CHUNK_SIZE) {
-        for block_batch in block_entries_chunk.chunks(BLOCKS_PER_BATCH) {
-        let batch_num = processed_blocks / BLOCKS_PER_BATCH + 1;
-        println!("Processing batch {} (blocks {}-{})...", 
-                batch_num, processed_blocks + 1, processed_blocks + block_batch.len());
+    for failure in failures.iter().take(process_limit) {
+        // Deduplicate by tx hex prefix
+        let key = if failure.tx_hex.len() >= 64 { &failure.tx_hex[..64] } else { &failure.tx_hex };
+        if checked_keys.contains(key) { continue; }
+        checked_keys.insert(key.to_string());
         
-        // Step 1: Load all blocks in parallel (better cache utilization)
-        // Store deserialized blocks by height
-        let mut blocks_loaded: HashMap<u64, Arc<Vec<u8>>> = HashMap::new();
+        batch.push(failure);
         
-        // Load blocks in parallel using tokio
-        let block_load_tasks: Vec<_> = block_batch.iter().map(|(block_height, _)| {
-            let block_height = *block_height;
-            let chunk_cache = Arc::clone(&chunk_cache);
-            let cache_lock = Arc::clone(&cache_lock);
+        // Process batch when full
+        if batch.len() >= BATCH_SIZE {
+            rpc_calls += 1;
+            let hex_refs: Vec<&str> = batch.iter().map(|f| f.tx_hex.as_str()).collect();
             
-            tokio::spawn(async move {
-                // Try cache first
-                {
-                    let cache = cache_lock.lock().await;
-                    if let Some(cached) = cache.get(&block_height) {
-                        return Some((Arc::clone(cached), block_height));
-                    }
-                }
-                
-                // Load from chunk cache
-                match chunk_cache.load_block(block_height) {
-                    Ok(Some(data)) => {
-                        let data_arc = Arc::new(data);
-                        // Cache it
-                        let mut cache = cache_lock.lock().await;
-                        if cache.len() >= MAX_CACHE_SIZE {
-                            if let Some(&oldest_key) = cache.keys().next() {
-                                cache.remove(&oldest_key);
-                            }
-                        }
-                        cache.insert(block_height, Arc::clone(&data_arc));
-                        Some((data_arc, block_height))
-                    },
-                    _ => None,
-                }
-            })
-        }).collect();
-        
-        // Wait for all blocks to load
-        let block_results = futures::future::join_all(block_load_tasks).await;
-        for result in block_results {
-            if let Ok(Some((block_data, height))) = result {
-                blocks_loaded.insert(height, block_data);
-            }
-        }
-        
-        // Step 2: Collect all transactions from loaded blocks
-        let mut tx_hexes = Vec::new();
-        let mut tx_ids = Vec::new();
-        let mut tx_to_failures: Vec<Vec<Failure>> = Vec::new();
-        
-        for (block_height, tx_map) in block_batch {
-            let block_data = match blocks_loaded.get(block_height) {
-                Some(data) => data,
-                None => continue, // Block couldn't be loaded
-            };
-            
-            // Deserialize block
-            let (block, _witnesses) = match deserialize_block_with_witnesses(block_data) {
-                Ok(b) => b,
-                Err(_) => continue,
-            };
-            
-            for (tx_idx, failures_in_tx) in tx_map {
-                if *tx_idx >= block.transactions.len() {
-                    continue;
-                }
-                
-                let tx = &block.transactions[*tx_idx];
-                let tx_id = calculate_tx_id(tx);
-                
-                // Check RPC cache by txid (more efficient than hex string)
-                let cached_result = {
-                    let cache = rpc_cache_lock.lock().await;
-                    cache.get(&tx_id).cloned()
-                };
-                
-                if let Some((allowed, _reject_reason)) = cached_result {
-                    // Use cached result
-                    if allowed {
-                        // Divergence - report all failures for this transaction
-                        for failure in failures_in_tx {
-                            let div_num = divergences.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-                            println!("❌ DIVERGENCE #{}: Block {}, tx {}, input {} - BLVM rejected, Core accepts", 
-                                    div_num, failure.block_height, failure.tx_idx, failure.input_idx);
-                        }
-                    }
-                    continue; // Already checked
-                }
-                
-                // Serialize transaction for RPC
-                let tx_bytes = serialize_transaction(tx);
-                let tx_hex = hex::encode(&tx_bytes);
-                
-                // Add to batch for RPC call
-                tx_hexes.push(tx_hex);
-                tx_ids.push(tx_id);
-                tx_to_failures.push(failures_in_tx.clone());
-            }
-        }
-        
-        if tx_hexes.is_empty() {
-            processed_blocks += block_batch.len();
-            continue;
-        }
-        
-        // Step 3: Batch RPC calls (process in sub-batches if needed)
-        for rpc_batch in tx_hexes.chunks(RPC_BATCH_SIZE) {
-            let tx_hex_refs: Vec<&str> = rpc_batch.iter().map(|s| s.as_str()).collect();
-            let batch_start_idx = tx_hexes.len() - rpc_batch.len();
-            
-            match rpc_client.test_mempool_accept_batch(&tx_hex_refs).await {
-                Ok(results) => {
-                    if let Some(results_array) = results.as_array() {
-                        for (i, result) in results_array.iter().enumerate() {
-                            let global_idx = batch_start_idx + i;
-                            if global_idx >= tx_hexes.len() {
-                                break;
-                            }
+            match tokio::time::timeout(
+                std::time::Duration::from_secs(120),
+                rpc_client.test_mempool_accept_batch(&hex_refs)
+            ).await {
+                Ok(Ok(results)) => {
+                    if let Some(arr) = results.as_array() {
+                        for (i, r) in arr.iter().enumerate() {
+                            if i >= batch.len() { break; }
+                            processed += 1;
                             
-                            let allowed = result.get("allowed")
-                                .and_then(|v| v.as_bool())
-                                .unwrap_or(false);
+                            let allowed = r.get("allowed").and_then(|v| v.as_bool()).unwrap_or(false);
+                            let reason = r.get("reject-reason").and_then(|v| v.as_str()).unwrap_or("");
                             
-                            let reject_reason = result.get("reject-reason")
-                                .and_then(|v| v.as_str())
-                                .map(|s| s.to_string());
-                            
-                            let reason_str = reject_reason.as_ref().map(|s| s.as_str()).unwrap_or("");
-                            
-                            // Skip "missing-inputs" - not script verification bugs
-                            if !allowed && (reason_str.contains("missing-inputs") || reason_str.contains("missing-input")) {
-                            // Cache by txid and skip (with eviction if needed)
-                            {
-                                let mut cache = rpc_cache_lock.lock().await;
-                                if cache.len() >= MAX_RPC_CACHE_SIZE && !cache.contains_key(&tx_ids[global_idx]) {
-                                    if let Some(&oldest_key) = cache.keys().next() {
-                                        cache.remove(&oldest_key);
-                                    }
-                                }
-                                cache.insert(tx_ids[global_idx], (false, reject_reason));
-                            }
-                                continue;
-                            }
-                            
-                            // Cache result by txid (more efficient than hex string)
-                            // CRITICAL: Evict oldest entries if cache is full
-                            {
-                                let mut cache = rpc_cache_lock.lock().await;
-                                if cache.len() >= MAX_RPC_CACHE_SIZE && !cache.contains_key(&tx_ids[global_idx]) {
-                                    // Evict first entry (simple FIFO - could use LRU but this is simpler)
-                                    if let Some(&oldest_key) = cache.keys().next() {
-                                        cache.remove(&oldest_key);
-                                    }
-                                }
-                                cache.insert(tx_ids[global_idx], (allowed, reject_reason.clone()));
-                            }
-                            
-                            // Check for divergence
-                            if allowed {
-                                // Divergence - report all failures for this transaction
-                                for failure in &tx_to_failures[global_idx] {
-                                    let div_num = divergences.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-                                    println!("❌ DIVERGENCE #{}: Block {}, tx {}, input {} - BLVM rejected, Core accepts", 
-                                            div_num, failure.block_height, failure.tx_idx, failure.input_idx);
-                                }
+                            if !allowed && reason.contains("missing-input") {
+                                skipped_missing += 1;
+                            } else if allowed {
+                                divergences += 1;
+                                let f = &batch[i];
+                                println!("\n❌ DIVERGENCE #{}: Block {}, tx {}", divergences, f.block_height, f.tx_idx);
+                            } else {
+                                core_rejects += 1;
                             }
                         }
                     }
-                },
-                Err(e) => {
-                    eprintln!("  ⚠️  RPC batch call failed: {}", e);
+                }
+                Ok(Err(e)) => {
+                    // Batch failed, try individually
+                    for f in &batch {
+                        processed += 1;
+                        if let Ok(Ok(r)) = tokio::time::timeout(
+                            std::time::Duration::from_secs(30),
+                            rpc_client.test_mempool_accept(&f.tx_hex)
+                        ).await {
+                            let allowed = r.as_array().and_then(|a| a.first())
+                                .and_then(|x| x.get("allowed")).and_then(|v| v.as_bool()).unwrap_or(false);
+                            let reason = r.as_array().and_then(|a| a.first())
+                                .and_then(|x| x.get("reject-reason")).and_then(|v| v.as_str()).unwrap_or("");
+                            
+                            if !allowed && reason.contains("missing-input") {
+                                skipped_missing += 1;
+                            } else if allowed {
+                                divergences += 1;
+                                println!("\n❌ DIVERGENCE #{}: Block {}, tx {}", divergences, f.block_height, f.tx_idx);
+                            } else {
+                                core_rejects += 1;
+                            }
+                        } else {
+                            rpc_errors += 1;
+                        }
+                    }
+                    if rpc_errors < 5 { eprintln!("  Batch RPC error: {}", e); }
+                }
+                Err(_) => {
+                    rpc_errors += batch.len();
+                    if rpc_errors < 5 { eprintln!("  Batch RPC timeout"); }
                 }
             }
-        }
-        
-        processed_blocks += block_batch.len();
-        let total_divergences = divergences.load(std::sync::atomic::Ordering::Relaxed);
-        println!("  Batch {} complete: {} divergences found (total: {}/{})", 
-                batch_num, total_divergences, total_divergences, processed_blocks);
-        println!();
+            
+            batch.clear();
+            
+            // Progress report
+            if rpc_calls % 10 == 0 || rpc_calls == 1 {
+                let elapsed = start.elapsed().as_secs_f64();
+                let rate = processed as f64 / elapsed.max(0.1);
+                let remaining = (process_limit - processed) as f64 / rate.max(0.1);
+                println!("[{}/{} txs, {} batches] ({:.1} tx/s, ETA {:.0}m) - {} div, {} ok, {} miss, {} err",
+                        processed, process_limit, rpc_calls, rate, remaining / 60.0,
+                        divergences, core_rejects, skipped_missing, rpc_errors);
+            }
         }
     }
     
-    let total_divergences = divergences.load(std::sync::atomic::Ordering::Relaxed);
-    println!("{}", "=".repeat(80));
-    println!("FINAL RESULTS");
-    println!("{}", "=".repeat(80));
-    println!("  Total blocks processed: {}", processed_blocks);
-    println!("  ❌ Divergences found: {}", total_divergences);
-    println!();
+    // Process remaining batch
+    if !batch.is_empty() {
+        rpc_calls += 1;
+        let hex_refs: Vec<&str> = batch.iter().map(|f| f.tx_hex.as_str()).collect();
+        
+        if let Ok(Ok(results)) = tokio::time::timeout(
+            std::time::Duration::from_secs(120),
+            rpc_client.test_mempool_accept_batch(&hex_refs)
+        ).await {
+            if let Some(arr) = results.as_array() {
+                for (i, r) in arr.iter().enumerate() {
+                    if i >= batch.len() { break; }
+                    processed += 1;
+                    
+                    let allowed = r.get("allowed").and_then(|v| v.as_bool()).unwrap_or(false);
+                    let reason = r.get("reject-reason").and_then(|v| v.as_str()).unwrap_or("");
+                    
+                    if !allowed && reason.contains("missing-input") {
+                        skipped_missing += 1;
+                    } else if allowed {
+                        divergences += 1;
+                        let f = &batch[i];
+                        println!("\n❌ DIVERGENCE #{}: Block {}, tx {}", divergences, f.block_height, f.tx_idx);
+                    } else {
+                        core_rejects += 1;
+                    }
+                }
+            }
+        }
+    }
     
-    if total_divergences > 0 {
-        println!("  🐛 Found {} consensus bugs (BLVM too strict)", total_divergences);
-    } else {
-        println!("  ✅ No divergences found - all failures match Core behavior");
+    let elapsed = start.elapsed();
+    
+    println!("================================================================================\n");
+    println!("RESULTS ({:.1}s = {:.1}m)", elapsed.as_secs_f64(), elapsed.as_secs_f64() / 60.0);
+    println!("  Txs checked: {}", processed);
+    println!("  Unique txs: {}", checked_keys.len());
+    println!("  RPC calls: {} (batched)", rpc_calls);
+    println!("  Core also rejects: {} ✓", core_rejects);
+    println!("  Missing inputs: {}", skipped_missing);
+    println!("  RPC errors: {}", rpc_errors);
+    
+    if divergences > 0 { 
+        println!("\n  ❌ DIVERGENCES: {}", divergences); 
+    } else { 
+        println!("\n  ✅ NO DIVERGENCES FOUND"); 
     }
     
     Ok(())
