@@ -5,8 +5,7 @@
 
 use crate::core_rpc_client::CoreRpcClient;
 use anyhow::{Context, Result};
-use blvm_consensus::types::Network;
-use blvm_consensus::{Block, Transaction};
+use blvm_consensus::types::{Network, Block, Transaction};
 
 /// Comparison result
 #[derive(Debug, Clone)]
