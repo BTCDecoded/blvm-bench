@@ -105,6 +105,9 @@ pub async fn compare_transaction_validation(
 }
 
 /// Compare block validation between BLLVM and Core
+///
+/// Optionally performs script-level comparison using Bitcoin Core's libbitcoinconsensus
+/// when the differential feature is enabled.
 pub async fn compare_block_validation(
     block: &Block,
     height: u64,
@@ -172,6 +175,27 @@ pub async fn compare_block_validation(
     } else {
         None
     };
+
+    // NEW: Script-level comparison using bitcoinconsensus (if feature enabled)
+    #[cfg(feature = "differential")]
+    {
+        use crate::script_validation::script_validation::compare_block_scripts;
+        match compare_block_scripts(block, height) {
+            Ok(script_results) => {
+                for result in script_results {
+                    if !result.matches {
+                        tracing::warn!(
+                            "Script divergence at block {} tx {} input {}: Core={}, BLVM={}",
+                            height, result.input_index, result.core_result, result.blvm_result
+                        );
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::debug!("Script comparison skipped for block {}: {}", height, e);
+            }
+        }
+    }
 
     Ok(ComparisonResult {
         matches,

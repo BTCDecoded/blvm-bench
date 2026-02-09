@@ -123,19 +123,11 @@ async fn main() -> Result<()> {
             }
         }
         
-        // Calculate script flags
-        // tx_witnesses is Option<&Vec<Witness>> where Witness = Vec<Vec<u8>>
-        // calculate_script_flags_for_block expects Option<&Witness> where Witness = Vec<Vec<u8>>
-        // We need to flatten all input witnesses into a single Witness
-        use blvm_consensus::witness::Witness;
-        let flattened_tx_witness: Option<Witness> = tx_witnesses.map(|witnesses| {
-            witnesses.iter()
-                .flat_map(|witness| witness.iter().cloned())
-                .collect()
-        });
+        // Calculate script flags (optimization: just check witness presence, no flattening)
+        let has_witness = tx_witnesses.map(|w| !w.is_empty()).unwrap_or(false);
         let flags = blvm_consensus::block::calculate_script_flags_for_block(
             tx,
-            flattened_tx_witness.as_ref(),
+            has_witness,
             block_height,
             Network::Mainnet
         );

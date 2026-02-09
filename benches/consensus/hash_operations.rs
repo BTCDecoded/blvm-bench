@@ -349,8 +349,8 @@ fn benchmark_pow_batching(c: &mut Criterion) {
     }
 }
 
-// Note: SipHash benchmarking is in reference-node/benches/compact_blocks.rs
-// since siphasher is only used in reference-node
+// Note: SipHash benchmarking is in blvm-node/benches/compact_blocks.rs
+// since siphasher is only used in blvm-node
 
 #[cfg(feature = "production")]
 fn benchmark_batch_ecdsa_verification(c: &mut Criterion) {

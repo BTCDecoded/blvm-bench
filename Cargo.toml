@@ -39,6 +39,8 @@ sha2 = "0.10"
 tempfile = "3.8"
 ripemd = "0.1"
 secp256k1 = "0.28"
+# Bitcoin Core consensus library bindings for differential testing
+bitcoinconsensus = { version = "0.1", optional = true }
 
 # For CLI tool to run shell benchmarks
 clap = { version = "4.4", features = ["derive"] }
@@ -73,7 +75,7 @@ default = []
 # This allows testing benches in production mode even though this is a dev crate
 production = ["blvm-consensus/production"]
 # Enable differential testing functionality
-differential = []
+differential = ["bitcoinconsensus"]
 # Enable benchmark helpers (uses differential infrastructure)
 benchmark-helpers = ["differential"]
 

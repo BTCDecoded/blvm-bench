@@ -47,6 +47,8 @@ pub mod collect_only;
 // pub mod two_phase;
 #[cfg(feature = "differential")]
 pub mod sort_merge;
+#[cfg(feature = "differential")]
+pub mod script_validation;
 
 use anyhow::Result;
 
