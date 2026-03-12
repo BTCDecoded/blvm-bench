@@ -1,7 +1,7 @@
 //! Direct Block File Reader
 //!
-//! Reads blocks directly from Bitcoin Core's block files (blk*.dat) without using RPC.
-//! This eliminates RPC overhead and allows sharing block data between Core and Commons.
+//! Reads blocks directly from standard Bitcoin block files (blk*.dat) without using RPC.
+//! This eliminates RPC overhead and allows sharing block data across node implementations.
 
 use anyhow::{Context, Result};
 use hex;
@@ -13,7 +13,7 @@ use std::fs::File;
 use std::io::{BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
-/// Bitcoin Core block file format:
+/// Standard Bitcoin block file format (blk*.dat):
 /// - Magic bytes: 4 bytes (0xf9beb4d9 for mainnet)
 /// - Block size: 4 bytes (little-endian)
 /// - Block data: variable size
@@ -349,7 +349,7 @@ impl BlockFileReader {
     }
 }
 
-/// Block file reader for Bitcoin Core's blk*.dat format
+/// Block file reader for standard blk*.dat format
 pub struct BlockFileReader {
     data_dir: PathBuf,
     network: Network,
@@ -504,12 +504,12 @@ impl BlockFileReader {
         })
     }
     
-    /// Auto-detect Core data directory
-    /// Defaults to standard local Bitcoin Core paths, with Start9 as fallback
+    /// Auto-detect Bitcoin data directory
+    /// Defaults to standard paths (~/.bitcoin, /var/lib/bitcoind), with Start9 as fallback
     pub fn auto_detect(network: Network) -> Result<Self> {
-        // Check common locations - standard Bitcoin Core paths first
+        // Check common locations - standard Bitcoin data paths
         let possible_dirs = vec![
-            dirs::home_dir().map(|h| h.join(".bitcoin")), // Standard local Bitcoin Core (default)
+            dirs::home_dir().map(|h| h.join(".bitcoin")), // Default data dir
             Some(PathBuf::from("/root/.bitcoin")),
             Some(PathBuf::from("/var/lib/bitcoind")),
             // Start9 paths (fallback for local testing only)
@@ -532,7 +532,7 @@ impl BlockFileReader {
             }
         }
         
-        anyhow::bail!("Could not auto-detect Bitcoin Core data directory with readable blocks")
+        anyhow::bail!("Could not auto-detect Bitcoin data directory with readable blocks")
     }
     
     /// Read a block by height (requires index or sequential scan)
@@ -541,11 +541,10 @@ impl BlockFileReader {
     /// because we can read blocks directly from disk without network overhead.
     pub fn read_block_by_height(&self, height: u64) -> Result<Vec<u8>> {
         // For now, we'll need to scan through blocks sequentially
-        // In the future, we could use Core's block index (blocks/index/*)
+        // In the future, we could use the block index (blocks/index/*)
         // or build our own index
         
         // TODO: Implement efficient height-to-block mapping
-        // For now, this is a placeholder that would need Core's index
         anyhow::bail!("Direct height lookup not yet implemented. Use read_block_by_hash or sequential reading.")
     }
     
@@ -3822,10 +3821,10 @@ impl Iterator for BlockIterator {
     }
 }
 
-/// Shared block cache for both Core and Commons
+/// Shared block cache for reference node and Commons
 /// 
 /// Downloads blocks once and stores them in a shared location
-/// that both Core and Commons can access.
+/// that both reference node and Commons can access.
 pub struct SharedBlockCache {
     cache_dir: PathBuf,
 }

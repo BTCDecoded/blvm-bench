@@ -380,10 +380,11 @@ impl ChunkedBlockIterator {
             let mut zstd_proc = std::process::Command::new("zstd")
                 .arg("-d")
                 .arg("--stdout")
+                .arg("-q") // Quiet - avoid stderr output that could fill pipe and deadlock
                 .arg(format!("-T{}", zstd_threads)) // Multi-threaded decompression
                 .arg(&chunk_file)
                 .stdout(std::process::Stdio::piped())
-                .stderr(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::null()) // Avoid deadlock: piped stderr fills and blocks zstd
                 .spawn()
                 .with_context(|| format!("Failed to start zstd for chunk {}", entry.chunk_number))?;
 
@@ -403,21 +404,34 @@ impl ChunkedBlockIterator {
 
         if self.current_offset < entry.offset_in_chunk {
             let skip_bytes = entry.offset_in_chunk - self.current_offset;
-            let mut skip_buf = vec![0u8; (skip_bytes.min(1024 * 1024)) as usize]; // 1MB max skip buffer
+            // Use 64MB skip buffer - 1MB was too slow for large chunks (50k+ read() calls for 50GB seek)
+            const SKIP_BUF_SIZE: u64 = 64 * 1024 * 1024;
+            let mut skip_buf = vec![0u8; (skip_bytes.min(SKIP_BUF_SIZE)) as usize];
             let mut remaining = skip_bytes;
-            
+            let mut skipped_so_far = 0u64;
+            let progress_interval = 1024 * 1024 * 1024; // Log every 1GB
+            let total_gb = skip_bytes as f64 / 1e9;
+            if total_gb > 0.1 {
+                eprintln!("   ⏳ Seeking to block {} in chunk {} ({:.1}GB to skip)...", height, entry.chunk_number, total_gb);
+            }
+
             while remaining > 0 {
                 let to_read = remaining.min(skip_buf.len() as u64) as usize;
-                // CRITICAL FIX: Use read() instead of read_exact() to avoid blocking forever
-                // If read() returns fewer bytes than requested, that's OK - we'll continue
                 use std::io::Read;
                 let bytes_read = reader.read(&mut skip_buf[..to_read])
                     .with_context(|| format!("Failed to read from chunk stream at offset {}", self.current_offset))?;
                 if bytes_read == 0 {
-                    anyhow::bail!("Unexpected EOF while seeking to block offset (current={}, needed={})", 
+                    anyhow::bail!("Unexpected EOF while seeking to block offset (current={}, needed={})",
                                  self.current_offset, entry.offset_in_chunk);
                 }
                 remaining -= bytes_read as u64;
+                skipped_so_far += bytes_read as u64;
+                let prev_gb = (skipped_so_far - bytes_read as u64) / progress_interval;
+                let curr_gb = skipped_so_far / progress_interval;
+                if curr_gb > prev_gb && total_gb > 0.1 {
+                    eprintln!("   ⏳ Seeking in chunk {}: {:.1}GB / {:.1}GB...", entry.chunk_number,
+                             skipped_so_far as f64 / 1e9, total_gb);
+                }
             }
             self.current_offset = entry.offset_in_chunk;
         } else if self.current_offset > entry.offset_in_chunk {
@@ -702,9 +716,10 @@ pub fn load_chunked_cache(
         let mut zstd_proc = Command::new("zstd")
             .arg("-d")
             .arg("--stdout")
+            .arg("-q")
             .arg(&chunk_file)
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
+            .stderr(Stdio::null())
             .spawn()
             .with_context(|| format!("Failed to start zstd for chunk {}", chunk_num))?;
         
@@ -865,10 +880,11 @@ impl SharedChunkCache {
             let mut zstd_proc = std::process::Command::new("zstd")
                 .arg("-d")
                 .arg("--stdout")
+                .arg("-q")
                 .arg(format!("-T{}", zstd_threads))
                 .arg(&chunk_file)
                 .stdout(std::process::Stdio::piped())
-                .stderr(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::null())
                 .spawn()
                 .with_context(|| format!("Failed to start zstd for chunk {}", entry.chunk_number))?;
 
@@ -886,9 +902,10 @@ impl SharedChunkCache {
         // Seek to block offset if needed
         if *current_offset < entry.offset_in_chunk {
             let skip_bytes = entry.offset_in_chunk - *current_offset;
-            let mut skip_buf = vec![0u8; (skip_bytes.min(1024 * 1024)) as usize];
+            const SKIP_BUF_SIZE: u64 = 64 * 1024 * 1024;
+            let mut skip_buf = vec![0u8; (skip_bytes.min(SKIP_BUF_SIZE)) as usize];
             let mut remaining = skip_bytes;
-            
+
             use std::io::Read;
             while remaining > 0 {
                 let to_read = remaining.min(skip_buf.len() as u64) as usize;

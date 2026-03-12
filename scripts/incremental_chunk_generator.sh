@@ -1,6 +1,7 @@
 #!/bin/bash
-# Incremental chunk generator - processes one chunk at a time and moves to secondary drive
-# This prevents disk space issues and allows monitoring progress
+# Incremental chunk generator - NO BLOCK SKIPPING
+# Processes one chunk at a time and moves to secondary drive
+# CRITICAL: Never skips blocks - if corruption is found, process fails
 
 set -euo pipefail
 
@@ -102,7 +103,7 @@ fi
 
 log "Starting from chunk $next_chunk"
 
-# Function to split and compress one chunk
+# Function to split and compress one chunk - NO SKIPPING
 split_chunk() {
     local chunk_num=$1
     local start_block=$2
@@ -120,6 +121,7 @@ split_chunk() {
     
     # Read blocks from temp file and write to chunk
     # Format: [len:u32][data...][len:u32][data...]...
+    # CRITICAL: Never skip blocks - if corruption found, fail immediately
     python3 << PYTHON_EOF
 import struct
 import sys
@@ -137,16 +139,11 @@ MAX_BLOCK_SIZE = 10 * 1024 * 1024  # 10 MB
 
 # Open temp file
 with open(temp_file, 'rb') as f_in:
-    # Skip to start block
+    # Skip to start block - NO SKIPPING OF CORRUPTED BLOCKS
     blocks_skipped = 0
     bytes_skipped = 0
-    errors_skipped = 0
-    consecutive_errors = 0
-    MAX_CONSECUTIVE_ERRORS = 100  # Allow up to 100 consecutive corrupted blocks before giving up
     
     while blocks_skipped < start_block:
-        current_pos = f_in.tell()
-        
         # Read block length
         len_bytes = f_in.read(4)
         if len(len_bytes) < 4:
@@ -154,27 +151,15 @@ with open(temp_file, 'rb') as f_in:
             sys.exit(1)
         block_len = struct.unpack('<I', len_bytes)[0]
         
-        # Validate block length
+        # Validate block length - if corrupted, FAIL IMMEDIATELY
         if block_len > MAX_BLOCK_SIZE:
-            consecutive_errors += 1
-            if consecutive_errors <= 3:  # Only log first few
-                print(f"⚠️  Block {blocks_skipped} has suspicious size: {block_len:,} bytes ({block_len/(1024**2):.1f} MB) - skipping", file=sys.stderr)
-            
-            if consecutive_errors > MAX_CONSECUTIVE_ERRORS:
-                print(f"Error: Too many consecutive corrupted blocks ({consecutive_errors}) starting at block {blocks_skipped}", file=sys.stderr)
-                sys.exit(1)
-            
-            # For skipping phase, just skip a reasonable amount and continue
-            # Assume average block size is ~1MB, skip that much
-            skip_amount = min(block_len, 2 * 1024 * 1024)  # Skip up to 2MB
-            f_in.seek(skip_amount, 1)
-            blocks_skipped += 1
-            bytes_skipped += 4 + skip_amount
-            errors_skipped += 1
-            continue
+            print(f"ERROR: Block {blocks_skipped} has corrupted size: {block_len:,} bytes ({block_len/(1024**2):.1f} MB)", file=sys.stderr)
+            print(f"CRITICAL: Cannot skip blocks - temp file is corrupted!", file=sys.stderr)
+            sys.exit(1)
         
-        # Valid block - reset error counter
-        consecutive_errors = 0
+        if block_len == 0:
+            print(f"ERROR: Block {blocks_skipped} has zero length", file=sys.stderr)
+            sys.exit(1)
         
         # Skip block data
         f_in.seek(block_len, 1)
@@ -184,14 +169,11 @@ with open(temp_file, 'rb') as f_in:
         if blocks_skipped % 25000 == 0:
             print(f"  Skipped {blocks_skipped:,}/{start_block:,} blocks...", file=sys.stderr)
     
-    if errors_skipped > 0:
-        print(f"  ⚠️  Encountered {errors_skipped} suspicious blocks while skipping", file=sys.stderr)
-    
     print(f"  Reached start block {start_block} (skipped {bytes_skipped / (1024**2):.1f} MB)", file=sys.stderr)
     
-    # Read num_blocks blocks and compress
+    # Read num_blocks blocks and compress - NO SKIPPING
     zstd_proc = subprocess.Popen(
-        ['zstd', '-1', '--stdout'],
+        ['zstd', '-3', '--stdout'],  # OPTIMIZED: -3 gives 10-15% better compression with minimal speed loss
         stdin=subprocess.PIPE,
         stdout=open(output_file, 'wb'),
         stderr=subprocess.PIPE
@@ -199,44 +181,37 @@ with open(temp_file, 'rb') as f_in:
     
     blocks_read = 0
     total_bytes = 0
-    errors_encountered = 0
     
     while blocks_read < num_blocks:
         # Read block length
         len_bytes = f_in.read(4)
         if len(len_bytes) < 4:
+            print(f"Error: Reached end of file at block {start_block + blocks_read}", file=sys.stderr)
             break
+        
         block_len = struct.unpack('<I', len_bytes)[0]
         
-        # Validate block length
+        # Validate block length - if corrupted, FAIL IMMEDIATELY
         if block_len > MAX_BLOCK_SIZE:
-            print(f"⚠️  Block {start_block + blocks_read} has suspicious size: {block_len:,} bytes ({block_len/(1024**2):.1f} MB)", file=sys.stderr)
-            print(f"   Skipping this block (may be corrupted)", file=sys.stderr)
-            errors_encountered += 1
-            # Skip this block and try next
-            # Try to find next valid block
-            found_valid = False
-            for offset in range(1, 1000):
-                f_in.seek(-3, 1)
-                test_bytes = f_in.read(4)
-                if len(test_bytes) == 4:
-                    test_len = struct.unpack('<I', test_bytes)[0]
-                    if test_len < MAX_BLOCK_SIZE and test_len > 0:
-                        block_len = test_len
-                        len_bytes = test_bytes
-                        found_valid = True
-                        break
-                f_in.seek(3, 1)
-            
-            if not found_valid:
-                print(f"Error: Could not find valid block after block {start_block + blocks_read}", file=sys.stderr)
-                break
+            print(f"ERROR: Block {start_block + blocks_read} has corrupted size: {block_len:,} bytes ({block_len/(1024**2):.1f} MB)", file=sys.stderr)
+            print(f"CRITICAL: Cannot skip blocks - temp file is corrupted!", file=sys.stderr)
+            zstd_proc.stdin.close()
+            zstd_proc.wait()
+            sys.exit(1)
+        
+        if block_len == 0:
+            print(f"ERROR: Block {start_block + blocks_read} has zero length", file=sys.stderr)
+            zstd_proc.stdin.close()
+            zstd_proc.wait()
+            sys.exit(1)
         
         # Read block data
         block_data = f_in.read(block_len)
         if len(block_data) < block_len:
-            print(f"Warning: Block {start_block + blocks_read} truncated (expected {block_len}, got {len(block_data)})", file=sys.stderr)
-            break
+            print(f"Error: Block {start_block + blocks_read} truncated (expected {block_len}, got {len(block_data)})", file=sys.stderr)
+            zstd_proc.stdin.close()
+            zstd_proc.wait()
+            sys.exit(1)
         
         # Write to zstd (length + data)
         zstd_proc.stdin.write(len_bytes)
@@ -255,11 +230,12 @@ with open(temp_file, 'rb') as f_in:
         print(f"Error: zstd compression failed: {zstd_stderr.decode()}", file=sys.stderr)
         sys.exit(1)
     
+    if blocks_read != num_blocks:
+        print(f"Error: Expected {num_blocks} blocks but only read {blocks_read}", file=sys.stderr)
+        sys.exit(1)
+    
     chunk_num_val = $chunk_num
-    if errors_encountered > 0:
-        print(f"  ⚠️  Chunk {chunk_num_val}: {blocks_read:,} blocks compressed ({errors_encountered} errors encountered)", file=sys.stderr)
-    else:
-        print(f"  ✅ Chunk {chunk_num_val}: {blocks_read:,} blocks compressed", file=sys.stderr)
+    print(f"  ✅ Chunk {chunk_num_val}: {blocks_read:,} blocks compressed", file=sys.stderr)
 PYTHON_EOF
 
     local exit_code=$?

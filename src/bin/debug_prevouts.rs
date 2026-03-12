@@ -36,18 +36,16 @@ fn main() -> Result<()> {
 
     // Load block
     println!("📦 Loading block...");
-    let mut block_iter = ChunkedBlockIterator::new(
-        &chunks_dir,
-        Some(block_height),
-        Some(1),
-    )?
-    .ok_or_else(|| anyhow::anyhow!("Failed to create block iterator"))?;
+    let mut block_iter = ChunkedBlockIterator::new(&chunks_dir, Some(block_height), Some(1))?
+        .ok_or_else(|| anyhow::anyhow!("Failed to create block iterator"))?;
 
-    let block_data = block_iter.next_block()?
+    let block_data = block_iter
+        .next_block()?
         .ok_or_else(|| anyhow::anyhow!("Block {} not found", block_height))?;
 
-    let (block, _witnesses) = blvm_consensus::serialization::block::deserialize_block_with_witnesses(&block_data)
-        .context("Failed to deserialize block")?;
+    let (block, _witnesses) =
+        blvm_consensus::serialization::block::deserialize_block_with_witnesses(&block_data)
+            .context("Failed to deserialize block")?;
 
     let tx = block
         .transactions
@@ -59,7 +57,11 @@ fn main() -> Result<()> {
         .get(input_idx)
         .ok_or_else(|| anyhow::anyhow!("Input {} not found in transaction", input_idx))?;
 
-    println!("  Transaction has {} inputs, {} outputs", tx.inputs.len(), tx.outputs.len());
+    println!(
+        "  Transaction has {} inputs, {} outputs",
+        tx.inputs.len(),
+        tx.outputs.len()
+    );
     println!("");
 
     // Load prevouts from joined_sorted.bin (what batch test uses)
@@ -77,7 +79,10 @@ fn main() -> Result<()> {
         );
     }
 
-    println!("  Found {} prevouts in joined_sorted.bin for this block", block_prevouts.len());
+    println!(
+        "  Found {} prevouts in joined_sorted.bin for this block",
+        block_prevouts.len()
+    );
     println!("");
 
     // Build intra-block UTXOs (what batch test uses)
@@ -90,10 +95,13 @@ fn main() -> Result<()> {
                 hash: tx_id,
                 index: output_idx as u64,
             };
-            intra_block_utxos.insert(outpoint, TransactionOutput {
-                value: output.value,
-                script_pubkey: output.script_pubkey.clone(),
-            });
+            intra_block_utxos.insert(
+                outpoint,
+                TransactionOutput {
+                    value: output.value,
+                    script_pubkey: output.script_pubkey.clone(),
+                },
+            );
         }
     }
     println!("  Built {} intra-block UTXOs", intra_block_utxos.len());
@@ -108,12 +116,20 @@ fn main() -> Result<()> {
                 value: prevout.value,
                 script_pubkey: prevout.script_pubkey.clone(),
             });
-            println!("  Input {}: Found in prevout_map (value: {}, script_pubkey: {} bytes)", 
-                i, prevout.value, prevout.script_pubkey.len());
+            println!(
+                "  Input {}: Found in prevout_map (value: {}, script_pubkey: {} bytes)",
+                i,
+                prevout.value,
+                prevout.script_pubkey.len()
+            );
         } else if let Some(output) = intra_block_utxos.get(&input_iter.prevout) {
             all_prevouts_batch.push(output.clone());
-            println!("  Input {}: Found in intra_block_utxos (value: {}, script_pubkey: {} bytes)",
-                i, output.value, output.script_pubkey.len());
+            println!(
+                "  Input {}: Found in intra_block_utxos (value: {}, script_pubkey: {} bytes)",
+                i,
+                output.value,
+                output.script_pubkey.len()
+            );
         } else {
             all_prevouts_batch.push(TransactionOutput {
                 value: 0,
@@ -129,16 +145,20 @@ fn main() -> Result<()> {
     println!("📋 Building all_prevouts array (individual test method)...");
     let mut all_prevouts_individual: Vec<TransactionOutput> = Vec::new();
     for i in 0..tx.inputs.len() {
-        let prevout_opt = block_prevouts.iter().find(|p| {
-            p.spending_tx_idx == tx_idx as u32 && p.spending_input_idx == i as u32
-        });
+        let prevout_opt = block_prevouts
+            .iter()
+            .find(|p| p.spending_tx_idx == tx_idx as u32 && p.spending_input_idx == i as u32);
         if let Some(prevout) = prevout_opt {
             all_prevouts_individual.push(TransactionOutput {
                 value: prevout.value,
                 script_pubkey: prevout.script_pubkey.clone(),
             });
-            println!("  Input {}: Found (value: {}, script_pubkey: {} bytes)",
-                i, prevout.value, prevout.script_pubkey.len());
+            println!(
+                "  Input {}: Found (value: {}, script_pubkey: {} bytes)",
+                i,
+                prevout.value,
+                prevout.script_pubkey.len()
+            );
         } else {
             all_prevouts_individual.push(TransactionOutput {
                 value: 0,
@@ -156,22 +176,39 @@ fn main() -> Result<()> {
     for i in 0..tx.inputs.len() {
         let batch = &all_prevouts_batch[i];
         let individual = &all_prevouts_individual[i];
-        
+
         if batch.value != individual.value || batch.script_pubkey != individual.script_pubkey {
             differences += 1;
             println!("  ❌ Input {} DIFFERS:", i);
-            println!("    Batch: value={}, script_pubkey={} bytes", 
-                batch.value, batch.script_pubkey.len());
-            println!("    Individual: value={}, script_pubkey={} bytes",
-                individual.value, individual.script_pubkey.len());
-            
+            println!(
+                "    Batch: value={}, script_pubkey={} bytes",
+                batch.value,
+                batch.script_pubkey.len()
+            );
+            println!(
+                "    Individual: value={}, script_pubkey={} bytes",
+                individual.value,
+                individual.script_pubkey.len()
+            );
+
             if batch.value != individual.value {
-                println!("      Value mismatch: {} != {}", batch.value, individual.value);
+                println!(
+                    "      Value mismatch: {} != {}",
+                    batch.value, individual.value
+                );
             }
             if batch.script_pubkey != individual.script_pubkey {
                 println!("      ScriptPubkey mismatch (first 20 bytes):");
-                println!("        Batch:      {}", hex::encode(&batch.script_pubkey[..batch.script_pubkey.len().min(20)]));
-                println!("        Individual: {}", hex::encode(&individual.script_pubkey[..individual.script_pubkey.len().min(20)]));
+                println!(
+                    "        Batch:      {}",
+                    hex::encode(&batch.script_pubkey[..batch.script_pubkey.len().min(20)])
+                );
+                println!(
+                    "        Individual: {}",
+                    hex::encode(
+                        &individual.script_pubkey[..individual.script_pubkey.len().min(20)]
+                    )
+                );
             }
         }
     }
@@ -179,9 +216,11 @@ fn main() -> Result<()> {
     if differences == 0 {
         println!("  ✅ Arrays match perfectly!");
     } else {
-        println!("  ❌ Found {} differences - this explains why batch test fails!", differences);
+        println!(
+            "  ❌ Found {} differences - this explains why batch test fails!",
+            differences
+        );
     }
 
     Ok(())
 }
-

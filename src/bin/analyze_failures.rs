@@ -6,16 +6,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let failures_file = "/run/media/acolyte/Extra/blockchain/sort_merge_data/failures.log";
     let file = File::open(failures_file)?;
     let reader = BufReader::new(file);
-    
+
     let mut block_counts: HashMap<u64, u64> = HashMap::new();
     let mut sample_failures: Vec<(u64, String)> = Vec::new();
-    
+
     for line in reader.lines() {
         let line = line?;
         if line.starts_with('#') || !line.contains("Script returned false") {
             continue;
         }
-        
+
         let parts: Vec<&str> = line.split('|').collect();
         if parts.len() >= 3 {
             if let Ok(block) = parts[0].trim().parse::<u64>() {
@@ -26,7 +26,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     }
-    
+
     println!("=== Failure Analysis ===");
     println!("\nTop 20 blocks by failure count:");
     let mut sorted: Vec<_> = block_counts.iter().collect();
@@ -34,12 +34,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for (block, count) in sorted.iter().take(20) {
         println!("  Block {}: {} failures", block, count);
     }
-    
+
     println!("\n=== Sample Failures ===");
     for (block, details) in sample_failures.iter().take(10) {
         println!("  Block {}: {}", block, details);
     }
-    
+
     println!("\n=== Block Range Analysis ===");
     let mut ranges: HashMap<&str, u64> = HashMap::new();
     for (block, _) in &block_counts {
@@ -60,6 +60,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for (range, count) in ranges {
         println!("  {}: {} blocks with failures", range, count);
     }
-    
+
     Ok(())
 }

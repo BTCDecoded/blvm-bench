@@ -1,6 +1,6 @@
-//! Bitcoin Core RPC Client
+//! Bitcoin Node RPC Client
 //!
-//! This module provides a Rust wrapper around Bitcoin Core's RPC interface
+//! This module provides a Rust wrapper around the Bitcoin node RPC interface
 //! for differential testing.
 
 use anyhow::{Context, Result};
@@ -88,13 +88,13 @@ impl RpcConfig {
     }
 }
 
-/// Bitcoin Core RPC client
-pub struct CoreRpcClient {
+/// Bitcoin node RPC client
+pub struct NodeRpcClient {
     client: Client,
     config: RpcConfig,
 }
 
-impl CoreRpcClient {
+impl NodeRpcClient {
     /// Create a new RPC client
     pub fn new(config: RpcConfig) -> Self {
         let client = Client::builder()
@@ -439,7 +439,7 @@ impl NodeDiscovery {
                     pass: pass.to_string(),
                     timeout: Duration::from_secs(2),
                 };
-                let client = CoreRpcClient::new(config.clone());
+                let client = NodeRpcClient::new(config.clone());
                 if client.test_connection().await.unwrap_or(false) {
                     configs.push(config);
                 }
@@ -460,7 +460,7 @@ impl NodeDiscovery {
         // 1. Check environment variables first (highest priority)
         if std::env::var("BITCOIN_RPC_HOST").is_ok() {
             let config = RpcConfig::from_env();
-            let client = CoreRpcClient::new(config.clone());
+            let client = NodeRpcClient::new(config.clone());
             if client.test_connection().await.unwrap_or(false) {
                 return Ok(config);
             }
@@ -475,7 +475,7 @@ impl NodeDiscovery {
         // Test all candidates and filter working ones
         let mut working = Vec::new();
         for config in candidates {
-            let client = CoreRpcClient::new(config.clone());
+            let client = NodeRpcClient::new(config.clone());
             if client.test_connection().await.unwrap_or(false) {
                 working.push(config);
             }
@@ -483,7 +483,7 @@ impl NodeDiscovery {
 
         if working.is_empty() {
             anyhow::bail!(
-                "No Bitcoin Core nodes found. Set BITCOIN_RPC_HOST or ensure a node is running."
+                "No Bitcoin nodes found. Set BITCOIN_RPC_HOST or ensure a node is running."
             );
         }
 

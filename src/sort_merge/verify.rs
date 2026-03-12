@@ -543,8 +543,11 @@ pub fn verify_scripts(
                 use blvm_consensus::constants::TAPROOT_SCRIPT_LENGTH;
                 for output in &tx.outputs {
                     let script = &output.script_pubkey;
-                    // P2TR format: OP_1 (0x51) + push 32 (0x20) + 32-byte program = 34 bytes
-                    if script.len() == TAPROOT_SCRIPT_LENGTH && script[0] == 0x51 && script[1] == 0x20 {
+                    // P2TR format: OP_1 + PUSH_32_BYTES + 32-byte program = 34 bytes
+                    if script.len() == TAPROOT_SCRIPT_LENGTH
+                        && script[0] == blvm_consensus::opcodes::OP_1
+                        && script[1] == blvm_consensus::opcodes::PUSH_32_BYTES
+                    {
                         tx_flags_base |= 0x8000; // SCRIPT_VERIFY_WITNESS_PUBKEYTYPE (Taproot)
                         break;
                     }

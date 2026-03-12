@@ -1,23 +1,23 @@
-//! Bitcoin Core Builder and Discovery
+//! Bitcoin Node Builder and Discovery
 //!
-//! This module handles finding and building Bitcoin Core binaries for differential testing.
-//! It supports both pre-built Core installations and building Core on-demand.
+//! This module handles finding and building bitcoind binaries for differential testing.
+//! It supports both pre-built installations and building on-demand.
 
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 
-/// Bitcoin Core binaries location
+/// Bitcoin node binaries location
 #[derive(Debug, Clone)]
-pub struct CoreBinaries {
+pub struct NodeBinaries {
     /// Path to bitcoind binary
     pub bitcoind: PathBuf,
     /// Path to bitcoin-cli binary
     pub bitcoin_cli: PathBuf,
-    /// Core version (if available)
+    /// Version (if available)
     pub version: Option<String>,
 }
 
-impl CoreBinaries {
+impl NodeBinaries {
     /// Verify that both binaries exist and are executable
     pub fn verify(&self) -> Result<()> {
         if !self.bitcoind.exists() {
@@ -53,16 +53,16 @@ impl CoreBinaries {
     }
 }
 
-/// Bitcoin Core builder and discovery
-pub struct CoreBuilder {
-    /// Cache directory for Core binaries
+/// Bitcoin node builder and discovery
+pub struct NodeBuilder {
+    /// Cache directory for node binaries
     cache_dir: Option<PathBuf>,
-    /// Prefer pre-built Core over building
+    /// Prefer pre-built over building
     prefer_prebuilt: bool,
 }
 
-impl CoreBuilder {
-    /// Create a new CoreBuilder
+impl NodeBuilder {
+    /// Create a new NodeBuilder
     pub fn new() -> Self {
         Self {
             cache_dir: std::env::var("BITCOIN_CORE_CACHE_DIR")
@@ -78,8 +78,8 @@ impl CoreBuilder {
         self
     }
 
-    /// Find existing Core installation
-    pub fn find_existing_core(&self) -> Result<CoreBinaries> {
+    /// Find existing node installation
+    pub fn find_existing(&self) -> Result<NodeBinaries> {
         // 1. Check cache first (fast path for self-hosted runner)
         if let Some(ref cache_dir) = self.cache_dir {
             if let Ok(binaries) = self.find_in_cache(cache_dir) {
@@ -124,18 +124,18 @@ impl CoreBuilder {
             let bitcoin_cli_path = which::which("bitcoin-cli")
                 .context("bitcoind found in PATH but bitcoin-cli not found")?;
 
-            return Ok(CoreBinaries {
+            return Ok(NodeBinaries {
                 bitcoind: bitcoind_path,
                 bitcoin_cli: bitcoin_cli_path,
                 version: None,
             });
         }
 
-        anyhow::bail!("Bitcoin Core not found. Please set CORE_PATH or install Core binaries.")
+        anyhow::bail!("Bitcoin node not found. Please set CORE_PATH or install node binaries.")
     }
 
     /// Find Core binaries in cache directory
-    fn find_in_cache(&self, cache_dir: &Path) -> Result<CoreBinaries> {
+    fn find_in_cache(&self, cache_dir: &Path) -> Result<NodeBinaries> {
         // Check for versioned directories (e.g., v25.0/)
         for entry in std::fs::read_dir(cache_dir).ok().into_iter().flatten() {
             let entry = entry?;
@@ -148,7 +148,7 @@ impl CoreBuilder {
                         .file_name()
                         .and_then(|n| n.to_str())
                         .map(|s| s.to_string());
-                    return Ok(CoreBinaries {
+                    return Ok(NodeBinaries {
                         bitcoind,
                         bitcoin_cli,
                         version,
@@ -161,7 +161,7 @@ impl CoreBuilder {
         let bitcoind = cache_dir.join("bitcoind");
         let bitcoin_cli = cache_dir.join("bitcoin-cli");
         if bitcoind.exists() && bitcoin_cli.exists() {
-            return Ok(CoreBinaries {
+            return Ok(NodeBinaries {
                 bitcoind,
                 bitcoin_cli,
                 version: None,
@@ -172,12 +172,12 @@ impl CoreBuilder {
     }
 
     /// Find Core binaries in Core source/build directory
-    fn find_in_core_path(&self, core_path: &Path) -> Result<CoreBinaries> {
+    fn find_in_core_path(&self, core_path: &Path) -> Result<NodeBinaries> {
         // Try build/bin first (CMake build)
         let bitcoind = core_path.join("build/bin/bitcoind");
         let bitcoin_cli = core_path.join("build/bin/bitcoin-cli");
         if bitcoind.exists() && bitcoin_cli.exists() {
-            return Ok(CoreBinaries {
+            return Ok(NodeBinaries {
                 bitcoind,
                 bitcoin_cli,
                 version: None,
@@ -188,7 +188,7 @@ impl CoreBuilder {
         let bitcoind = core_path.join("src/bitcoind");
         let bitcoin_cli = core_path.join("src/bitcoin-cli");
         if bitcoind.exists() && bitcoin_cli.exists() {
-            return Ok(CoreBinaries {
+            return Ok(NodeBinaries {
                 bitcoind,
                 bitcoin_cli,
                 version: None,
@@ -199,7 +199,7 @@ impl CoreBuilder {
         let bitcoind = core_path.join("bin/bitcoind");
         let bitcoin_cli = core_path.join("bin/bitcoin-cli");
         if bitcoind.exists() && bitcoin_cli.exists() {
-            return Ok(CoreBinaries {
+            return Ok(NodeBinaries {
                 bitcoind,
                 bitcoin_cli,
                 version: None,
@@ -211,7 +211,7 @@ impl CoreBuilder {
 
     /// Ensure Core is built and available
     /// This will find existing Core or build it if needed
-    pub async fn ensure_core_built(&self, _version: Option<&str>) -> Result<CoreBinaries> {
+    pub async fn ensure_core_built(&self, _version: Option<&str>) -> Result<NodeBinaries> {
         // Try to find existing first
         match self.find_existing_core() {
             Ok(binaries) => {
@@ -232,7 +232,7 @@ impl CoreBuilder {
     }
 }
 
-impl Default for CoreBuilder {
+impl Default for NodeBuilder {
     fn default() -> Self {
         Self::new()
     }
@@ -247,7 +247,7 @@ mod tests {
         // This test would require actual Core binaries
         // Skip in CI unless Core is available
         if std::env::var("CORE_PATH").is_ok() {
-            let builder = CoreBuilder::new();
+            let builder = NodeBuilder::new();
             if let Ok(binaries) = builder.find_existing_core() {
                 // Should verify successfully if Core is properly installed
                 let _ = binaries.verify();

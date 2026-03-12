@@ -1,5 +1,5 @@
-use bllvm_consensus::{tx_inputs, tx_outputs, Block, BlockHeader, Transaction, TransactionOutput};
-use bllvm_node::storage::Storage;
+use blvm_consensus::{tx_inputs, tx_outputs, Block, BlockHeader, Transaction, TransactionOutput};
+use blvm_node::storage::Storage;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use tempfile::TempDir;
 
@@ -18,7 +18,7 @@ fn create_test_block() -> Block {
             inputs: tx_inputs![],
             outputs: tx_outputs![TransactionOutput {
                 value: 5000000000,
-                script_pubkey: vec![0x51],
+                script_pubkey: vec![blvm_consensus::opcodes::OP_1],
             }],
             lock_time: 0,
         }]

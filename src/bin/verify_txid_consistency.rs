@@ -33,11 +33,12 @@ fn main() -> Result<()> {
     let mut block_iter = ChunkedBlockIterator::new(&chunks_dir, Some(block_height), Some(1))?
         .ok_or_else(|| anyhow::anyhow!("Failed to create block iterator"))?;
 
-    let block_data = block_iter.next_block()?
+    let block_data = block_iter
+        .next_block()?
         .ok_or_else(|| anyhow::anyhow!("Block {} not found", block_height))?;
 
-    let (block, _witnesses) = deserialize_block_with_witnesses(&block_data)
-        .context("Failed to deserialize block")?;
+    let (block, _witnesses) =
+        deserialize_block_with_witnesses(&block_data).context("Failed to deserialize block")?;
 
     if tx_idx >= block.transactions.len() {
         return Err(anyhow::anyhow!("Transaction index {} out of range", tx_idx));
@@ -53,7 +54,10 @@ fn main() -> Result<()> {
     let prevout_idx = input.prevout.index;
 
     println!("📋 Input prevout:");
-    println!("  Txid (from input.prevout.hash): {}", hex::encode(prevout_txid_from_input));
+    println!(
+        "  Txid (from input.prevout.hash): {}",
+        hex::encode(prevout_txid_from_input)
+    );
     println!("  Output index: {}", prevout_idx);
     println!("");
 
@@ -61,7 +65,7 @@ fn main() -> Result<()> {
     println!("🔎 Searching for creating transaction...");
     let start_height: u64 = 0;
     let end_height: u64 = block_height; // Can't be created after it's spent
-    
+
     let mut creating_block = None;
     let mut creating_tx_idx = None;
     let mut found = false;
@@ -86,22 +90,28 @@ fn main() -> Result<()> {
                 creating_block = Some(height);
                 creating_tx_idx = Some(idx);
                 found = true;
-                
+
                 println!("  ✅ FOUND creating transaction!");
                 println!("  Block: {}", height);
                 println!("  Transaction index: {}", idx);
                 println!("  Calculated txid: {}", hex::encode(calculated_txid));
                 println!("");
-                
+
                 // Check if output index is valid
                 if prevout_idx < search_tx.outputs.len() as u64 {
-                    println!("  ✅ Output index {} is valid (transaction has {} outputs)", 
-                             prevout_idx, search_tx.outputs.len());
+                    println!(
+                        "  ✅ Output index {} is valid (transaction has {} outputs)",
+                        prevout_idx,
+                        search_tx.outputs.len()
+                    );
                 } else {
-                    println!("  ❌ Output index {} is INVALID (transaction has only {} outputs)", 
-                             prevout_idx, search_tx.outputs.len());
+                    println!(
+                        "  ❌ Output index {} is INVALID (transaction has only {} outputs)",
+                        prevout_idx,
+                        search_tx.outputs.len()
+                    );
                 }
-                
+
                 break;
             }
         }
@@ -118,14 +128,23 @@ fn main() -> Result<()> {
     }
 
     if !found {
-        println!("  ❌ Creating transaction NOT FOUND in blocks 0-{}", block_height);
+        println!(
+            "  ❌ Creating transaction NOT FOUND in blocks 0-{}",
+            block_height
+        );
         println!("  This means:");
-        println!("    - Transaction was created AFTER block {} (impossible)", block_height);
+        println!(
+            "    - Transaction was created AFTER block {} (impossible)",
+            block_height
+        );
         println!("    - OR there's a txid mismatch");
         println!("    - OR transaction is from outside processed range");
     } else {
         println!("✅ Txid consistency check:");
-        println!("  Input.prevout.hash: {}", hex::encode(prevout_txid_from_input));
+        println!(
+            "  Input.prevout.hash: {}",
+            hex::encode(prevout_txid_from_input)
+        );
         if let Some(calc_txid) = creating_block.and_then(|_| {
             // Re-calculate to show it matches
             if let Some(tx_idx) = creating_tx_idx {
@@ -142,21 +161,3 @@ fn main() -> Result<()> {
 
     Ok(())
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

@@ -14,9 +14,9 @@ pub mod shell;
 /// Differential testing modules (feature-gated)
 /// Also available for benchmarks via benchmark-helpers feature
 #[cfg(any(feature = "differential", feature = "benchmark-helpers"))]
-pub mod core_builder;
+pub mod node_builder;
 #[cfg(any(feature = "differential", feature = "benchmark-helpers"))]
-pub mod core_rpc_client;
+pub mod node_rpc_client;
 #[cfg(feature = "differential")]
 pub mod differential;
 #[cfg(any(feature = "differential", feature = "benchmark-helpers"))]
@@ -29,13 +29,13 @@ pub mod block_file_reader;
 pub mod chunk_protection;
 #[cfg(feature = "differential")]
 pub mod start9_rpc_client;
-#[cfg(feature = "differential")]
+#[cfg(any(feature = "differential", feature = "scan"))]
 pub mod chunked_cache;
-#[cfg(feature = "differential")]
+#[cfg(any(feature = "differential", feature = "scan"))]
 pub mod chunk_index;
 #[cfg(feature = "differential")]
 pub mod chunk_index_rpc;
-#[cfg(feature = "differential")]
+#[cfg(any(feature = "differential", feature = "scan"))]
 pub mod missing_blocks;
 #[cfg(feature = "differential")]
 pub mod collect_only;
@@ -49,6 +49,8 @@ pub mod collect_only;
 pub mod sort_merge;
 #[cfg(feature = "differential")]
 pub mod script_validation;
+#[cfg(any(feature = "differential", feature = "scan"))]
+pub mod chain_scan;
 
 use anyhow::Result;
 

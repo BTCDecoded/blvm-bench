@@ -4,11 +4,11 @@
 use anyhow::{Context, Result};
 use blvm_bench::chunked_cache::ChunkedBlockIterator;
 use blvm_bench::start9_rpc_client::Start9RpcClient;
-use blvm_consensus::serialization::block::deserialize_block_with_witnesses;
 use blvm_consensus::block::calculate_tx_id;
 use blvm_consensus::script::{verify_script_with_context_full, SigVersion};
-use blvm_consensus::types::Network;
+use blvm_consensus::serialization::block::deserialize_block_with_witnesses;
 use blvm_consensus::serialization::transaction::serialize_transaction;
+use blvm_consensus::types::Network;
 use std::path::PathBuf;
 
 #[tokio::main]
@@ -38,19 +38,28 @@ async fn main() -> Result<()> {
     let mut block_iter = ChunkedBlockIterator::new(&chunks_dir, Some(block_height), Some(1))?
         .ok_or_else(|| anyhow::anyhow!("Failed to create block iterator"))?;
 
-    let block_data = block_iter.next_block()?
+    let block_data = block_iter
+        .next_block()?
         .ok_or_else(|| anyhow::anyhow!("Block {} not found", block_height))?;
 
-    let (block, witnesses) = deserialize_block_with_witnesses(&block_data)
-        .context("Failed to deserialize block")?;
+    let (block, witnesses) =
+        deserialize_block_with_witnesses(&block_data).context("Failed to deserialize block")?;
 
     if tx_idx >= block.transactions.len() {
-        return Err(anyhow::anyhow!("Transaction index {} out of range (block has {} transactions)", tx_idx, block.transactions.len()));
+        return Err(anyhow::anyhow!(
+            "Transaction index {} out of range (block has {} transactions)",
+            tx_idx,
+            block.transactions.len()
+        ));
     }
 
     let tx = &block.transactions[tx_idx];
     if input_idx >= tx.inputs.len() {
-        return Err(anyhow::anyhow!("Input index {} out of range (transaction has {} inputs)", input_idx, tx.inputs.len()));
+        return Err(anyhow::anyhow!(
+            "Input index {} out of range (transaction has {} inputs)",
+            input_idx,
+            tx.inputs.len()
+        ));
     }
 
     let input = &tx.inputs[input_idx];
@@ -71,31 +80,32 @@ async fn main() -> Result<()> {
     use blvm_bench::sort_merge::merge_join::JoinedPrevout;
     use std::fs::File;
     use std::io::{BufReader, Read, Seek, SeekFrom};
-    
+
     let joined_file = std::env::var("SORT_MERGE_DIR")
         .unwrap_or_else(|_| "/run/media/acolyte/Extra/blockchain/sort_merge_data".to_string());
     let joined_file = PathBuf::from(joined_file).join("joined_sorted.bin");
-    
+
     // Find the prevout in joined_sorted.bin using JoinedPrevout
     let file = File::open(&joined_file)?;
     let mut reader = BufReader::new(file);
-    
+
     // Search for the joined prevout by spending location
     let mut found_prevout: Option<JoinedPrevout> = None;
     let mut buf = vec![0u8; 1024 * 1024]; // 1MB buffer
-    
+
     reader.seek(SeekFrom::Start(0))?;
     while let Ok(n) = reader.read(&mut buf) {
         if n == 0 {
             break;
         }
-        
+
         let mut pos = 0;
         while pos < n {
             if let Some((joined, consumed)) = JoinedPrevout::from_bytes(&buf[pos..]) {
-                if joined.spending_block == block_height as u32 
+                if joined.spending_block == block_height as u32
                     && joined.spending_tx_idx == tx_idx as u32
-                    && joined.spending_input_idx == input_idx as u32 {
+                    && joined.spending_input_idx == input_idx as u32
+                {
                     found_prevout = Some(joined);
                     break;
                 }
@@ -104,25 +114,28 @@ async fn main() -> Result<()> {
                 break;
             }
         }
-        
+
         if found_prevout.is_some() {
             break;
         }
     }
-    
+
     if let Some(joined) = found_prevout {
         println!("  ✅ Found prevout!");
         println!("    Prevout block: {}", joined.prevout_height);
         println!("    Value: {} satoshis", joined.value);
         println!("    Script pubkey: {}", hex::encode(&joined.script_pubkey));
-        println!("    Script pubkey length: {} bytes", joined.script_pubkey.len());
+        println!(
+            "    Script pubkey length: {} bytes",
+            joined.script_pubkey.len()
+        );
         println!("");
-        
+
         // Try to verify with BLVM
         println!("🔐 Verifying script with BLVM...");
         let tx_witnesses = witnesses.get(tx_idx);
         let witness_stack = tx_witnesses.and_then(|w| w.get(input_idx));
-        
+
         // Build prevouts list - need all prevouts for sighash calculation
         let mut prevouts = Vec::new();
         for (i, input) in tx.inputs.iter().enumerate() {
@@ -140,17 +153,17 @@ async fn main() -> Result<()> {
                 });
             }
         }
-        
+
         // Calculate script flags for this block
         // Use the same script flags calculation as step6
         use blvm_bench::sort_merge::verify;
         let mut flags = verify::get_script_flags(block_height, Network::Mainnet);
-        
+
         // Add witness flag if transaction has witness data
         if tx_witnesses.is_some() {
             flags |= 0x80; // SCRIPT_VERIFY_WITNESS
         }
-        
+
         match verify_script_with_context_full(
             &input.script_sig,
             &joined.script_pubkey,
@@ -177,40 +190,44 @@ async fn main() -> Result<()> {
                 println!("  Error: {:?}", e);
             }
         }
-        
+
         // Verify with Bitcoin Core
         println!("");
         println!("🔐 Verifying with Bitcoin Core...");
         let rpc_client = Start9RpcClient::new();
-        
+
         // Get the block hash
         match rpc_client.get_block_hash(block_height).await {
             Ok(block_hash) => {
                 println!("  Block hash: {}", block_hash);
-                
+
                 // Get the block from Core
                 let core_block_hex = rpc_client.get_block_hex(&block_hash).await?;
                 println!("  Block size: {} bytes", core_block_hex.len() / 2);
-                
+
                 // Serialize our transaction
                 let tx_hex = hex::encode(serialize_transaction(tx));
-                
+
                 // Test with testmempoolaccept
                 match rpc_client.test_mempool_accept(&tx_hex).await {
                     Ok(result) => {
                         println!("  Bitcoin Core testmempoolaccept:");
                         println!("  {}", serde_json::to_string_pretty(&result)?);
-                        
+
                         if let Some(arr) = result.as_array() {
                             if let Some(first) = arr.get(0) {
                                 if let Some(allowed) = first.get("allowed") {
                                     if allowed.as_bool().unwrap_or(false) {
                                         println!("  ✅ Bitcoin Core would ACCEPT this transaction");
-                                        println!("  ⚠️  But BLVM rejected it - this is a CONSENSUS BUG!");
+                                        println!(
+                                            "  ⚠️  But BLVM rejected it - this is a CONSENSUS BUG!"
+                                        );
                                     } else {
                                         if let Some(reason) = first.get("reject-reason") {
                                             println!("  ❌ Bitcoin Core would REJECT: {}", reason);
-                                            println!("  💡 Checking if this matches BLVM's behavior...");
+                                            println!(
+                                                "  💡 Checking if this matches BLVM's behavior..."
+                                            );
                                         }
                                     }
                                 }
@@ -223,7 +240,10 @@ async fn main() -> Result<()> {
                 }
             }
             Err(e) => {
-                println!("  ⚠️  Block {} not found in Bitcoin Core: {}", block_height, e);
+                println!(
+                    "  ⚠️  Block {} not found in Bitcoin Core: {}",
+                    block_height, e
+                );
             }
         }
     } else {
@@ -233,4 +253,3 @@ async fn main() -> Result<()> {
 
     Ok(())
 }
-

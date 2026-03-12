@@ -7,10 +7,10 @@
 //! 3. Forces full script verification (no assume-valid optimization)
 //! 4. Matches Core's ConnectBlock benchmark methodology
 
-use bllvm_consensus::block::{calculate_tx_id, connect_block};
-use bllvm_consensus::segwit::Witness;
-use bllvm_consensus::transaction_hash::{calculate_transaction_sighash, SighashType};
-use bllvm_consensus::{
+use blvm_consensus::block::{calculate_tx_id, connect_block};
+use blvm_consensus::segwit::Witness;
+use blvm_consensus::transaction_hash::{calculate_transaction_sighash, SighashType};
+use blvm_consensus::{
     tx_inputs, tx_outputs, Block, BlockHeader, OutPoint, Transaction, TransactionInput,
     TransactionOutput, UtxoSet, UTXO,
 };
@@ -24,7 +24,7 @@ fn create_p2wpkh_script_pubkey(pubkey: &PublicKey) -> Vec<u8> {
     let mut hasher = Sha256::new();
     hasher.update(&pubkey_bytes);
     let hash = hasher.finalize();
-    let mut script = vec![0x00]; // OP_0
+    let mut script = vec![blvm_consensus::opcodes::OP_0];
     script.extend_from_slice(&hash[..20]); // 20-byte hash
     script
 }
@@ -76,7 +76,7 @@ fn create_realistic_test_block_with_signatures(
                 hash: [0; 32],
                 index: 0xffffffff, // Coinbase
             },
-            script_sig: vec![0x51; 4], // OP_1 repeated
+            script_sig: vec![blvm_consensus::opcodes::OP_1; 4],
             sequence: 0xffffffff,
         }],
         outputs: tx_outputs![TransactionOutput {
@@ -204,7 +204,7 @@ fn benchmark_connect_block_realistic_100tx(c: &mut Criterion) {
                 black_box(utxo_set.clone()),
                 black_box(1), // Height 1 = no assume-valid optimization
                 black_box(None),
-                black_box(bllvm_consensus::types::Network::Mainnet),
+                black_box(blvm_consensus::types::Network::Mainnet),
             );
             // Ensure we're actually validating - use result to ensure it's computed
             black_box(result);
@@ -227,7 +227,7 @@ fn benchmark_connect_block_realistic_1000tx(c: &mut Criterion) {
                 black_box(utxo_set.clone()),
                 black_box(1), // Height 1 = no assume-valid optimization
                 black_box(None),
-                black_box(bllvm_consensus::types::Network::Mainnet),
+                black_box(blvm_consensus::types::Network::Mainnet),
             );
             // Ensure we're actually validating - use result to ensure it's computed
             black_box(result);

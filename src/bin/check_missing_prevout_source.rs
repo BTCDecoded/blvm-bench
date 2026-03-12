@@ -11,14 +11,16 @@ fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
     if args.len() != 2 {
         eprintln!("Usage: {} <txid_hex>", args[0]);
-        eprintln!("Example: {} 1e8a8280e253fc635aea2731e606af721e548f7d1a7ff3a399512e7bf8bc5bd8", args[0]);
+        eprintln!(
+            "Example: {} 1e8a8280e253fc635aea2731e606af721e548f7d1a7ff3a399512e7bf8bc5bd8",
+            args[0]
+        );
         std::process::exit(1);
     }
 
     let txid_hex = &args[1];
     let mut txid = [0u8; 32];
-    hex::decode_to_slice(txid_hex, &mut txid)
-        .context("Invalid txid hex")?;
+    hex::decode_to_slice(txid_hex, &mut txid).context("Invalid txid hex")?;
 
     let chunks_dir = std::env::var("BLOCK_CACHE_DIR")
         .unwrap_or_else(|_| "/run/media/acolyte/Extra/blockchain".to_string());
@@ -51,8 +53,8 @@ fn main() -> Result<()> {
             None => break,
         };
 
-        let (block, _witnesses) = deserialize_block_with_witnesses(&block_data)
-            .context("Failed to deserialize block")?;
+        let (block, _witnesses) =
+            deserialize_block_with_witnesses(&block_data).context("Failed to deserialize block")?;
 
         // Check each transaction in this block
         for (tx_idx, tx) in block.transactions.iter().enumerate() {
@@ -61,7 +63,10 @@ fn main() -> Result<()> {
                 println!("✅ FOUND!");
                 println!("  Block height: {}", height);
                 println!("  Transaction index: {}", tx_idx);
-                println!("  Is coinbase: {}", blvm_consensus::transaction::is_coinbase(tx));
+                println!(
+                    "  Is coinbase: {}",
+                    blvm_consensus::transaction::is_coinbase(tx)
+                );
                 println!("  Outputs: {}", tx.outputs.len());
                 println!("  This transaction SHOULD be in outputs_sorted.bin!");
                 found = true;
@@ -89,21 +94,3 @@ fn main() -> Result<()> {
 
     Ok(())
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

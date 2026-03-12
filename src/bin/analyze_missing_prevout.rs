@@ -3,25 +3,29 @@
 
 use anyhow::{Context, Result};
 use blvm_bench::chunked_cache::ChunkedBlockIterator;
+use blvm_bench::sort_merge::output_refs::OutputRef;
 use blvm_consensus::block::calculate_tx_id;
 use blvm_consensus::serialization::block::deserialize_block_with_witnesses;
-use blvm_bench::sort_merge::output_refs::OutputRef;
 use std::fs::File;
 use std::io::{BufReader, Read, Seek, SeekFrom};
 use std::path::PathBuf;
 
-fn binary_search_txid(reader: &mut BufReader<File>, file_size: u64, target_txid: [u8; 32]) -> Result<Option<OutputRef>> {
+fn binary_search_txid(
+    reader: &mut BufReader<File>,
+    file_size: u64,
+    target_txid: [u8; 32],
+) -> Result<Option<OutputRef>> {
     let mut low = 0u64;
     let mut high = file_size;
-    
+
     // Binary search for the txid
     while low < high {
         let mid = (low + high) / 2;
-        
+
         // Try to find a record boundary near mid
         let mut search_offset = mid;
         let mut found_record = false;
-        
+
         // Search backwards for a valid record start
         for _i in 0..1000 {
             if search_offset < 100 {
@@ -29,14 +33,14 @@ fn binary_search_txid(reader: &mut BufReader<File>, file_size: u64, target_txid:
             } else {
                 search_offset -= 100;
             }
-            
+
             reader.seek(SeekFrom::Start(search_offset))?;
             let mut header = vec![0u8; 200];
             let n = reader.read(&mut header)?;
             if n < 51 {
                 continue;
             }
-            
+
             if let Some((record, _)) = OutputRef::from_bytes(&header) {
                 found_record = true;
                 match record.txid.cmp(&target_txid) {
@@ -54,12 +58,12 @@ fn binary_search_txid(reader: &mut BufReader<File>, file_size: u64, target_txid:
                 }
             }
         }
-        
+
         if !found_record {
             low = mid + 1;
         }
     }
-    
+
     Ok(None)
 }
 
@@ -78,7 +82,7 @@ fn main() -> Result<()> {
     let chunks_dir = std::env::var("BLOCK_CACHE_DIR")
         .unwrap_or_else(|_| "/run/media/acolyte/Extra/blockchain".to_string());
     let chunks_dir = PathBuf::from(chunks_dir);
-    
+
     let outputs_file = std::env::var("SORT_MERGE_DIR")
         .unwrap_or_else(|_| "/run/media/acolyte/Extra/blockchain/sort_merge_data".to_string());
     let outputs_file = PathBuf::from(outputs_file).join("outputs_sorted.bin");
@@ -93,19 +97,28 @@ fn main() -> Result<()> {
     let mut block_iter = ChunkedBlockIterator::new(&chunks_dir, Some(block_height), Some(1))?
         .ok_or_else(|| anyhow::anyhow!("Failed to create block iterator"))?;
 
-    let block_data = block_iter.next_block()?
+    let block_data = block_iter
+        .next_block()?
         .ok_or_else(|| anyhow::anyhow!("Block {} not found", block_height))?;
 
-    let (block, _witnesses) = deserialize_block_with_witnesses(&block_data)
-        .context("Failed to deserialize block")?;
+    let (block, _witnesses) =
+        deserialize_block_with_witnesses(&block_data).context("Failed to deserialize block")?;
 
     if tx_idx >= block.transactions.len() {
-        return Err(anyhow::anyhow!("Transaction index {} out of range (block has {} transactions)", tx_idx, block.transactions.len()));
+        return Err(anyhow::anyhow!(
+            "Transaction index {} out of range (block has {} transactions)",
+            tx_idx,
+            block.transactions.len()
+        ));
     }
 
     let tx = &block.transactions[tx_idx];
     if input_idx >= tx.inputs.len() {
-        return Err(anyhow::anyhow!("Input index {} out of range (transaction has {} inputs)", input_idx, tx.inputs.len()));
+        return Err(anyhow::anyhow!(
+            "Input index {} out of range (transaction has {} inputs)",
+            input_idx,
+            tx.inputs.len()
+        ));
     }
 
     let input = &tx.inputs[input_idx];
@@ -116,15 +129,17 @@ fn main() -> Result<()> {
     println!("  Prevout txid: {}", hex::encode(prevout_txid));
     println!("  Prevout index: {}", prevout_idx);
     println!("");
-    
+
     // Check if this is a null prevout (coinbase)
     if prevout_txid == [0u8; 32] && prevout_idx == 0xffffffff {
         println!("  ⚠️  WARNING: This is a NULL prevout (coinbase input)!");
         println!("     Coinbase inputs should be skipped in input extraction.");
-        println!("     This suggests a bug in extract_input_refs - it's including coinbase inputs!");
+        println!(
+            "     This suggests a bug in extract_input_refs - it's including coinbase inputs!"
+        );
         return Ok(());
     }
-    
+
     // Check if prevout_txid starts with 0xff (suspicious)
     if prevout_txid[0] == 0xff {
         println!("  ⚠️  WARNING: Prevout txid starts with 0xff (suspicious)!");
@@ -134,7 +149,7 @@ fn main() -> Result<()> {
         println!("     2. Data corruption");
         println!("     3. Extraction bug");
     }
-    
+
     // Calculate the actual transaction ID to verify
     let actual_tx_id = calculate_tx_id(tx);
     println!("  Actual transaction ID: {}", hex::encode(actual_tx_id));
@@ -145,7 +160,7 @@ fn main() -> Result<()> {
     let file = File::open(&outputs_file)?;
     let file_size = file.metadata()?.len();
     let mut reader = BufReader::with_capacity(64 * 1024 * 1024, file);
-    
+
     if let Some(output) = binary_search_txid(&mut reader, file_size, prevout_txid)? {
         println!("  ✅ FOUND in outputs_sorted.bin!");
         println!("  Block height: {}", output.block_height);
@@ -153,16 +168,22 @@ fn main() -> Result<()> {
         println!("  Is coinbase: {}", output.is_coinbase);
         println!("  Value: {} satoshis", output.value);
         println!("");
-        
+
         if output.output_idx as u64 != prevout_idx {
             println!("  ⚠️  WARNING: Output index mismatch!");
-            println!("     Expected: {}, Found: {}", prevout_idx, output.output_idx);
+            println!(
+                "     Expected: {}, Found: {}",
+                prevout_idx, output.output_idx
+            );
         } else {
             println!("  ✅ Output index matches!");
         }
-        
+
         if output.block_height > 912723 {
-            println!("  ⚠️  WARNING: Output is from block {} > 912723", output.block_height);
+            println!(
+                "  ⚠️  WARNING: Output is from block {} > 912723",
+                output.block_height
+            );
             println!("     This shouldn't be in outputs_sorted.bin if we only processed 0-912723!");
         } else {
             println!("  ✅ Output is from processed block range (0-912723)");
@@ -180,5 +201,3 @@ fn main() -> Result<()> {
 
     Ok(())
 }
-
-

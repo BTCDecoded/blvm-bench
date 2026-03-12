@@ -411,6 +411,7 @@ fn scan_cache_for_block(chunks_dir: &Path, height: u64) -> Result<Option<Vec<u8>
 }
 
 /// Fetch a block from RPC and add it to missing blocks
+#[cfg(feature = "differential")]
 pub async fn fetch_and_store_missing_block(
     chunks_dir: &Path,
     height: u64,

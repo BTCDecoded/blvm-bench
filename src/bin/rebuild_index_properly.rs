@@ -1,5 +1,5 @@
 //! Rebuild the index properly by checking ALL blocks, not just gaps
-//! 
+//!
 //! This fixes the issue where blocks are incorrectly marked as missing
 //! when they're actually in chunks.
 
@@ -14,14 +14,14 @@ async fn main() -> Result<()> {
         eprintln!("   ❌ PANIC: {:?}", panic_info);
         eprintln!("   💡 This should not happen - please report this error");
     }));
-    
+
     let chunks_dir = std::env::var("BLOCK_CACHE_DIR")
         .unwrap_or_else(|_| "/run/media/acolyte/Extra/blockchain".to_string());
     let chunks_dir = PathBuf::from(chunks_dir);
-    
+
     println!("🔨 Rebuilding index properly...");
     println!("   Chunks directory: {}", chunks_dir.display());
-    
+
     // Backup existing index
     let index_path = chunks_dir.join("chunks.index");
     if index_path.exists() {
@@ -29,7 +29,7 @@ async fn main() -> Result<()> {
         println!("   💾 Backing up existing index...");
         std::fs::copy(&index_path, &backup_path)?;
         println!("   ✅ Backed up to {}", backup_path.display());
-        
+
         // Check if we should force a full rebuild or resume
         let should_force_rebuild = std::env::var("FORCE_REBUILD").is_ok();
         if should_force_rebuild {
@@ -45,7 +45,7 @@ async fn main() -> Result<()> {
         println!("\n🚀 Building index from scratch (no existing index found)...");
     }
     use blvm_bench::chunk_index_rpc::build_block_index_via_rpc;
-    
+
     // Index all 912,723 blocks in our chunks
     let index = match build_block_index_via_rpc(&chunks_dir, Some(912722)).await {
         Ok(idx) => {
@@ -58,22 +58,18 @@ async fn main() -> Result<()> {
             return Err(e);
         }
     };
-    
+
     println!("   Total blocks indexed: {}", index.len());
-    
+
     // Count how many are actually missing
     let missing_count = index.values().filter(|e| e.chunk_number == 999).count();
     println!("   Blocks in chunks: {}", index.len() - missing_count);
     println!("   Blocks truly missing: {}", missing_count);
-    
+
     // Final save
     use blvm_bench::chunk_index::save_block_index;
     save_block_index(&chunks_dir, &index)?;
     println!("   💾 Final index saved");
-    
+
     Ok(())
 }
-
-
-
-

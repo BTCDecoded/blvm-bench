@@ -1,6 +1,6 @@
 #!/bin/bash
 # Bitcoin Commons Mempool Operations Benchmark
-# Uses consensus-proof/benches/mempool_operations.rs to benchmark mempool operations
+# Uses blvm-consensus/benches/mempool_operations.rs to benchmark mempool operations
 
 set -e
 
@@ -9,14 +9,14 @@ source "$SCRIPT_DIR/../shared/common.sh"
 
 OUTPUT_DIR=$(get_output_dir "${1:-$RESULTS_DIR}")
 mkdir -p "$OUTPUT_DIR"
-BENCH_DIR="$BLLVM_BENCH_ROOT"
+BENCH_DIR="${COMMONS_CONSENSUS_PATH:-$BLLVM_BENCH_ROOT}"
 OUTPUT_FILE="$OUTPUT_DIR/commons-mempool-bench-$(date +%Y%m%d-%H%M%S).json"
 
 echo "=== Bitcoin Commons Mempool Operations Benchmark ==="
 echo ""
 
 if [ ! -d "$BENCH_DIR" ]; then
-    echo "❌ consensus-proof directory not found at $BENCH_DIR"
+    echo "❌ blvm-consensus directory not found at $BENCH_DIR"
     exit 1
 fi
 
@@ -117,7 +117,7 @@ cat > "$OUTPUT_FILE" << EOF
       "operations_per_second": ${REPLACEMENT_OPS},
       "note": "Replace-by-fee (RBF) replacement checks"
     },
-    "measurement_method": "Criterion benchmark - consensus-proof/benches/mempool_operations.rs"
+    "measurement_method": "Criterion benchmark - blvm-consensus/benches/mempool_operations.rs"
   }
 }
 EOF

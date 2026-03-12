@@ -15,7 +15,7 @@ mod helpers {
         // Create coinbase transaction with BIP34 height
         let mut coinbase_script = vec![0x03]; // OP_PUSH_3 (for height encoding)
         coinbase_script.extend_from_slice(&height.to_le_bytes()[..3]);
-        coinbase_script.push(0x51); // OP_1
+        coinbase_script.push(blvm_consensus::opcodes::OP_1);
 
         let coinbase = Transaction {
             version: 1,
@@ -29,7 +29,7 @@ mod helpers {
             }],
             outputs: tx_outputs![TransactionOutput {
                 value: 50_000_000_000,     // 50 BTC
-                script_pubkey: vec![0x51], // OP_1
+                script_pubkey: vec![blvm_consensus::opcodes::OP_1],
             }],
             lock_time: 0,
         };
@@ -69,12 +69,12 @@ mod helpers {
                     hash: [0; 32],
                     index: 0xffffffff,
                 },
-                script_sig: vec![0x51], // Just OP_1, no height
+                script_sig: vec![blvm_consensus::opcodes::OP_1],
                 sequence: 0xffffffff,
             }],
             outputs: tx_outputs![TransactionOutput {
                 value: 50_000_000_000,
-                script_pubkey: vec![0x51],
+                script_pubkey: vec![blvm_consensus::opcodes::OP_1],
             }],
             lock_time: 0,
         };
@@ -100,7 +100,7 @@ mod helpers {
     }
 
     /// Validate block with BLLVM
-    pub fn validate_bllvm_block(
+    pub fn validate_blvm_block(
         block: &Block,
         height: u64,
         network: Network,
@@ -115,7 +115,15 @@ mod helpers {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        match connect_block(block, &witnesses, utxo_set, height, None, network_time, network) {
+        match connect_block(
+            block,
+            &witnesses,
+            utxo_set,
+            height,
+            None,
+            network_time,
+            network,
+        ) {
             Ok((result, _, _)) => result,
             Err(e) => blvm_consensus::types::ValidationResult::Invalid(format!("{:?}", e)),
         }
@@ -228,7 +236,7 @@ use std::time::SystemTime;
 struct TestResult {
     name: String,
     status: String,
-    bllvm_result: String,
+    blvm_result: String,
     core_result: String,
     match_result: bool,
     duration_ms: u64,
@@ -354,9 +362,9 @@ async fn test_bip30_differential() -> Result<()> {
     let height = 1;
     let network = Network::Mainnet;
 
-    // Validate with BLLVM
-    let bllvm_result = validate_bllvm_block(&block, height, network);
-    let bllvm_validation = match bllvm_result {
+    // Validate with BLVM
+    let blvm_result = validate_blvm_block(&block, height, network);
+    let blvm_validation = match blvm_result {
         blvm_consensus::types::ValidationResult::Valid => ValidationResult::Valid,
         blvm_consensus::types::ValidationResult::Invalid(msg) => ValidationResult::Invalid(msg),
     };
@@ -366,7 +374,7 @@ async fn test_bip30_differential() -> Result<()> {
         &block,
         height,
         network,
-        bllvm_validation.clone(),
+        blvm_validation.clone(),
         &rpc_client,
     )
     .await?;
@@ -375,7 +383,7 @@ async fn test_bip30_differential() -> Result<()> {
 
     // Record test result
     use blvm_bench::differential::{CoreValidationResult, ValidationResult};
-    let bllvm_result_str = match &bllvm_validation {
+    let blvm_result_str = match &blvm_validation {
         ValidationResult::Valid => "Valid".to_string(),
         ValidationResult::Invalid(msg) => format!("Invalid({})", msg),
     };
@@ -387,7 +395,7 @@ async fn test_bip30_differential() -> Result<()> {
     record_test_result(TestResult {
         name: "test_bip30_differential".to_string(),
         status: "passed".to_string(),
-        bllvm_result: bllvm_result_str,
+        blvm_result: blvm_result_str,
         core_result: core_result_str,
         match_result: comparison.matches,
         duration_ms: 0, // Will be set by test wrapper if we use macro
@@ -396,7 +404,7 @@ async fn test_bip30_differential() -> Result<()> {
 
     // Both should reject (BIP30 violation)
     assert!(
-        !comparison.matches || matches!(bllvm_validation, ValidationResult::Invalid(_)),
+        !comparison.matches || matches!(blvm_validation, ValidationResult::Invalid(_)),
         "CRITICAL BUG: BIP30 violation should be rejected by both implementations"
     );
 
@@ -435,9 +443,9 @@ async fn test_bip34_differential() -> Result<()> {
     let height = 1;
     let network = Network::Mainnet;
 
-    // Validate with BLLVM
-    let bllvm_result = validate_bllvm_block(&block, height, network);
-    let bllvm_validation = match bllvm_result {
+    // Validate with BLVM
+    let blvm_result = validate_blvm_block(&block, height, network);
+    let blvm_validation = match blvm_result {
         blvm_consensus::types::ValidationResult::Valid => ValidationResult::Valid,
         blvm_consensus::types::ValidationResult::Invalid(msg) => ValidationResult::Invalid(msg),
     };
@@ -447,7 +455,7 @@ async fn test_bip34_differential() -> Result<()> {
         &block,
         height,
         network,
-        bllvm_validation.clone(),
+        blvm_validation.clone(),
         &rpc_client,
     )
     .await?;
@@ -456,7 +464,7 @@ async fn test_bip34_differential() -> Result<()> {
 
     // Record test result
     use blvm_bench::differential::{CoreValidationResult, ValidationResult};
-    let bllvm_result_str = match &bllvm_validation {
+    let blvm_result_str = match &blvm_validation {
         ValidationResult::Valid => "Valid".to_string(),
         ValidationResult::Invalid(msg) => format!("Invalid({})", msg),
     };
@@ -468,7 +476,7 @@ async fn test_bip34_differential() -> Result<()> {
     record_test_result(TestResult {
         name: "test_bip34_differential".to_string(),
         status: "passed".to_string(),
-        bllvm_result: bllvm_result_str,
+        blvm_result: blvm_result_str,
         core_result: core_result_str,
         match_result: comparison.matches,
         duration_ms: 0,
@@ -477,7 +485,7 @@ async fn test_bip34_differential() -> Result<()> {
 
     // Both should reject (BIP34 violation)
     assert!(
-        !comparison.matches || matches!(bllvm_validation, ValidationResult::Invalid(_)),
+        !comparison.matches || matches!(blvm_validation, ValidationResult::Invalid(_)),
         "CRITICAL BUG: BIP34 violation should be rejected by both implementations"
     );
 
@@ -516,9 +524,9 @@ async fn test_bip90_differential() -> Result<()> {
     let height = 1;
     let network = Network::Mainnet;
 
-    // Validate with BLLVM
-    let bllvm_result = validate_bllvm_block(&block, height, network);
-    let bllvm_validation = match bllvm_result {
+    // Validate with BLVM
+    let blvm_result = validate_blvm_block(&block, height, network);
+    let blvm_validation = match blvm_result {
         blvm_consensus::types::ValidationResult::Valid => ValidationResult::Valid,
         blvm_consensus::types::ValidationResult::Invalid(msg) => ValidationResult::Invalid(msg),
     };
@@ -528,7 +536,7 @@ async fn test_bip90_differential() -> Result<()> {
         &block,
         height,
         network,
-        bllvm_validation.clone(),
+        blvm_validation.clone(),
         &rpc_client,
     )
     .await?;
@@ -537,7 +545,7 @@ async fn test_bip90_differential() -> Result<()> {
 
     // Record test result
     use blvm_bench::differential::{CoreValidationResult, ValidationResult};
-    let bllvm_result_str = match &bllvm_validation {
+    let blvm_result_str = match &blvm_validation {
         ValidationResult::Valid => "Valid".to_string(),
         ValidationResult::Invalid(msg) => format!("Invalid({})", msg),
     };
@@ -549,7 +557,7 @@ async fn test_bip90_differential() -> Result<()> {
     record_test_result(TestResult {
         name: "test_bip90_differential".to_string(),
         status: "passed".to_string(),
-        bllvm_result: bllvm_result_str,
+        blvm_result: blvm_result_str,
         core_result: core_result_str,
         match_result: comparison.matches,
         duration_ms: 0,
@@ -558,7 +566,7 @@ async fn test_bip90_differential() -> Result<()> {
 
     // Both should reject (BIP90 violation)
     assert!(
-        !comparison.matches || matches!(bllvm_validation, ValidationResult::Invalid(_)),
+        !comparison.matches || matches!(blvm_validation, ValidationResult::Invalid(_)),
         "CRITICAL BUG: BIP90 violation should be rejected by both implementations"
     );
 
@@ -597,9 +605,9 @@ async fn test_valid_block_accepted() -> Result<()> {
     let height = 1;
     let network = Network::Mainnet;
 
-    // Validate with BLLVM
-    let bllvm_result = validate_bllvm_block(&block, height, network);
-    let bllvm_validation = match bllvm_result {
+    // Validate with BLVM
+    let blvm_result = validate_blvm_block(&block, height, network);
+    let blvm_validation = match blvm_result {
         blvm_consensus::types::ValidationResult::Valid => ValidationResult::Valid,
         blvm_consensus::types::ValidationResult::Invalid(msg) => ValidationResult::Invalid(msg),
     };
@@ -609,7 +617,7 @@ async fn test_valid_block_accepted() -> Result<()> {
         &block,
         height,
         network,
-        bllvm_validation.clone(),
+        blvm_validation.clone(),
         &rpc_client,
     )
     .await?;
@@ -618,7 +626,7 @@ async fn test_valid_block_accepted() -> Result<()> {
 
     // Record test result
     use blvm_bench::differential::{CoreValidationResult, ValidationResult};
-    let bllvm_result_str = match &bllvm_validation {
+    let blvm_result_str = match &blvm_validation {
         ValidationResult::Valid => "Valid".to_string(),
         ValidationResult::Invalid(msg) => format!("Invalid({})", msg),
     };
@@ -630,7 +638,7 @@ async fn test_valid_block_accepted() -> Result<()> {
     record_test_result(TestResult {
         name: "test_valid_block_accepted".to_string(),
         status: "passed".to_string(),
-        bllvm_result: bllvm_result_str,
+        blvm_result: blvm_result_str,
         core_result: core_result_str,
         match_result: comparison.matches,
         duration_ms: 0,
@@ -658,10 +666,14 @@ async fn test_historical_blocks_differential() -> Result<()> {
     use std::sync::Arc;
 
     // Check if we should use parallel differential with chunks (when RPC unavailable or BLOCK_CACHE_DIR is set)
-    let use_parallel = std::env::var("BLOCK_CACHE_DIR").is_ok() || 
-                       std::env::var("HISTORICAL_BLOCK_END").is_ok() && 
-                       std::env::var("HISTORICAL_BLOCK_END").unwrap().parse::<u64>().unwrap_or(0) > 1000;
-    
+    let use_parallel = std::env::var("BLOCK_CACHE_DIR").is_ok()
+        || std::env::var("HISTORICAL_BLOCK_END").is_ok()
+            && std::env::var("HISTORICAL_BLOCK_END")
+                .unwrap()
+                .parse::<u64>()
+                .unwrap_or(0)
+                > 1000;
+
     if use_parallel {
         // Use parallel differential testing with chunks
         return test_historical_blocks_parallel_fallback().await;
@@ -804,12 +816,12 @@ async fn test_historical_blocks_differential() -> Result<()> {
             }
         };
 
-        // Validate with BLLVM
+        // Validate with BLVM
         let network_time = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        let bllvm_result = match connect_block(
+        let blvm_result = match connect_block(
             &block,
             &witnesses,
             utxo_set.clone(),
@@ -839,7 +851,7 @@ async fn test_historical_blocks_differential() -> Result<()> {
 
         // Compare results
         let matches = matches!(
-            (&bllvm_result, &core_result),
+            (&blvm_result, &core_result),
             (ValidationResult::Valid, CoreValidationResult::Valid)
                 | (
                     ValidationResult::Invalid(_),
@@ -851,12 +863,12 @@ async fn test_historical_blocks_differential() -> Result<()> {
             divergences.push((
                 height,
                 block_hash,
-                bllvm_result.clone(),
+                blvm_result.clone(),
                 core_result.clone(),
             ));
             eprintln!(
                 "❌ DIVERGENCE at height {}: BLLVM={:?}, Core={:?}",
-                height, bllvm_result, core_result
+                height, blvm_result, core_result
             );
         } else {
             matched += 1;
@@ -884,7 +896,7 @@ async fn test_historical_blocks_differential() -> Result<()> {
             "failed"
         }
         .to_string(),
-        bllvm_result: format!("Tested {} blocks", tested),
+        blvm_result: format!("Tested {} blocks", tested),
         core_result: format!("Matched {} blocks", matched),
         match_result: divergences.is_empty(),
         duration_ms: 0,
@@ -903,10 +915,10 @@ async fn test_historical_blocks_differential() -> Result<()> {
 
     if !divergences.is_empty() {
         println!("\n❌ Divergences found:");
-        for (height, hash, bllvm, core) in divergences.iter().take(10) {
+        for (height, hash, blvm, core) in divergences.iter().take(10) {
             println!(
                 "   Height {} ({}): BLLVM={:?}, Core={:?}",
-                height, hash, bllvm, core
+                height, hash, blvm, core
             );
         }
         if divergences.len() > 10 {
@@ -924,8 +936,9 @@ async fn test_historical_blocks_differential() -> Result<()> {
 /// Fallback to parallel differential testing with chunks when RPC is unavailable
 #[cfg(feature = "differential")]
 async fn test_historical_blocks_parallel_fallback() -> Result<()> {
-    use blvm_bench::parallel_differential::{ParallelConfig, run_parallel_differential, 
-        ResumableConfig, run_differential_with_resume};
+    use blvm_bench::parallel_differential::{
+        run_differential_with_resume, run_parallel_differential, ParallelConfig, ResumableConfig,
+    };
     use std::sync::Arc;
 
     // Check if RESUMABLE mode is enabled (recommended for large tests)
@@ -934,8 +947,14 @@ async fn test_historical_blocks_parallel_fallback() -> Result<()> {
         .and_then(|s| s.parse::<bool>().ok())
         .unwrap_or(true); // Default to resumable for safety
 
-    println!("🔄 Using {} differential testing with chunks", 
-             if use_resumable { "RESUMABLE" } else { "parallel" });
+    println!(
+        "🔄 Using {} differential testing with chunks",
+        if use_resumable {
+            "RESUMABLE"
+        } else {
+            "parallel"
+        }
+    );
 
     // Get configuration from environment
     let start_height: u64 = std::env::var("HISTORICAL_BLOCK_START")
@@ -951,12 +970,12 @@ async fn test_historical_blocks_parallel_fallback() -> Result<()> {
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or_else(|| num_cpus::get().min(4)); // Limit to 4 workers for safety
-    
+
     let chunk_size: u64 = std::env::var("CHUNK_SIZE")
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(125_000);
-    
+
     let checkpoint_interval: u64 = std::env::var("CHECKPOINT_INTERVAL")
         .ok()
         .and_then(|s| s.parse().ok())
@@ -976,7 +995,7 @@ async fn test_historical_blocks_parallel_fallback() -> Result<()> {
     let cache_dir = std::env::var("BLOCK_CACHE_DIR")
         .ok()
         .map(std::path::PathBuf::from);
-    
+
     // Try to get RPC client (optional)
     let rpc_client = match create_rpc_client(Some(BitcoinNetwork::Mainnet)).await {
         Ok((client, net)) => {
@@ -988,13 +1007,13 @@ async fn test_historical_blocks_parallel_fallback() -> Result<()> {
             None
         }
     };
-    
+
     let block_source = blvm_bench::parallel_differential::create_block_data_source(
         blvm_bench::parallel_differential::BlockFileNetwork::Mainnet,
         cache_dir.as_deref(),
         rpc_client,
     )?;
-    
+
     // Log what data source we're using
     match &block_source {
         blvm_bench::parallel_differential::BlockDataSource::DirectFile(_) => {
@@ -1010,12 +1029,12 @@ async fn test_historical_blocks_parallel_fallback() -> Result<()> {
             println!("✅ Using Start9 RPC (for encrypted files)");
         }
     }
-    
+
     let block_source = Arc::new(block_source);
-    
+
     // Run differential test (resumable or parallel)
     println!("🚀 Starting differential validation...");
-    
+
     let results = if use_resumable {
         let config = ResumableConfig {
             parallel_config: ParallelConfig {
@@ -1030,13 +1049,8 @@ async fn test_historical_blocks_parallel_fallback() -> Result<()> {
                 .unwrap_or(10000), // Save progress every 10k blocks (default, was 1k)
             checkpoint_dir: cache_dir,
         };
-        
-        run_differential_with_resume(
-            start_height,
-            end_height,
-            config,
-            block_source,
-        ).await?
+
+        run_differential_with_resume(start_height, end_height, config, block_source).await?
     } else {
         let config = ParallelConfig {
             num_workers,
@@ -1046,30 +1060,28 @@ async fn test_historical_blocks_parallel_fallback() -> Result<()> {
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(false),
         };
-        
-        run_parallel_differential(
-            start_height,
-            end_height,
-            config,
-            block_source,
-        ).await?
+
+        run_parallel_differential(start_height, end_height, config, block_source).await?
     };
 
     // Check for divergences
     let total_tested: usize = results.iter().map(|r| r.tested).sum();
     let total_matched: usize = results.iter().map(|r| r.matched).sum();
     let total_divergences: usize = results.iter().map(|r| r.divergences.len()).sum();
-    
+
     println!("📊 Results:");
     println!("   Blocks tested: {}", total_tested);
     println!("   Blocks matched: {}", total_matched);
     println!("   Divergences: {}", total_divergences);
-    
+
     if total_divergences > 0 {
         eprintln!("❌ Found {} divergences!", total_divergences);
         for result in &results {
             for (height, blvm_result, core_result) in &result.divergences {
-                eprintln!("   Height {}: BLVM={}, Core={}", height, blvm_result, core_result);
+                eprintln!(
+                    "   Height {}: BLVM={}, Core={}",
+                    height, blvm_result, core_result
+                );
             }
         }
         // Don't fail the test - just report divergences

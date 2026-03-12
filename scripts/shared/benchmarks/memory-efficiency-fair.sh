@@ -83,12 +83,12 @@ echo "2. Bitcoin Commons Memory Usage"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 # Try multiple process name patterns
-COMMONS_PID=$(get_process_pid "reference-node")
+COMMONS_PID=$(get_process_pid "blvm-node")
 if [ -z "$COMMONS_PID" ]; then
-    COMMONS_PID=$(get_process_pid "bllvm-node")
+    COMMONS_PID=$(get_process_pid "blvm")
 fi
 if [ -z "$COMMONS_PID" ]; then
-    COMMONS_PID=$(pgrep -f "bllvm.*node" | head -1)
+    COMMONS_PID=$(pgrep -f "blvm.*node" | head -1)
 fi
 COMMONS_IDLE_MEMORY_KB=0
 COMMONS_SYNC_MEMORY_KB=0

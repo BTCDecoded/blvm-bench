@@ -6,9 +6,9 @@
 //! 2. Calls check_block (structure validation only, no scripts)
 //! 3. Matches Core's CheckBlock operation (not connect_block)
 
-use bllvm_consensus::block::check_block;
-use bllvm_consensus::mining::calculate_merkle_root;
-use bllvm_consensus::{
+use blvm_consensus::block::check_block;
+use blvm_consensus::mining::calculate_merkle_root;
+use blvm_consensus::{
     tx_inputs, tx_outputs, Block, BlockHeader, OutPoint, Transaction, TransactionInput,
     TransactionOutput,
 };
@@ -25,12 +25,12 @@ fn create_test_block_for_check_block() -> Block {
                 hash: [0u8; 32],
                 index: 0xffffffff, // Coinbase
             },
-            script_sig: vec![0x51; 4], // Coinbase script
+            script_sig: vec![blvm_consensus::opcodes::OP_1; 4],
             sequence: 0xffffffff,
         }],
         outputs: tx_outputs![TransactionOutput {
             value: 50_000_000_000, // 50 BTC
-            script_pubkey: vec![0x51],
+            script_pubkey: vec![blvm_consensus::opcodes::OP_1],
         }],
         lock_time: 0,
     };
@@ -45,12 +45,12 @@ fn create_test_block_for_check_block() -> Block {
                     hash: [i as u8; 32],
                     index: 0,
                 },
-                script_sig: vec![0x51],
+                script_sig: vec![blvm_consensus::opcodes::OP_1],
                 sequence: 0xffffffff,
             }],
             outputs: tx_outputs![TransactionOutput {
                 value: 10_000_000,
-                script_pubkey: vec![0x51],
+                script_pubkey: vec![blvm_consensus::opcodes::OP_1],
             }],
             lock_time: 0,
         };

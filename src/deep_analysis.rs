@@ -74,6 +74,8 @@ pub fn run_with_perf(benchmark_cmd: &[&str]) -> Result<DeepAnalysisMetrics, Stri
         "branch-misses",
     ];
 
+    let perf_output_path = std::env::temp_dir().join("perf-deep-analysis.csv");
+
     let mut perf_cmd = Command::new("perf");
     perf_cmd.arg("stat");
     for event in &perf_events {
@@ -82,7 +84,7 @@ pub fn run_with_perf(benchmark_cmd: &[&str]) -> Result<DeepAnalysisMetrics, Stri
     perf_cmd
         .arg("-x,")
         .arg("-o")
-        .arg("/tmp/perf-deep-analysis.csv");
+        .arg(&perf_output_path);
 
     // Add the actual benchmark command
     for arg in benchmark_cmd {
@@ -102,7 +104,7 @@ pub fn run_with_perf(benchmark_cmd: &[&str]) -> Result<DeepAnalysisMetrics, Stri
     }
 
     // Parse perf CSV output
-    parse_perf_csv("/tmp/perf-deep-analysis.csv")
+    parse_perf_csv(perf_output_path.to_string_lossy().as_ref())
 }
 
 fn parse_perf_csv(path: &str) -> Result<DeepAnalysisMetrics, String> {

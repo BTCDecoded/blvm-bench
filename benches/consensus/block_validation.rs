@@ -1,6 +1,6 @@
-use bllvm_consensus::block::connect_block;
-use bllvm_consensus::segwit::Witness;
-use bllvm_consensus::{
+use blvm_consensus::block::connect_block;
+use blvm_consensus::segwit::Witness;
+use blvm_consensus::{
     tx_inputs, tx_outputs, Block, BlockHeader, OutPoint, Transaction, TransactionInput,
     TransactionOutput, UtxoSet, UTXO,
 };
@@ -38,7 +38,7 @@ fn benchmark_connect_block(c: &mut Criterion) {
                 black_box(utxo_set.clone()),
                 black_box(0),
                 black_box(None),
-                black_box(bllvm_consensus::types::Network::Mainnet),
+                black_box(blvm_consensus::types::Network::Mainnet),
             );
             // Coinbase-only block, so validation should succeed
         })
@@ -54,12 +54,12 @@ fn benchmark_connect_block_multi_tx(c: &mut Criterion) {
                 hash: [0; 32],
                 index: 0xffffffff, // Coinbase
             },
-            script_sig: vec![0x51; 4],
+            script_sig: vec![blvm_consensus::opcodes::OP_1; 4],
             sequence: 0xffffffff,
         }],
         outputs: tx_outputs![TransactionOutput {
             value: 50_000_000_000,
-            script_pubkey: vec![0x51],
+            script_pubkey: vec![blvm_consensus::opcodes::OP_1],
         }],
         lock_time: 0,
     };
@@ -75,7 +75,7 @@ fn benchmark_connect_block_multi_tx(c: &mut Criterion) {
         };
         let prev_utxo = UTXO {
             value: 10_000_000,
-            script_pubkey: vec![0x51; 25],
+            script_pubkey: vec![blvm_consensus::opcodes::OP_1; 25],
             height: 0,
         };
         utxo_set.insert(prev_outpoint.clone(), prev_utxo);
@@ -85,12 +85,12 @@ fn benchmark_connect_block_multi_tx(c: &mut Criterion) {
             version: 1,
             inputs: tx_inputs![TransactionInput {
                 prevout: prev_outpoint.clone(),
-                script_sig: vec![0x51; 20],
+                script_sig: vec![blvm_consensus::opcodes::OP_1; 20],
                 sequence: 0xffffffff,
             }],
             outputs: tx_outputs![TransactionOutput {
                 value: 5_000_000,
-                script_pubkey: vec![0x51; 25],
+                script_pubkey: vec![blvm_consensus::opcodes::OP_1; 25],
             }],
             lock_time: 0,
         });
@@ -115,7 +115,7 @@ fn benchmark_connect_block_multi_tx(c: &mut Criterion) {
                 black_box(utxo_set.clone()),
                 black_box(0),
                 black_box(None),
-                black_box(bllvm_consensus::types::Network::Mainnet),
+                black_box(blvm_consensus::types::Network::Mainnet),
             );
             // Now with valid UTXOs, this should do actual validation work
         })

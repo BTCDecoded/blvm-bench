@@ -57,46 +57,46 @@ jobs:
       - name: Setup Commons dependencies
         run: |
           # Setup Commons dependencies (similar to benchmarks workflow)
-          CONSENSUS_DIR="$HOME/bllvm-consensus"
+          CONSENSUS_DIR="$HOME/blvm-consensus"
           if [ ! -d "$CONSENSUS_DIR" ]; then
             echo "Cloning Bitcoin Commons consensus..."
-            git clone --depth 1 https://github.com/BTCDecoded/bllvm-consensus.git "$CONSENSUS_DIR" || {
-              if [ -d "$HOME/src/bllvm-consensus" ]; then
-                CONSENSUS_DIR="$HOME/src/bllvm-consensus"
+            git clone --depth 1 https://github.com/BTCDecoded/blvm-consensus.git "$CONSENSUS_DIR" || {
+              if [ -d "$HOME/src/blvm-consensus" ]; then
+                CONSENSUS_DIR="$HOME/src/blvm-consensus"
               fi
             }
           fi
           
-          NODE_DIR="$HOME/bllvm-node"
+          NODE_DIR="$HOME/blvm-node"
           if [ ! -d "$NODE_DIR" ]; then
             echo "Cloning Bitcoin Commons node..."
-            git clone --depth 1 https://github.com/BTCDecoded/bllvm-node.git "$NODE_DIR" || {
-              if [ -d "$HOME/src/bllvm-node" ]; then
-                NODE_DIR="$HOME/src/bllvm-node"
+            git clone --depth 1 https://github.com/BTCDecoded/blvm-node.git "$NODE_DIR" || {
+              if [ -d "$HOME/src/blvm-node" ]; then
+                NODE_DIR="$HOME/src/blvm-node"
               fi
             }
           fi
           
-          PROTOCOL_DIR="$HOME/bllvm-protocol"
+          PROTOCOL_DIR="$HOME/blvm-protocol"
           if [ ! -d "$PROTOCOL_DIR" ]; then
             echo "Cloning Bitcoin Commons protocol..."
-            git clone --depth 1 https://github.com/BTCDecoded/bllvm-protocol.git "$PROTOCOL_DIR" || {
-              if [ -d "$HOME/src/bllvm-protocol" ]; then
-                PROTOCOL_DIR="$HOME/src/bllvm-protocol"
+            git clone --depth 1 https://github.com/BTCDecoded/blvm-protocol.git "$PROTOCOL_DIR" || {
+              if [ -d "$HOME/src/blvm-protocol" ]; then
+                PROTOCOL_DIR="$HOME/src/blvm-protocol"
               fi
             }
           fi
           
           # Create symlinks
           cd "$GITHUB_WORKSPACE"
-          if [ ! -e "../bllvm-consensus" ]; then
-            ln -sf "$CONSENSUS_DIR" ../bllvm-consensus
+          if [ ! -e "../blvm-consensus" ]; then
+            ln -sf "$CONSENSUS_DIR" ../blvm-consensus
           fi
-          if [ ! -e "../bllvm-node" ]; then
-            ln -sf "$NODE_DIR" ../bllvm-node
+          if [ ! -e "../blvm-node" ]; then
+            ln -sf "$NODE_DIR" ../blvm-node
           fi
-          if [ ! -e "../bllvm-protocol" ] && [ -d "$PROTOCOL_DIR" ]; then
-            ln -sf "$PROTOCOL_DIR" ../bllvm-protocol
+          if [ ! -e "../blvm-protocol" ] && [ -d "$PROTOCOL_DIR" ]; then
+            ln -sf "$PROTOCOL_DIR" ../blvm-protocol
           fi
           
           echo "COMMONS_CONSENSUS_PATH=$CONSENSUS_DIR" >> $GITHUB_ENV
@@ -107,8 +107,8 @@ jobs:
           mkdir -p .cargo
           cat > .cargo/config.toml << EOF
           [patch.crates-io]
-          bllvm-protocol = { path = "../bllvm-protocol" }
-          bllvm-consensus = { path = "../bllvm-consensus" }
+          blvm-protocol = { path = "../blvm-protocol" }
+          blvm-consensus = { path = "../blvm-consensus" }
           EOF
           echo "✅ Created .cargo/config.toml for local dependency builds"
 

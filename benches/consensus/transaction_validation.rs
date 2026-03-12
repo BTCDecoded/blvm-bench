@@ -1,5 +1,5 @@
-use bllvm_consensus::transaction::check_transaction;
-use bllvm_consensus::{
+use blvm_consensus::transaction::check_transaction;
+use blvm_consensus::{
     tx_inputs, tx_outputs, OutPoint, Transaction, TransactionInput, TransactionOutput,
 };
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
@@ -12,12 +12,12 @@ fn create_test_transaction() -> Transaction {
                 hash: [1; 32],
                 index: 0,
             },
-            script_sig: vec![0x51], // OP_1
+            script_sig: vec![blvm_consensus::opcodes::OP_1],
             sequence: 0xffffffff,
         }],
         outputs: tx_outputs![TransactionOutput {
             value: 100000000,
-            script_pubkey: vec![0x51, 0x87], // OP_1 OP_EQUAL
+            script_pubkey: vec![blvm_consensus::opcodes::OP_1, blvm_consensus::opcodes::OP_EQUAL],
         }],
         lock_time: 0,
     }
@@ -40,7 +40,7 @@ fn benchmark_transaction_validation_complex(c: &mut Criterion) {
                     hash: [i as u8; 32],
                     index: i,
                 },
-                script_sig: vec![0x51; 20], // Longer script
+                script_sig: vec![blvm_consensus::opcodes::OP_1; 20],
                 sequence: 0xffffffff,
             })
             .collect::<Vec<_>>()
@@ -48,7 +48,7 @@ fn benchmark_transaction_validation_complex(c: &mut Criterion) {
         outputs: (0..10)
             .map(|i| TransactionOutput {
                 value: 10000000 + i as i64,
-                script_pubkey: vec![0x51; 25],
+                script_pubkey: vec![blvm_consensus::opcodes::OP_1; 25],
             })
             .collect::<Vec<_>>()
             .into(),

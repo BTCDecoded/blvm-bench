@@ -217,39 +217,39 @@ jobs:
           echo "✅ Core setup complete: $CORE_DIR"
           
           # Setup Commons consensus
-          CONSENSUS_DIR="$HOME/bllvm-consensus"
+          CONSENSUS_DIR="$HOME/blvm-consensus"
           if [ ! -d "$CONSENSUS_DIR" ]; then
             echo "Cloning Bitcoin Commons consensus..."
-            git clone --depth 1 https://github.com/BTCDecoded/bllvm-consensus.git "$CONSENSUS_DIR" || {
+            git clone --depth 1 https://github.com/BTCDecoded/blvm-consensus.git "$CONSENSUS_DIR" || {
               echo "⚠️  Failed to clone consensus, trying existing directory..."
-              if [ -d "$HOME/src/bllvm-consensus" ]; then
-                CONSENSUS_DIR="$HOME/src/bllvm-consensus"
+              if [ -d "$HOME/src/blvm-consensus" ]; then
+                CONSENSUS_DIR="$HOME/src/blvm-consensus"
               fi
             }
           fi
           echo "commons_consensus_path=$CONSENSUS_DIR" >> $GITHUB_OUTPUT
           
           # Setup Commons node
-          NODE_DIR="$HOME/bllvm-node"
+          NODE_DIR="$HOME/blvm-node"
           if [ ! -d "$NODE_DIR" ]; then
             echo "Cloning Bitcoin Commons node..."
-            git clone --depth 1 https://github.com/BTCDecoded/bllvm-node.git "$NODE_DIR" || {
+            git clone --depth 1 https://github.com/BTCDecoded/blvm-node.git "$NODE_DIR" || {
               echo "⚠️  Failed to clone node, trying existing directory..."
-              if [ -d "$HOME/src/bllvm-node" ]; then
-                NODE_DIR="$HOME/src/bllvm-node"
+              if [ -d "$HOME/src/blvm-node" ]; then
+                NODE_DIR="$HOME/src/blvm-node"
               fi
             }
           fi
           echo "commons_node_path=$NODE_DIR" >> $GITHUB_OUTPUT
           
           # Setup Commons protocol
-          PROTOCOL_DIR="$HOME/bllvm-protocol"
+          PROTOCOL_DIR="$HOME/blvm-protocol"
           if [ ! -d "$PROTOCOL_DIR" ]; then
             echo "Cloning Bitcoin Commons protocol..."
-            git clone --depth 1 https://github.com/BTCDecoded/bllvm-protocol.git "$PROTOCOL_DIR" || {
+            git clone --depth 1 https://github.com/BTCDecoded/blvm-protocol.git "$PROTOCOL_DIR" || {
               echo "⚠️  Failed to clone protocol, trying existing directory..."
-              if [ -d "$HOME/src/bllvm-protocol" ]; then
-                PROTOCOL_DIR="$HOME/src/bllvm-protocol"
+              if [ -d "$HOME/src/blvm-protocol" ]; then
+                PROTOCOL_DIR="$HOME/src/blvm-protocol"
               fi
             }
           fi
@@ -269,9 +269,9 @@ jobs:
           
           # Create symlinks for Commons dependencies
           cd "$GITHUB_WORKSPACE"
-          RELATIVE_CONSENSUS_DIR="../bllvm-consensus"
-          RELATIVE_NODE_DIR="../bllvm-node"
-          RELATIVE_PROTOCOL_DIR="../bllvm-protocol"
+          RELATIVE_CONSENSUS_DIR="../blvm-consensus"
+          RELATIVE_NODE_DIR="../blvm-node"
+          RELATIVE_PROTOCOL_DIR="../blvm-protocol"
           
           if [ ! -e "$RELATIVE_CONSENSUS_DIR" ]; then
             ln -sf "$(cd "$CONSENSUS_DIR" && pwd)" "$RELATIVE_CONSENSUS_DIR"
@@ -279,15 +279,15 @@ jobs:
           if [ ! -e "$RELATIVE_NODE_DIR" ]; then
             ln -sf "$(cd "$NODE_DIR" && pwd)" "$RELATIVE_NODE_DIR"
           fi
-          if [ ! -e "$RELATIVE_PROTOCOL_DIR" ] && [ -d "$HOME/bllvm-protocol" ]; then
-            ln -sf "$(cd "$HOME/bllvm-protocol" && pwd)" "$RELATIVE_PROTOCOL_DIR"
+          if [ ! -e "$RELATIVE_PROTOCOL_DIR" ] && [ -d "$HOME/blvm-protocol" ]; then
+            ln -sf "$(cd "$HOME/blvm-protocol" && pwd)" "$RELATIVE_PROTOCOL_DIR"
           fi
           
           # Verify Cargo.toml can find dependencies
           if [ -f "Cargo.toml" ]; then
             echo "Verifying Cargo.toml dependencies..."
-            if grep -q "bllvm-consensus" Cargo.toml; then
-              echo "✅ bllvm-consensus dependency found in Cargo.toml"
+            if grep -q "blvm-consensus" Cargo.toml; then
+              echo "✅ blvm-consensus dependency found in Cargo.toml"
             fi
           fi
           
@@ -295,8 +295,8 @@ jobs:
           mkdir -p .cargo
           cat > .cargo/config.toml << EOF
           [patch.crates-io]
-          bllvm-protocol = { path = "../bllvm-protocol" }
-          bllvm-consensus = { path = "../bllvm-consensus" }
+          blvm-protocol = { path = "../blvm-protocol" }
+          blvm-consensus = { path = "../blvm-consensus" }
           EOF
           echo "✅ Created .cargo/config.toml for local dependency builds"
 
@@ -310,17 +310,17 @@ jobs:
           echo "🔍 Checking if Rust infrastructure is available (optional)..."
           
           # Verify dependencies are available
-          if [ ! -e "../bllvm-consensus" ] && [ ! -d "../bllvm-consensus" ]; then
-            echo "⚠️  bllvm-consensus dependency not found, skipping Rust check"
+          if [ ! -e "../blvm-consensus" ] && [ ! -d "../blvm-consensus" ]; then
+            echo "⚠️  blvm-consensus dependency not found, skipping Rust check"
             echo "ℹ️  This is expected if dependencies aren't set up yet (not critical for benchmarks)"
             exit 0
           fi
           
           # Try to build with verbose output to see what's happening
-          echo "Building bllvm-bench with benchmark-helpers feature..."
-          if cargo build --features benchmark-helpers --bin bllvm-bench --message-format=short 2>&1; then
+          echo "Building blvm-bench with benchmark-helpers feature..."
+          if cargo build --features benchmark-helpers --bin blvm-bench --message-format=short 2>&1; then
             echo "✅ Rust infrastructure available for Core detection"
-            # Could use: cargo run --features benchmark-helpers --bin bllvm-bench -- --find-core
+            # Could use: cargo run --features benchmark-helpers --bin blvm-bench -- --find-core
           else
             echo "ℹ️  Rust infrastructure check failed (not critical for benchmarks)"
             echo "   This is expected if dependencies aren't fully set up or if there are build issues"
@@ -558,38 +558,38 @@ jobs:
           
           # Create symlinks for Commons dependencies (use absolute paths)
           cd "$GITHUB_WORKSPACE"
-          if [ ! -e "../bllvm-consensus" ]; then
-            ln -sf "$COMMONS_CONSENSUS_PATH" ../bllvm-consensus
-            echo "✅ Created symlink: ../bllvm-consensus -> $COMMONS_CONSENSUS_PATH"
+          if [ ! -e "../blvm-consensus" ]; then
+            ln -sf "$COMMONS_CONSENSUS_PATH" ../blvm-consensus
+            echo "✅ Created symlink: ../blvm-consensus -> $COMMONS_CONSENSUS_PATH"
           fi
-          if [ ! -e "../bllvm-node" ]; then
-            ln -sf "$COMMONS_NODE_PATH" ../bllvm-node
-            echo "✅ Created symlink: ../bllvm-node -> $COMMONS_NODE_PATH"
+          if [ ! -e "../blvm-node" ]; then
+            ln -sf "$COMMONS_NODE_PATH" ../blvm-node
+            echo "✅ Created symlink: ../blvm-node -> $COMMONS_NODE_PATH"
           fi
-          if [ ! -e "../bllvm-protocol" ] && [ -d "$COMMONS_PROTOCOL_PATH" ]; then
-            ln -sf "$COMMONS_PROTOCOL_PATH" ../bllvm-protocol
-            echo "✅ Created symlink: ../bllvm-protocol -> $COMMONS_PROTOCOL_PATH"
+          if [ ! -e "../blvm-protocol" ] && [ -d "$COMMONS_PROTOCOL_PATH" ]; then
+            ln -sf "$COMMONS_PROTOCOL_PATH" ../blvm-protocol
+            echo "✅ Created symlink: ../blvm-protocol -> $COMMONS_PROTOCOL_PATH"
           fi
           
           # Verify symlinks
           echo "Verifying dependencies..."
-          if [ -f "../bllvm-consensus/Cargo.toml" ]; then
-            echo "✅ bllvm-consensus found"
+          if [ -f "../blvm-consensus/Cargo.toml" ]; then
+            echo "✅ blvm-consensus found"
           else
-            echo "❌ bllvm-consensus not found at ../bllvm-consensus/Cargo.toml"
-            ls -la ../bllvm-consensus 2>/dev/null || echo "   Symlink doesn't exist"
+            echo "❌ blvm-consensus not found at ../blvm-consensus/Cargo.toml"
+            ls -la ../blvm-consensus 2>/dev/null || echo "   Symlink doesn't exist"
           fi
-          if [ -f "../bllvm-node/Cargo.toml" ]; then
-            echo "✅ bllvm-node found"
+          if [ -f "../blvm-node/Cargo.toml" ]; then
+            echo "✅ blvm-node found"
           else
-            echo "❌ bllvm-node not found at ../bllvm-node/Cargo.toml"
-            ls -la ../bllvm-node 2>/dev/null || echo "   Symlink doesn't exist"
+            echo "❌ blvm-node not found at ../blvm-node/Cargo.toml"
+            ls -la ../blvm-node 2>/dev/null || echo "   Symlink doesn't exist"
           fi
-          if [ -f "../bllvm-protocol/Cargo.toml" ]; then
-            echo "✅ bllvm-protocol found"
+          if [ -f "../blvm-protocol/Cargo.toml" ]; then
+            echo "✅ blvm-protocol found"
           else
-            echo "❌ bllvm-protocol not found at ../bllvm-protocol/Cargo.toml"
-            ls -la ../bllvm-protocol 2>/dev/null || echo "   Symlink doesn't exist"
+            echo "❌ blvm-protocol not found at ../blvm-protocol/Cargo.toml"
+            ls -la ../blvm-protocol 2>/dev/null || echo "   Symlink doesn't exist"
             echo "   Expected path: $COMMONS_PROTOCOL_PATH"
           fi
           
@@ -597,8 +597,8 @@ jobs:
           mkdir -p .cargo
           cat > .cargo/config.toml << EOF
           [patch.crates-io]
-          bllvm-protocol = { path = "../bllvm-protocol" }
-          bllvm-consensus = { path = "../bllvm-consensus" }
+          blvm-protocol = { path = "../blvm-protocol" }
+          blvm-consensus = { path = "../blvm-consensus" }
           EOF
           echo "✅ Created .cargo/config.toml for local dependency builds"
 
@@ -607,7 +607,7 @@ jobs:
           CORE_PATH="${{ needs.setup.outputs.core_path }}"
           COMMONS_CONSENSUS_PATH="${{ needs.setup.outputs.commons_consensus_path }}"
           COMMONS_NODE_PATH="${{ needs.setup.outputs.commons_node_path }}"
-          PROTOCOL_DIR="$HOME/bllvm-protocol"
+          PROTOCOL_DIR="$HOME/blvm-protocol"
           
           # Verify Core path and bench_bitcoin (improved detection)
           echo "Checking Core setup..."
@@ -643,16 +643,16 @@ jobs:
           # Verify Commons dependencies
           echo "Verifying Commons dependencies..."
           if [ -f "$COMMONS_CONSENSUS_PATH/Cargo.toml" ]; then
-            echo "✅ bllvm-consensus found"
+            echo "✅ blvm-consensus found"
           else
-            echo "❌ bllvm-consensus not found at: $COMMONS_CONSENSUS_PATH"
+            echo "❌ blvm-consensus not found at: $COMMONS_CONSENSUS_PATH"
             exit 1
           fi
           
           if [ -f "$COMMONS_NODE_PATH/Cargo.toml" ]; then
-            echo "✅ bllvm-node found"
+            echo "✅ blvm-node found"
           else
-            echo "❌ bllvm-node not found at: $COMMONS_NODE_PATH"
+            echo "❌ blvm-node not found at: $COMMONS_NODE_PATH"
             exit 1
           fi
           

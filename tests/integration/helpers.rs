@@ -11,7 +11,7 @@ pub fn create_test_block(height: u64) -> Block {
     // Create coinbase transaction with BIP34 height
     let mut coinbase_script = vec![0x03]; // OP_PUSH_3 (for height encoding)
     coinbase_script.extend_from_slice(&height.to_le_bytes()[..3]);
-    coinbase_script.push(0x51); // OP_1
+    coinbase_script.push(blvm_consensus::opcodes::OP_1);
 
     let coinbase = Transaction {
         version: 1,
@@ -25,7 +25,7 @@ pub fn create_test_block(height: u64) -> Block {
         }],
         outputs: tx_outputs![TransactionOutput {
             value: 50_000_000_000, // 50 BTC
-            script_pubkey: vec![0x51], // OP_1
+            script_pubkey: vec![blvm_consensus::opcodes::OP_1],
         }],
         lock_time: 0,
     };
@@ -65,12 +65,12 @@ pub fn create_bip34_violation_block(height: u64) -> Block {
                 hash: [0; 32],
                 index: 0xffffffff,
             },
-            script_sig: vec![0x51], // Just OP_1, no height
+            script_sig: vec![blvm_consensus::opcodes::OP_1],
             sequence: 0xffffffff,
         }],
         outputs: tx_outputs![TransactionOutput {
             value: 50_000_000_000,
-            script_pubkey: vec![0x51],
+            script_pubkey: vec![blvm_consensus::opcodes::OP_1],
         }],
         lock_time: 0,
     };
@@ -95,8 +95,8 @@ pub fn create_bip90_violation_block(height: u64, invalid_version: i32) -> Block 
     block
 }
 
-/// Validate block with BLLVM
-pub fn validate_bllvm_block(block: &Block, height: u64, network: Network) -> blvm_consensus::block::BlockValidationResult {
+/// Validate block with BLVM
+pub fn validate_blvm_block(block: &Block, height: u64, network: Network) -> blvm_consensus::block::BlockValidationResult {
     use blvm_consensus::block::connect_block;
     use blvm_consensus::segwit::Witness;
     use blvm_consensus::UtxoSet;

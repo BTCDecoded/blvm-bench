@@ -1,14 +1,14 @@
-use std::path::Path;
 use blvm_bench::chunked_cache::ChunkedBlockIterator;
+use std::path::Path;
 
 #[test]
 fn test_block_481824_size() {
     let chunks_dir = Path::new("/run/media/acolyte/Extra/blockchain");
-    
+
     let mut iter = ChunkedBlockIterator::new(chunks_dir, Some(481820), None)
         .expect("ChunkedBlockIterator::new failed")
         .expect("No iterator returned");
-    
+
     for expected_height in 481820..481830 {
         match iter.next_block() {
             Ok(Some(data)) => {

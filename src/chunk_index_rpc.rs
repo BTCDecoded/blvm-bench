@@ -1,6 +1,6 @@
-//! Alternative block index builder using Core RPC
-//! 
-//! If chaining fails (blocks out of order), use Core RPC to get block hashes
+//! Alternative block index builder using node RPC
+//!
+//! If chaining fails (blocks out of order), use RPC to get block hashes
 //! by height, then search chunks for those specific hashes.
 
 use anyhow::{Context, Result};
@@ -11,19 +11,19 @@ use sha2::{Sha256, Digest};
 use std::io::Read;
 use std::path::Path;
 
-/// Build block index using Core RPC to get block hashes by height
+/// Build block index using node RPC to get block hashes by height
 /// OPTIMIZED: First builds hash map from chunks (fast), then uses it for O(1) lookups
 pub async fn build_block_index_via_rpc(
     chunks_dir: &Path,
     max_height: Option<u64>,
 ) -> Result<BlockIndex> {
-    println!("🔨 Building block index via Core RPC (optimized)...");
+    println!("🔨 Building block index via RPC (optimized)...");
     
     let rpc_client = Start9RpcClient::new();
     
     // Get chain height
     let chain_height = rpc_client.get_block_count().await
-        .context("Failed to get chain height from Core")?;
+        .context("Failed to get chain height from node")?;
     let max_h = max_height.unwrap_or(chain_height).min(chain_height);
     
     println!("   Chain height: {}", chain_height);

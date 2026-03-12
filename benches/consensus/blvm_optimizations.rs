@@ -1,19 +1,20 @@
-//! Performance benchmarks for BLLVM optimizations
+//! Performance benchmarks for BLVM optimizations
 //!
-//! These benchmarks measure the performance impact of BLLVM optimizations:
+//! These benchmarks measure the performance impact of BLVM optimizations:
 //! - Pre-allocation (Phase 1)
 //! - Cache alignment (Phase 2)
-//! Run with: cargo bench --bench bllvm_optimizations --features production
+//! Run with: cargo bench --bench blvm_optimizations --features production
 
 #[cfg(feature = "production")]
-use bllvm_consensus::optimizations;
-use bllvm_consensus::{
+use blvm_consensus::optimizations;
+use blvm_consensus::{
     mining::calculate_merkle_root,
     serialization::{block::serialize_block_header, transaction::serialize_transaction},
     types::{BlockHeader, OutPoint, Transaction, TransactionInput, TransactionOutput},
 };
+use blvm_consensus::{tx_inputs, tx_outputs};
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
-use bllvm_consensus::{tx_inputs, tx_outputs};
+
 /// Helper to create a test transaction
 fn create_test_transaction() -> Transaction {
     Transaction {
@@ -23,16 +24,17 @@ fn create_test_transaction() -> Transaction {
                 hash: [1; 32],
                 index: 0,
             },
-            script_sig: vec![0x51], // OP_1
+            script_sig: vec![blvm_consensus::opcodes::OP_1],
             sequence: 0xffffffff,
         }],
         outputs: tx_outputs![TransactionOutput {
             value: 1000,
-            script_pubkey: vec![0x51], // OP_1
+            script_pubkey: vec![blvm_consensus::opcodes::OP_1],
         }],
         lock_time: 0,
     }
 }
+
 /// Helper to create a test block header
 fn create_test_block_header() -> BlockHeader {
     BlockHeader {
@@ -50,77 +52,103 @@ fn create_test_transactions(count: usize) -> Vec<Transaction> {
     (0..count)
         .map(|i| {
             let mut tx = create_test_transaction();
-            tx.inputs[0].prevout.index = i as u64;
+            tx.inputs[0].prevout.index = i as u32;
             tx
         })
-        .collect::<Vec<_>>().into()
+        .collect::<Vec<_>>()
+}
+
 /// Benchmark transaction serialization with/without production optimizations
 fn bench_transaction_serialization(c: &mut Criterion) {
     let tx = create_test_transaction();
     let mut group = c.benchmark_group("transaction_serialization");
     group.bench_function("serialize_transaction", |b| {
-        b.iter(|| {
-            black_box(serialize_transaction(black_box(&tx)));
-        });
+        b.iter(|| black_box(serialize_transaction(black_box(&tx))));
     });
     group.finish();
+}
+
 /// Benchmark batch hash operations with different batch sizes
+#[cfg(feature = "production")]
 fn bench_batch_hashing(c: &mut Criterion) {
     let group = c.benchmark_group("batch_hashing");
     for size in [10, 100, 1000, 2000].iter() {
         let transactions = create_test_transactions(*size);
         let serialized: Vec<Vec<u8>> = transactions.iter().map(serialize_transaction).collect();
         let tx_refs: Vec<&[u8]> = serialized.iter().map(|v| v.as_slice()).collect();
-        #[cfg(feature = "production")]
-        {
-            group.bench_with_input(
-                BenchmarkId::new("batch_double_sha256_aligned", size),
-                &tx_refs,
-                |b, refs| {
-                    b.iter(|| {
-                        black_box(
-                            optimizations::simd_vectorization::batch_double_sha256_aligned(
-                                black_box(refs),
-                            ),
-                        );
-                    });
-                },
-            );
-                BenchmarkId::new("batch_double_sha256", size),
-                        black_box(optimizations::simd_vectorization::batch_double_sha256(
-                            black_box(refs),
-                        ));
-        }
+        group.bench_with_input(
+            BenchmarkId::new("batch_double_sha256_aligned", size),
+            &tx_refs,
+            |b, refs| {
+                b.iter(|| {
+                    black_box(
+                        optimizations::simd_vectorization::batch_double_sha256_aligned(black_box(
+                            refs,
+                        )),
+                    );
+                });
+            },
+        );
+        group.bench_with_input(
+            BenchmarkId::new("batch_double_sha256", size),
+            &tx_refs,
+            |b, refs| {
+                b.iter(|| {
+                    black_box(optimizations::simd_vectorization::batch_double_sha256(
+                        black_box(refs),
+                    ));
+                });
+            },
+        );
+    }
+    group.finish();
+}
+
+#[cfg(not(feature = "production"))]
+fn bench_batch_hashing(_c: &mut Criterion) {}
+
 /// Benchmark merkle root calculation with different transaction counts
 fn bench_merkle_root_calculation(c: &mut Criterion) {
     let mut group = c.benchmark_group("merkle_root_calculation");
     for size in [10, 100, 500, 1000, 2000].iter() {
+        let transactions = create_test_transactions(*size);
         group.bench_with_input(
             BenchmarkId::new("calculate_merkle_root", size),
             &transactions,
             |b, txs| {
-                b.iter(|| {
-                    black_box(calculate_merkle_root(black_box(txs)).unwrap());
-                });
+                b.iter(|| black_box(calculate_merkle_root(black_box(txs)).unwrap()));
             },
         );
+    }
+    group.finish();
+}
+
 /// Benchmark block header serialization
 fn bench_block_header_serialization(c: &mut Criterion) {
     let header = create_test_block_header();
     let mut group = c.benchmark_group("block_header_serialization");
     group.bench_function("serialize_block_header", |b| {
-            black_box(serialize_block_header(black_box(&header)));
+        b.iter(|| black_box(serialize_block_header(black_box(&header))));
+    });
+    group.finish();
+}
+
 /// Benchmark pre-allocation impact
+#[cfg(feature = "production")]
 fn bench_preallocation_impact(c: &mut Criterion) {
-    use bllvm_consensus::optimizations::{prealloc_block_buffer, prealloc_tx_buffer};
+    use blvm_consensus::optimizations::{prealloc_block_buffer, prealloc_tx_buffer};
     let mut group = c.benchmark_group("preallocation");
     group.bench_function("prealloc_tx_buffer", |b| {
-            black_box(prealloc_tx_buffer());
+        b.iter(|| black_box(prealloc_tx_buffer()));
+    });
     group.bench_function("prealloc_block_buffer", |b| {
-            black_box(prealloc_block_buffer());
-        });
-    }
+        b.iter(|| black_box(prealloc_block_buffer()));
+    });
+    group.finish();
 }
+
+#[cfg(not(feature = "production"))]
+fn bench_preallocation_impact(_c: &mut Criterion) {}
 
 criterion_group!(
     benches,
@@ -129,5 +157,5 @@ criterion_group!(
     bench_merkle_root_calculation,
     bench_block_header_serialization,
 );
-criterion_group!(production_benches, bench_preallocation_impact,);
-criterion_main!(benches);
+criterion_group!(production_benches, bench_preallocation_impact);
+criterion_main!(benches, production_benches);

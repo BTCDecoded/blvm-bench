@@ -1,12 +1,12 @@
 //! Script Verification Benchmarks
 //! Measures script execution and verification performance
 
-use bllvm_consensus::script::{eval_script, verify_script};
+use blvm_consensus::script::{eval_script, verify_script};
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
 /// Create a simple script for verification
 fn create_simple_script() -> Vec<u8> {
-    vec![0x51, 0x51, 0x87] // OP_1 OP_1 OP_EQUAL
+    vec![blvm_consensus::opcodes::OP_1, blvm_consensus::opcodes::OP_1, blvm_consensus::opcodes::OP_EQUAL]
 }
 
 /// Create a complex script with many operations
@@ -20,22 +20,22 @@ fn create_complex_script() -> Vec<u8> {
     // We use: 100 * (OP_DUP + OP_HASH160 + push + OP_EQUALVERIFY) = 400 ops
     // Plus 1000 OP_1 operations = 1400 total (slightly more to account for no IF overhead)
     for _ in 0..100 {
-        script.push(0x76); // OP_DUP
-        script.push(0xa9); // OP_HASH160
-        script.push(0x14); // Push 20 bytes
+        script.push(blvm_consensus::opcodes::OP_DUP);
+        script.push(blvm_consensus::opcodes::OP_HASH160);
+        script.push(blvm_consensus::opcodes::PUSH_20_BYTES);
         script.extend_from_slice(&[0x42; 20]);
-        script.push(0x88); // OP_EQUALVERIFY
+        script.push(blvm_consensus::opcodes::OP_EQUALVERIFY);
     }
     // Add 1000 OP_1 operations (matches Core's inner loop)
     for _ in 0..1000 {
-        script.push(0x51); // OP_1
+        script.push(blvm_consensus::opcodes::OP_1);
     }
-    script.push(0xac); // OP_CHECKSIG
+    script.push(blvm_consensus::opcodes::OP_CHECKSIG);
     script
 }
 
 fn benchmark_verify_script(c: &mut Criterion) {
-    let script_sig = vec![0x51]; // OP_1
+    let script_sig = vec![blvm_consensus::opcodes::OP_1];
     let script_pubkey = create_simple_script();
 
     c.bench_function("verify_script", |b| {

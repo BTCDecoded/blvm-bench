@@ -3,8 +3,8 @@
 
 use anyhow::{Context, Result};
 use blvm_bench::chunked_cache::ChunkedBlockIterator;
-use blvm_consensus::serialization::block::deserialize_block_with_witnesses;
 use blvm_consensus::block::calculate_tx_id;
+use blvm_consensus::serialization::block::deserialize_block_with_witnesses;
 use std::path::PathBuf;
 
 fn main() -> Result<()> {
@@ -32,19 +32,28 @@ fn main() -> Result<()> {
     let mut block_iter = ChunkedBlockIterator::new(&chunks_dir, Some(block_height), Some(1))?
         .ok_or_else(|| anyhow::anyhow!("Failed to create block iterator"))?;
 
-    let block_data = block_iter.next_block()?
+    let block_data = block_iter
+        .next_block()?
         .ok_or_else(|| anyhow::anyhow!("Block {} not found", block_height))?;
 
-    let (block, _witnesses) = deserialize_block_with_witnesses(&block_data)
-        .context("Failed to deserialize block")?;
+    let (block, _witnesses) =
+        deserialize_block_with_witnesses(&block_data).context("Failed to deserialize block")?;
 
     if tx_idx >= block.transactions.len() {
-        return Err(anyhow::anyhow!("Transaction index {} out of range (block has {} transactions)", tx_idx, block.transactions.len()));
+        return Err(anyhow::anyhow!(
+            "Transaction index {} out of range (block has {} transactions)",
+            tx_idx,
+            block.transactions.len()
+        ));
     }
 
     let tx = &block.transactions[tx_idx];
     if input_idx >= tx.inputs.len() {
-        return Err(anyhow::anyhow!("Input index {} out of range (transaction has {} inputs)", input_idx, tx.inputs.len()));
+        return Err(anyhow::anyhow!(
+            "Input index {} out of range (transaction has {} inputs)",
+            input_idx,
+            tx.inputs.len()
+        ));
     }
 
     let input = &tx.inputs[input_idx];
@@ -70,25 +79,25 @@ fn main() -> Result<()> {
     println!("🔎 Checking raw transaction bytes...");
     use blvm_consensus::serialization::transaction::serialize_transaction;
     let tx_bytes = serialize_transaction(tx);
-    
+
     // Find the input in the serialized bytes
     // Transaction format: version (4) + input_count (varint) + inputs...
     // Each input: prevout_hash (32) + prevout_index (4) + script_len (varint) + script + sequence (4)
-    
+
     println!("  Transaction serialized size: {} bytes", tx_bytes.len());
     println!("  Number of inputs: {}", tx.inputs.len());
-    
+
     // Parse the serialized transaction to find the raw prevout hash
     // Skip version (4 bytes)
     let mut offset = 4;
-    
+
     // Read input count (varint)
     use blvm_consensus::serialization::decode_varint;
     let (input_count, varint_len) = decode_varint(&tx_bytes[offset..])?;
     offset += varint_len;
-    
+
     println!("  Input count from serialization: {}", input_count);
-    
+
     // Skip to the specific input
     for i in 0..input_idx {
         // Skip prevout hash (32)
@@ -103,20 +112,23 @@ fn main() -> Result<()> {
         // Skip sequence (4)
         offset += 4;
     }
-    
+
     // Now we're at the target input
     if offset + 32 <= tx_bytes.len() {
-        let raw_prevout_hash = &tx_bytes[offset..offset+32];
-        println!("  Raw prevout hash from serialized bytes: {}", hex::encode(raw_prevout_hash));
+        let raw_prevout_hash = &tx_bytes[offset..offset + 32];
+        println!(
+            "  Raw prevout hash from serialized bytes: {}",
+            hex::encode(raw_prevout_hash)
+        );
         println!("  Extracted prevout hash: {}", hex::encode(prevout_txid));
-        
+
         if raw_prevout_hash == prevout_txid.as_slice() {
             println!("  ✅ Hash matches - extraction is correct");
         } else {
             println!("  ❌ Hash mismatch - extraction bug!");
         }
     }
-    
+
     // Check if this prevout_txid is actually a valid transaction ID format
     // Valid Bitcoin txids are SHA256 hashes - they should be random-looking
     // If it starts with 0xff, it's suspicious
@@ -136,4 +148,3 @@ fn main() -> Result<()> {
 
     Ok(())
 }
-

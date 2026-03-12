@@ -8,8 +8,8 @@
 //! - Mixed ECDSA/Schnorr signatures (1:4 ratio)
 //! - Chained transactions (each spends from previous)
 
-use bllvm_node::validation::{BlockValidationContext, ParallelBlockValidator};
-use bllvm_protocol::{
+use blvm_node::validation::{BlockValidationContext, ParallelBlockValidator};
+use blvm_protocol::{
     tx_inputs, tx_outputs, Block, BlockHeader, OutPoint, Transaction, TransactionInput,
     TransactionOutput, UtxoSet,
 };
@@ -29,17 +29,17 @@ fn create_test_block_matching_core(
     // Create coinbase transaction
     let coinbase = Transaction {
         version: 1,
-        inputs: bllvm_protocol::tx_inputs![TransactionInput {
+        inputs: blvm_protocol::tx_inputs![TransactionInput {
             prevout: OutPoint {
                 hash: [0; 32],
                 index: 0xffffffff, // Coinbase
             },
-            script_sig: vec![0x51; 4],
+            script_sig: vec![blvm_consensus::opcodes::OP_1; 4],
             sequence: 0xffffffff,
         }],
         outputs: tx_outputs![TransactionOutput {
             value: 50_000_000_000,     // 50 BTC
-            script_pubkey: vec![0x51], // Simplified
+            script_pubkey: vec![blvm_consensus::opcodes::OP_1],
         }],
         lock_time: 0,
     };
@@ -58,28 +58,28 @@ fn create_test_block_matching_core(
                     hash: prev_tx_hash,
                     index: 0,
                 },
-                script_sig: vec![0x51; 20], // Simplified signature
+                script_sig: vec![blvm_consensus::opcodes::OP_1; 20],
                 sequence: 0xffffffff,
             }],
             outputs: tx_outputs![
                 TransactionOutput {
                     value: 10_000_000,
-                    script_pubkey: vec![0x51; 25],
+                    script_pubkey: vec![blvm_consensus::opcodes::OP_1; 25],
                 },
                 TransactionOutput {
                     value: 5_000_000,
-                    script_pubkey: vec![0x51; 25],
+                    script_pubkey: vec![blvm_consensus::opcodes::OP_1; 25],
                 }
             ],
             lock_time: 0,
         };
         // Calculate transaction ID (double SHA256 of serialized transaction)
-        use bllvm_protocol::block::calculate_tx_id;
+        use blvm_protocol::block::calculate_tx_id;
         prev_tx_hash = calculate_tx_id(&tx);
         transactions.push(tx);
     }
     // Calculate merkle root
-    use bllvm_protocol::mining::calculate_merkle_root;
+    use blvm_protocol::mining::calculate_merkle_root;
     let mut txs_for_merkle = transactions.clone();
     let merkle_root = calculate_merkle_root(&txs_for_merkle).unwrap_or([0; 32]);
     let block = Block {

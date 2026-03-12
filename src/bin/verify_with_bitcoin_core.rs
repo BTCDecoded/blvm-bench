@@ -4,8 +4,8 @@
 use anyhow::{Context, Result};
 use blvm_bench::chunked_cache::ChunkedBlockIterator;
 use blvm_bench::start9_rpc_client::Start9RpcClient;
-use blvm_consensus::serialization::block::deserialize_block_with_witnesses;
 use blvm_consensus::block::calculate_tx_id;
+use blvm_consensus::serialization::block::deserialize_block_with_witnesses;
 use blvm_consensus::serialization::transaction::serialize_transaction;
 use std::path::PathBuf;
 
@@ -36,19 +36,28 @@ async fn main() -> Result<()> {
     let mut block_iter = ChunkedBlockIterator::new(&chunks_dir, Some(block_height), Some(1))?
         .ok_or_else(|| anyhow::anyhow!("Failed to create block iterator"))?;
 
-    let block_data = block_iter.next_block()?
+    let block_data = block_iter
+        .next_block()?
         .ok_or_else(|| anyhow::anyhow!("Block {} not found", block_height))?;
 
-    let (block, _witnesses) = deserialize_block_with_witnesses(&block_data)
-        .context("Failed to deserialize block")?;
+    let (block, _witnesses) =
+        deserialize_block_with_witnesses(&block_data).context("Failed to deserialize block")?;
 
     if tx_idx >= block.transactions.len() {
-        return Err(anyhow::anyhow!("Transaction index {} out of range (block has {} transactions)", tx_idx, block.transactions.len()));
+        return Err(anyhow::anyhow!(
+            "Transaction index {} out of range (block has {} transactions)",
+            tx_idx,
+            block.transactions.len()
+        ));
     }
 
     let tx = &block.transactions[tx_idx];
     if input_idx >= tx.inputs.len() {
-        return Err(anyhow::anyhow!("Input index {} out of range (transaction has {} inputs)", input_idx, tx.inputs.len()));
+        return Err(anyhow::anyhow!(
+            "Input index {} out of range (transaction has {} inputs)",
+            input_idx,
+            tx.inputs.len()
+        ));
     }
 
     let input = &tx.inputs[input_idx];
@@ -66,7 +75,7 @@ async fn main() -> Result<()> {
     // Connect to Bitcoin Core via Start9 RPC
     println!("🔌 Connecting to Bitcoin Core via Start9 RPC...");
     let rpc_client = Start9RpcClient::new();
-    
+
     // Test connection
     match rpc_client.get_block_count().await {
         Ok(height) => {
@@ -83,16 +92,19 @@ async fn main() -> Result<()> {
     // Check if the block exists in Bitcoin Core
     println!("🔎 Checking block {} in Bitcoin Core...", block_height);
     let block_hash_result = rpc_client.get_block_hash(block_height).await;
-    
+
     match block_hash_result {
         Ok(block_hash) => {
             println!("  ✅ Block {} exists in Bitcoin Core", block_height);
             println!("  Block hash: {}", block_hash);
-            
+
             // Get the block from Bitcoin Core
             let core_block_hex = rpc_client.get_block_hex(&block_hash).await?;
-            println!("  Block hex length from Core: {} bytes", core_block_hex.len());
-            
+            println!(
+                "  Block hex length from Core: {} bytes",
+                core_block_hex.len()
+            );
+
             // Check if the transaction exists in this block (compare hex)
             let tx_hex = hex::encode(serialize_transaction(tx));
             if core_block_hex.contains(&tx_hex) {
@@ -102,7 +114,10 @@ async fn main() -> Result<()> {
             }
         }
         Err(e) => {
-            println!("  ❌ Block {} NOT found in Bitcoin Core: {}", block_height, e);
+            println!(
+                "  ❌ Block {} NOT found in Bitcoin Core: {}",
+                block_height, e
+            );
             println!("  💡 This suggests the block is from a side chain or reorg!");
             return Ok(());
         }
@@ -112,15 +127,17 @@ async fn main() -> Result<()> {
     // Check if the prevout transaction exists
     println!("🔎 Checking if prevout transaction exists in Bitcoin Core...");
     println!("  Looking for txid: {}", hex::encode(prevout_txid));
-    
+
     // Try to get the transaction
-    let prevout_tx_result = rpc_client.get_raw_transaction(&hex::encode(prevout_txid), false).await;
-    
+    let prevout_tx_result = rpc_client
+        .get_raw_transaction(&hex::encode(prevout_txid), false)
+        .await;
+
     match prevout_tx_result {
         Ok(prevout_tx_hex) => {
             println!("  ✅ Prevout transaction EXISTS in Bitcoin Core!");
             println!("  Transaction hex length: {} bytes", prevout_tx_hex.len());
-            
+
             // Check if the output index exists
             // Parse the transaction to count outputs
             // For now, just report that it exists
@@ -129,7 +146,8 @@ async fn main() -> Result<()> {
         }
         Err(e) => {
             let error_msg = e.to_string();
-            if error_msg.contains("not found") || error_msg.contains("No such mempool transaction") {
+            if error_msg.contains("not found") || error_msg.contains("No such mempool transaction")
+            {
                 println!("  ❌ Prevout transaction NOT FOUND in Bitcoin Core");
                 println!("  💡 This confirms the prevout doesn't exist!");
                 println!("  💡 Bitcoin Core would REJECT this transaction!");
@@ -145,12 +163,12 @@ async fn main() -> Result<()> {
     println!("🔎 Testing transaction with testmempoolaccept...");
     let tx_hex = hex::encode(serialize_transaction(tx));
     let test_result = rpc_client.test_mempool_accept(&tx_hex).await;
-    
+
     match test_result {
         Ok(result) => {
             println!("  Bitcoin Core testmempoolaccept result:");
             println!("  {}", serde_json::to_string_pretty(&result)?);
-            
+
             if let Some(allowed) = result.get("allowed") {
                 if allowed.as_bool().unwrap_or(false) {
                     println!("  ✅ Bitcoin Core would ACCEPT this transaction!");
@@ -170,4 +188,3 @@ async fn main() -> Result<()> {
 
     Ok(())
 }
-

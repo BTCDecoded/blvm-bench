@@ -1,8 +1,8 @@
-use bllvm_consensus::segwit::Witness;
-use bllvm_consensus::segwit::{
+use blvm_consensus::segwit::Witness;
+use blvm_consensus::segwit::{
     calculate_block_weight, calculate_transaction_weight, is_segwit_transaction,
 };
-use bllvm_consensus::{
+use blvm_consensus::{
     tx_inputs, tx_outputs, Block, BlockHeader, OutPoint, Transaction, TransactionInput,
     TransactionOutput,
 };
@@ -16,12 +16,12 @@ fn create_test_transaction() -> Transaction {
                 hash: [0u8; 32],
                 index: 0,
             },
-            script_sig: vec![0x51], // OP_1
+            script_sig: vec![blvm_consensus::opcodes::OP_1],
             sequence: 0xffffffff,
         }],
         outputs: tx_outputs![TransactionOutput {
             value: 5000000000,
-            script_pubkey: vec![0x51], // OP_1
+            script_pubkey: vec![blvm_consensus::opcodes::OP_1],
         }],
         lock_time: 0,
     }
@@ -41,7 +41,9 @@ fn create_segwit_transaction() -> (Transaction, Witness) {
         outputs: tx_outputs![TransactionOutput {
             value: 5000000000,
             script_pubkey: vec![
-                0x00, 0x14, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c,
+                blvm_consensus::opcodes::OP_0,
+                blvm_consensus::opcodes::PUSH_20_BYTES,
+                0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c,
                 0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13,
             ], // P2WPKH
         }],

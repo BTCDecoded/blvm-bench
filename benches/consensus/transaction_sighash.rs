@@ -1,8 +1,8 @@
 //! Transaction Sighash Benchmark
 //! Matches Core's TransactionSighashCalculation benchmark exactly
 
-use bllvm_consensus::transaction_hash::{calculate_transaction_sighash, SighashType};
-use bllvm_consensus::{
+use blvm_consensus::transaction_hash::{calculate_transaction_sighash, SighashType};
+use blvm_consensus::{
     tx_inputs, tx_outputs, OutPoint, Transaction, TransactionInput, TransactionOutput,
 };
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
@@ -16,12 +16,12 @@ fn create_test_transaction() -> (Transaction, Vec<TransactionOutput>) {
                 hash: [1; 32],
                 index: 0,
             },
-            script_sig: vec![0x51], // OP_1 (matches Core)
+            script_sig: vec![blvm_consensus::opcodes::OP_1],
             sequence: 0xffffffff,
         }],
         outputs: tx_outputs![TransactionOutput {
             value: 10_000_000_000,           // 10 BTC (matches Core's 10 * COIN)
-            script_pubkey: vec![0x51, 0x87], // OP_1 OP_EQUAL (matches Core)
+            script_pubkey: vec![blvm_consensus::opcodes::OP_1, blvm_consensus::opcodes::OP_EQUAL],
         }],
         lock_time: 0,
     };
@@ -29,7 +29,7 @@ fn create_test_transaction() -> (Transaction, Vec<TransactionOutput>) {
     // Create prevout (matches Core's coin structure)
     let prevouts = vec![TransactionOutput {
         value: 11_000_000_000,           // 11 BTC (matches Core's dummy input value)
-        script_pubkey: vec![0x51, 0x87], // OP_1 OP_EQUAL
+        script_pubkey: vec![blvm_consensus::opcodes::OP_1, blvm_consensus::opcodes::OP_EQUAL],
     }];
 
     (tx, prevouts)
