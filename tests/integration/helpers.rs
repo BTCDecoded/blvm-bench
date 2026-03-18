@@ -101,9 +101,14 @@ pub fn validate_blvm_block(block: &Block, height: u64, network: Network) -> blvm
     use blvm_consensus::segwit::Witness;
     use blvm_consensus::UtxoSet;
 
-    let witnesses: Vec<Witness> = block.transactions.iter().map(|_| Vec::new()).collect();
+    let witnesses: Vec<Vec<Witness>> = block
+        .transactions
+        .iter()
+        .map(|tx| (0..tx.inputs.len()).map(|_| vec![]).collect())
+        .collect();
     let utxo_set = UtxoSet::new();
-    connect_block(block, &witnesses, utxo_set, height, None, network)
+    let ctx = blvm_consensus::block::BlockValidationContext::for_network(network);
+    connect_block(block, &witnesses, utxo_set, height, &ctx)
 }
 
 

@@ -14,7 +14,7 @@ OUTPUT_FILE="$OUTPUT_DIR/commons-transaction-validation-bench-$(date +%Y%m%d-%H%
 echo "=== Bitcoin Commons Transaction Validation Benchmark ==="
 echo ""
 
-BENCH_DIR="$BLLVM_BENCH_ROOT"
+BENCH_DIR="$BLVM_BENCH_ROOT"
 
 if [ ! -d "$BENCH_DIR" ]; then
     echo "❌ bllvm-bench directory not found at $BENCH_DIR"
@@ -120,7 +120,7 @@ for bench_dir in "$CRITERION_DIR"/check_block*; do
             TIME_NS_INT=$(awk "BEGIN {printf \"%.0f\", $TIME_NS}" 2>/dev/null || echo "0")
             
             # Extract statistical data
-            STATS=$("$BLLVM_BENCH_ROOT/scripts/shared/extract-criterion-stats.sh" "$bench_dir/base/estimates.json")
+            STATS=$("$BLVM_BENCH_ROOT/scripts/shared/extract-criterion-stats.sh" "$bench_dir/base/estimates.json")
             
             # Use direct number substitution (no --argjson needed)
             BENCHMARKS=$(echo "$BENCHMARKS" | jq --arg name "$BENCH_NAME" \

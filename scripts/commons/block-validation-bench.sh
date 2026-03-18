@@ -15,7 +15,7 @@ echo "=== Bitcoin Commons Block Validation Benchmark ==="
 echo ""
 
 # bllvm-bench is always in the same repo
-BENCH_DIR="$BLLVM_BENCH_ROOT"
+BENCH_DIR="$BLVM_BENCH_ROOT"
 
 if [ ! -d "$BENCH_DIR" ]; then
     echo "❌ bllvm-bench directory not found at $BENCH_DIR"

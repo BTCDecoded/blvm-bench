@@ -43,14 +43,19 @@ fn validate_snapshot(dir: &Path, height: u64, iterations: u32) -> Vec<f64> {
         let block_arc_clone = Arc::clone(&block_arc);
 
         let t = Instant::now();
+        let ctx = blvm_consensus::block::BlockValidationContext::from_connect_block_ibd_args(
+            None::<&[blvm_consensus::types::BlockHeader]>,
+            0u64,
+            Network::Mainnet,
+            None,
+            None,
+        );
         let (result, _new_utxo, _tx_ids, _delta) = connect_block_ibd(
             &block,
             &witnesses,
             utxo_clone,
             height,
-            None::<&[blvm_consensus::types::BlockHeader]>,
-            0u64,
-            Network::Mainnet,
+            &ctx,
             None,
             None,
             Some(block_arc_clone),

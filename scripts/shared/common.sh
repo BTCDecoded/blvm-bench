@@ -11,28 +11,28 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Find bllvm-bench root (could be scripts/../.. or scripts/..)
 # Don't override if already set (e.g., by run-benchmarks.sh)
-if [ -z "$BLLVM_BENCH_ROOT" ]; then
+if [ -z "$BLVM_BENCH_ROOT" ]; then
     if [ -f "$SCRIPT_DIR/../discover-paths.sh" ]; then
-        BLLVM_BENCH_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+        BLVM_BENCH_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
     elif [ -f "$SCRIPT_DIR/../../scripts/discover-paths.sh" ]; then
-        BLLVM_BENCH_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+        BLVM_BENCH_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
     else
         # Try to find it from current working directory
         CURRENT_DIR="$(pwd)"
         if [ -f "$CURRENT_DIR/scripts/discover-paths.sh" ]; then
-            BLLVM_BENCH_ROOT="$CURRENT_DIR"
+            BLVM_BENCH_ROOT="$CURRENT_DIR"
         elif [ -f "$CURRENT_DIR/discover-paths.sh" ]; then
-            BLLVM_BENCH_ROOT="$CURRENT_DIR"
+            BLVM_BENCH_ROOT="$CURRENT_DIR"
         else
-            BLLVM_BENCH_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+            BLVM_BENCH_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
         fi
     fi
 fi
 
 # Discover paths
-DISCOVER_SCRIPT="$BLLVM_BENCH_ROOT/scripts/discover-paths.sh"
+DISCOVER_SCRIPT="$BLVM_BENCH_ROOT/scripts/discover-paths.sh"
 if [ ! -f "$DISCOVER_SCRIPT" ]; then
-    DISCOVER_SCRIPT="$BLLVM_BENCH_ROOT/discover-paths.sh"
+    DISCOVER_SCRIPT="$BLVM_BENCH_ROOT/discover-paths.sh"
 fi
 
 if [ -f "$DISCOVER_SCRIPT" ]; then
@@ -43,7 +43,7 @@ if [ -f "$DISCOVER_SCRIPT" ]; then
     set -e
 else
     echo "⚠️  Warning: discover-paths.sh not found at $DISCOVER_SCRIPT" >&2
-    echo "   BLLVM_BENCH_ROOT: $BLLVM_BENCH_ROOT" >&2
+    echo "   BLVM_BENCH_ROOT: $BLVM_BENCH_ROOT" >&2
     echo "   SCRIPT_DIR: $SCRIPT_DIR" >&2
 fi
 
@@ -51,17 +51,17 @@ fi
 # Only exit if BOTH are missing (at least one must be available)
 if [ -z "$COMMONS_CONSENSUS_PATH" ] && [ -z "$CORE_PATH" ]; then
     echo "❌ Error: Neither Commons nor Core paths discovered" >&2
-    echo "   BLLVM_BENCH_ROOT: ${BLLVM_BENCH_ROOT:-NOT SET}" >&2
+    echo "   BLVM_BENCH_ROOT: ${BLVM_BENCH_ROOT:-NOT SET}" >&2
     echo "   Current directory: $(pwd)" >&2
     echo "   CORE_PATH: ${CORE_PATH:-NOT SET}" >&2
     echo "   COMMONS_CONSENSUS_PATH: ${COMMONS_CONSENSUS_PATH:-NOT SET}" >&2
     echo "   COMMONS_NODE_PATH: ${COMMONS_NODE_PATH:-NOT SET}" >&2
-    echo "   BLLVM_BENCH_CONFIG: ${BLLVM_BENCH_CONFIG:-NOT SET}" >&2
+    echo "   BLVM_BENCH_CONFIG: ${BLVM_BENCH_CONFIG:-NOT SET}" >&2
     echo "   Please set paths in config/config.toml or ensure Core/Commons are in standard locations" >&2
     echo "" >&2
     echo "   Trying manual discovery..." >&2
     # Last resort: try to find it from common locations
-    for path in "../bllvm-consensus" "../../bllvm-consensus" "$HOME/src/bllvm-consensus" "$HOME/bllvm-consensus" "$(dirname "$BLLVM_BENCH_ROOT")/bllvm-consensus" "$(dirname "$(dirname "$BLLVM_BENCH_ROOT")")/commons/bllvm-consensus"; do
+    for path in "../bllvm-consensus" "../../bllvm-consensus" "$HOME/src/bllvm-consensus" "$HOME/bllvm-consensus" "$(dirname "$BLVM_BENCH_ROOT")/bllvm-consensus" "$(dirname "$(dirname "$BLVM_BENCH_ROOT")")/commons/bllvm-consensus"; do
         if [ -d "$path" ] && [ -f "$path/Cargo.toml" ] && grep -q "bllvm-consensus" "$path/Cargo.toml" 2>/dev/null; then
             abs_path=$(cd "$path" 2>/dev/null && pwd || echo "")
             if [ -n "$abs_path" ]; then
@@ -95,11 +95,11 @@ elif [ -z "$COMMONS_CONSENSUS_PATH" ]; then
     echo "⚠️  Warning: Commons consensus path not discovered (Core-only mode)" >&2
 fi
 
-# Export BLLVM_BENCH_ROOT so all scripts can use it
-export BLLVM_BENCH_ROOT
+# Export BLVM_BENCH_ROOT so all scripts can use it
+export BLVM_BENCH_ROOT
 
-# Set up results directory (always define, even if BLLVM_BENCH_ROOT is not set)
-RESULTS_DIR="${RESULTS_DIR:-${BLLVM_BENCH_ROOT:-$(pwd)}/results}"
+# Set up results directory (always define, even if BLVM_BENCH_ROOT is not set)
+RESULTS_DIR="${RESULTS_DIR:-${BLVM_BENCH_ROOT:-$(pwd)}/results}"
 mkdir -p "$RESULTS_DIR" 2>/dev/null || true
 export RESULTS_DIR
 
@@ -252,6 +252,6 @@ format_time() {
     export CORE_PATH
     export COMMONS_CONSENSUS_PATH
     export COMMONS_NODE_PATH
-    export BLLVM_BENCH_ROOT
+    export BLVM_BENCH_ROOT
     export RESULTS_DIR
 

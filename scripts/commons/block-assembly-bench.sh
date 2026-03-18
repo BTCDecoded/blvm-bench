@@ -24,7 +24,7 @@ fi
 OUTPUT_DIR=$(get_output_dir "${1:-$RESULTS_DIR}")
 # OUTPUT_DIR already set by get_output_dir # Ensure absolute path
 mkdir -p "$OUTPUT_DIR"
-BENCH_DIR="$BLLVM_BENCH_ROOT"
+BENCH_DIR="$BLVM_BENCH_ROOT"
 OUTPUT_FILE="$OUTPUT_DIR/commons-block-assembly-bench-$(date +%Y%m%d-%H%M%S).json"
 
 echo "=== Bitcoin Commons Block Assembly Benchmark ==="

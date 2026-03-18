@@ -40,15 +40,15 @@ async fn debug_real_110300() -> Result<()> {
             blvm_consensus::serialization::block::deserialize_block_with_witnesses(&block_bytes)?;
 
         let network = Network::Mainnet;
-        let (result, new_utxo, _) = blvm_consensus::block::connect_block(
-            &block,
-            &witnesses,
-            current_utxo,
-            height,
-            None,
+        let ctx = blvm_consensus::block::BlockValidationContext::from_connect_block_ibd_args(
+            None::<&[blvm_consensus::types::BlockHeader]>,
             block.header.timestamp,
             network,
-        )?;
+            None,
+            None,
+        );
+        let (result, new_utxo, _) =
+            blvm_consensus::block::connect_block(&block, &witnesses, current_utxo, height, &ctx)?;
 
         if !matches!(result, blvm_consensus::ValidationResult::Valid) {
             println!("❌ Block {} invalid: {:?}", height, result);

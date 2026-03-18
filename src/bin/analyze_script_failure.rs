@@ -131,7 +131,7 @@ async fn main() -> Result<()> {
 
         // Calculate script flags (optimization: just check witness presence, no flattening)
         let has_witness = tx_witnesses.map(|w| !w.is_empty()).unwrap_or(false);
-        let flags = blvm_consensus::block::calculate_script_flags_for_block(
+        let flags = blvm_consensus::block::calculate_script_flags_for_block_network(
             tx,
             has_witness,
             block_height,

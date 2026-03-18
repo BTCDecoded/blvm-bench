@@ -6,7 +6,7 @@
 set +e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BLLVM_BENCH_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+BLVM_BENCH_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 source "$SCRIPT_DIR/shared/common.sh"
 
 OUTPUT_DIR=$(get_output_dir "${1:-$RESULTS_DIR}")
@@ -476,9 +476,9 @@ if [ -n "$COMPARISON_KEYS" ]; then
             # Extract comprehensive statistical data
             # Try to extract from Criterion estimates.json for Commons
             COMMONS_STATS="null"
-            if [ -f "$LATEST_SUITE/commons-$BENCH_KEY-bench" ] || [ -d "$BLLVM_BENCH_ROOT/target/criterion" ]; then
+            if [ -f "$LATEST_SUITE/commons-$BENCH_KEY-bench" ] || [ -d "$BLVM_BENCH_ROOT/target/criterion" ]; then
                 # Try to find Criterion estimates.json
-                CRITERION_DIR="$BLLVM_BENCH_ROOT/target/criterion"
+                CRITERION_DIR="$BLVM_BENCH_ROOT/target/criterion"
                 for bench_dir in "$CRITERION_DIR"/*; do
                     if [ -d "$bench_dir" ] && [ -f "$bench_dir/base/estimates.json" ]; then
                         COMMONS_STATS=$("$SCRIPT_DIR/shared/extract-criterion-stats.sh" "$bench_dir/base/estimates.json" 2>/dev/null || echo "null")

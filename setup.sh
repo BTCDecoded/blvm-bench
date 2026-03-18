@@ -8,7 +8,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 # Check if we should auto-clone (non-interactive)
-AUTO_CLONE="${BLLVM_BENCH_AUTO_SETUP:-0}"
+AUTO_CLONE="${BLVM_BENCH_AUTO_SETUP:-0}"
 
 echo "╔══════════════════════════════════════════════════════════════╗"
 echo "║  bllvm-bench: Quick Setup                                      ║"
@@ -18,7 +18,7 @@ echo ""
 # Source path discovery
 eval "$(bash scripts/discover-paths.sh 2>/dev/null || true)"
 
-CLONE_DIR="${BLLVM_BENCH_CLONE_DIR:-$SCRIPT_DIR/../dependencies}"
+CLONE_DIR="${BLVM_BENCH_CLONE_DIR:-$SCRIPT_DIR/../dependencies}"
 mkdir -p "$CLONE_DIR"
 
 # Check and clone Bitcoin Core

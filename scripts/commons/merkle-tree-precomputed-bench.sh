@@ -10,7 +10,7 @@ OUTPUT_DIR=$(get_output_dir "${1:-$RESULTS_DIR}")
 
 set -euo pipefail
 
-BENCH_DIR="$BLLVM_BENCH_ROOT"
+BENCH_DIR="$BLVM_BENCH_ROOT"
 
 # Create results directory if it doesn't exist
 mkdir -p "$RESULTS_DIR"

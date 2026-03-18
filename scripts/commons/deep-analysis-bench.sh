@@ -18,7 +18,7 @@ echo "║  Deep Commons Analysis - Low-Level Performance Metrics       ║"
 echo "╚══════════════════════════════════════════════════════════╝"
 echo ""
 
-BENCH_DIR="$BLLVM_BENCH_ROOT"
+BENCH_DIR="$BLVM_BENCH_ROOT"
 
 if [ ! -d "$BENCH_DIR" ]; then
     echo "❌ bllvm-bench directory not found"
@@ -141,7 +141,7 @@ CRITERION_DIR="$BENCH_DIR/target/criterion"
 for bench_dir in "$CRITERION_DIR"/*; do
     if [ -d "$bench_dir" ] && [ -f "$bench_dir/base/estimates.json" ]; then
         BENCH_NAME=$(basename "$bench_dir")
-        STATS=$("$BLLVM_BENCH_ROOT/scripts/shared/extract-criterion-stats.sh" "$bench_dir/base/estimates.json")
+        STATS=$("$BLVM_BENCH_ROOT/scripts/shared/extract-criterion-stats.sh" "$bench_dir/base/estimates.json")
         
         # Add to benchmarks if not already present
         if ! echo "$BENCHMARKS" | jq -e ".[] | select(.name == \"$BENCH_NAME\")" >/dev/null 2>&1; then

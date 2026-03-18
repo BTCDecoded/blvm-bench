@@ -35,7 +35,7 @@ setup:
 # Auto-setup (non-interactive, clones if not found)
 setup-auto:
 	@echo "Auto-setting up dependencies..."
-	@BLLVM_BENCH_AUTO_SETUP=1 ./scripts/setup-dependencies.sh
+	@BLVM_BENCH_AUTO_SETUP=1 ./scripts/setup-dependencies.sh
 
 # Run benchmarks
 bench:

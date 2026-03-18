@@ -11,10 +11,14 @@
 //! Default: /run/media/acolyte/Extra/blockchain
 
 use anyhow::{Context, Result};
-use blvm_bench::chain_scan::{analyze_block, merge_block_into_results, ChainScanResults};
+use blvm_bench::chain_scan::{
+    analyze_block, analyze_block_with_outpoint_index, merge_block_into_results, ChainScanResults,
+};
+use blvm_consensus::types::OutPoint;
+use rustc_hash::FxHashMap;
 use blvm_bench::chunked_cache::{get_chunks_dir, load_chunk_metadata, ChunkedBlockIterator};
 use blvm_consensus::serialization::block::deserialize_block_with_witnesses;
-use blvm_consensus::spam_filter::{SpamFilter, SpamFilterPreset};
+use blvm_protocol::spam_filter::{SpamFilter, SpamFilterPreset};
 use clap::Parser;
 use rayon::prelude::*;
 use std::path::PathBuf;
@@ -47,6 +51,15 @@ struct Args {
     /// Block batch size for parallel processing. 1 = sequential. 64–256 typical for multi-core.
     #[arg(long, default_value = "64")]
     batch_size: usize,
+
+    /// Track grandfathered vs unspendable for Tapscript OP_IF (requires sequential scan, slower)
+    #[arg(long)]
+    grandfathered: bool,
+
+    /// BIP-110 activation height for grandfathered analysis. Prevouts created before this are grandfathered.
+    /// Default ~960000 (approx Aug 2026 per bip110.org deployment timeline).
+    #[arg(long, default_value = "960000")]
+    bip110_activation_height: u64,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -123,10 +136,16 @@ fn main() -> Result<()> {
         "   Spam filter: {:?} (cross-reference analysis)",
         args.spam_preset
     );
-    eprintln!(
-        "   Batch size: {} (parallel block processing)",
+    let batch_size = if args.grandfathered {
+        eprintln!("   Grandfathered: enabled (sequential scan, BIP-110 activation @ {})", args.bip110_activation_height);
+        1usize
+    } else {
+        eprintln!(
+            "   Batch size: {} (parallel block processing)",
+            args.batch_size
+        );
         args.batch_size
-    );
+    };
     eprintln!("   Chunks: {}", chunks_dir.display());
     eprintln!();
 
@@ -140,7 +159,8 @@ fn main() -> Result<()> {
     let mut blocks_fail = 0u64;
     let mut current_height = args.start;
     let start_time = Instant::now();
-    let mut batch: Vec<(u64, Vec<u8>)> = Vec::with_capacity(args.batch_size);
+    let mut batch: Vec<(u64, Vec<u8>)> = Vec::with_capacity(batch_size);
+    let mut outpoint_index: FxHashMap<OutPoint, u32> = FxHashMap::default();
 
     let process_batch = |batch: &[(u64, Vec<u8>)], spam_filter: Option<&SpamFilter>| {
         batch
@@ -158,16 +178,69 @@ fn main() -> Result<()> {
             .collect::<Vec<_>>()
     };
 
-    loop {
-        match block_iter.next_block()? {
-            Some(data) => {
-                batch.push((current_height, data));
-                current_height += 1;
+    if args.grandfathered {
+        // Sequential processing with outpoint index
+        loop {
+            match block_iter.next_block()? {
+                Some(data) => {
+                    if let Ok((block, witnesses)) = deserialize_block_with_witnesses(&data) {
+                        let stats = analyze_block_with_outpoint_index(
+                            &block,
+                            &witnesses,
+                            current_height,
+                            spam_filter.as_ref(),
+                            &mut outpoint_index,
+                            args.bip110_activation_height,
+                        );
+                        merge_block_into_results(&mut results, &stats);
+                        blocks_ok += 1;
+                    } else {
+                        eprintln!("⚠️  Block {} failed to parse", current_height);
+                        blocks_fail += 1;
+                    }
+                    current_height += 1;
+                }
+                None => break,
             }
-            None => break,
+            let total = blocks_ok + blocks_fail;
+            if total > 0 && total % args.progress as u64 == 0 {
+                let elapsed = start_time.elapsed().as_secs_f64();
+                let rate = total as f64 / elapsed;
+                eprintln!("   {} blocks ({:.1} blk/s)", total, rate);
+            }
+        }
+    } else {
+        loop {
+            match block_iter.next_block()? {
+                Some(data) => {
+                    batch.push((current_height, data));
+                    current_height += 1;
+                }
+                None => break,
+            }
+
+            if batch.len() >= batch_size {
+                let stats_list = process_batch(&batch, spam_filter.as_ref());
+                for stats in stats_list {
+                    if let Some(s) = stats {
+                        merge_block_into_results(&mut results, &s);
+                        blocks_ok += 1;
+                    } else {
+                        blocks_fail += 1;
+                    }
+                }
+                batch.clear();
+
+                let total = blocks_ok + blocks_fail;
+                if total > 0 && total % args.progress as u64 == 0 {
+                    let elapsed = start_time.elapsed().as_secs_f64();
+                    let rate = total as f64 / elapsed;
+                    eprintln!("   {} blocks ({:.1} blk/s)", total, rate);
+                }
+            }
         }
 
-        if batch.len() >= args.batch_size {
+        if !batch.is_empty() {
             let stats_list = process_batch(&batch, spam_filter.as_ref());
             for stats in stats_list {
                 if let Some(s) = stats {
@@ -176,27 +249,6 @@ fn main() -> Result<()> {
                 } else {
                     blocks_fail += 1;
                 }
-            }
-            batch.clear();
-
-            let total = blocks_ok + blocks_fail;
-            if total > 0 && total % args.progress as u64 == 0 {
-                let elapsed = start_time.elapsed().as_secs_f64();
-                let rate = total as f64 / elapsed;
-                eprintln!("   {} blocks ({:.1} blk/s)", total, rate);
-            }
-        }
-    }
-
-    // Process remainder
-    if !batch.is_empty() {
-        let stats_list = process_batch(&batch, spam_filter.as_ref());
-        for stats in stats_list {
-            if let Some(s) = stats {
-                merge_block_into_results(&mut results, &s);
-                blocks_ok += 1;
-            } else {
-                blocks_fail += 1;
             }
         }
     }
@@ -292,6 +344,23 @@ fn main() -> Result<()> {
         "  Control: {} / {}",
         results.blocked_txs_with_control_violation, results.blocked_weight_with_control_violation
     );
+    eprintln!();
+    eprintln!("Tapscript OP_IF (BIP-110): {} txs with OP_IF/OP_NOTIF in tapscript", results.block_txs_with_tapscript_op_if_violation);
+    if results.tapscript_op_if_grandfathered > 0 || results.tapscript_op_if_unspendable > 0 {
+        let total = results.tapscript_op_if_grandfathered + results.tapscript_op_if_unspendable;
+        eprintln!(
+            "  Grandfathered (prevout created before activation): {} inputs",
+            results.tapscript_op_if_grandfathered
+        );
+        eprintln!(
+            "  Unspendable (prevout at/after activation): {} inputs",
+            results.tapscript_op_if_unspendable
+        );
+        if total > 0 {
+            let pct_g = 100.0 * results.tapscript_op_if_grandfathered as f64 / total as f64;
+            eprintln!("  → {:.1}% grandfathered, {:.1}% would be stuck", pct_g, 100.0 - pct_g);
+        }
+    }
     eprintln!();
     eprintln!("Violations by type:");
     for (k, v) in &results.violations_by_type {

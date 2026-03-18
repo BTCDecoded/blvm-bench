@@ -6,10 +6,10 @@
 # Don't use set -e here as it can cause issues when sourced
 
 # Load config if it exists (try multiple locations)
-CONFIG_FILE="${BLLVM_BENCH_CONFIG:-}"
+CONFIG_FILE="${BLVM_BENCH_CONFIG:-}"
 if [ -z "$CONFIG_FILE" ]; then
     # Try to find config in common locations
-    for config_path in "./config/config.toml" "$BLLVM_BENCH_ROOT/config/config.toml" "$HOME/.bllvm-bench/config.toml"; do
+    for config_path in "./config/config.toml" "$BLVM_BENCH_ROOT/config/config.toml" "$HOME/.bllvm-bench/config.toml"; do
         if [ -f "$config_path" ]; then
             CONFIG_FILE="$config_path"
             break
@@ -38,16 +38,16 @@ fi
 
 # Get script directory (bllvm-bench root)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BLLVM_BENCH_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+BLVM_BENCH_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# If BLLVM_BENCH_ROOT is already set and valid, use it
-if [ -z "$BLLVM_BENCH_ROOT" ] || [ ! -d "$BLLVM_BENCH_ROOT" ]; then
+# If BLVM_BENCH_ROOT is already set and valid, use it
+if [ -z "$BLVM_BENCH_ROOT" ] || [ ! -d "$BLVM_BENCH_ROOT" ]; then
     # Try to find bllvm-bench from current directory
     CURRENT_DIR="$(pwd)"
     if [ -f "$CURRENT_DIR/Cargo.toml" ] && grep -q "bllvm-bench" "$CURRENT_DIR/Cargo.toml" 2>/dev/null; then
-        BLLVM_BENCH_ROOT="$CURRENT_DIR"
+        BLVM_BENCH_ROOT="$CURRENT_DIR"
     elif [ -d "$CURRENT_DIR/scripts" ] && [ -f "$CURRENT_DIR/scripts/discover-paths.sh" ]; then
-        BLLVM_BENCH_ROOT="$CURRENT_DIR"
+        BLVM_BENCH_ROOT="$CURRENT_DIR"
     fi
 fi
 
@@ -87,17 +87,17 @@ fi
 
 # Auto-discover Bitcoin Commons
 if [ -z "$COMMONS_CONSENSUS_PATH" ] || [ -z "$COMMONS_NODE_PATH" ]; then
-    # Common locations to search (relative to BLLVM_BENCH_ROOT and absolute)
+    # Common locations to search (relative to BLVM_BENCH_ROOT and absolute)
     SEARCH_PATHS=(
         "$HOME/src/bllvm-consensus"
         "$HOME/src/bitcoin-commons"
         "../bllvm-consensus"
         "../../bllvm-consensus"
-        "$BLLVM_BENCH_ROOT/../bllvm-consensus"
-        "$BLLVM_BENCH_ROOT/../../bllvm-consensus"
-        "$(dirname "$BLLVM_BENCH_ROOT")/bllvm-consensus"
-        "$(dirname "$(dirname "$BLLVM_BENCH_ROOT")")/commons/bllvm-consensus"
-        "$(dirname "$(dirname "$BLLVM_BENCH_ROOT")")/bllvm-consensus"
+        "$BLVM_BENCH_ROOT/../bllvm-consensus"
+        "$BLVM_BENCH_ROOT/../../bllvm-consensus"
+        "$(dirname "$BLVM_BENCH_ROOT")/bllvm-consensus"
+        "$(dirname "$(dirname "$BLVM_BENCH_ROOT")")/commons/bllvm-consensus"
+        "$(dirname "$(dirname "$BLVM_BENCH_ROOT")")/bllvm-consensus"
     )
     
     for path in "${SEARCH_PATHS[@]}"; do
@@ -131,7 +131,7 @@ fi
 export CORE_PATH
 export COMMONS_CONSENSUS_PATH
 export COMMONS_NODE_PATH
-export BLLVM_BENCH_ROOT
+export BLVM_BENCH_ROOT
 
 # Validate paths
 if [ -n "$CORE_PATH" ] && [ ! -d "$CORE_PATH" ]; then
@@ -155,5 +155,5 @@ if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
     printf '%s\n' "export CORE_PATH=\"${CORE_PATH}\""
     printf '%s\n' "export COMMONS_CONSENSUS_PATH=\"${COMMONS_CONSENSUS_PATH}\""
     printf '%s\n' "export COMMONS_NODE_PATH=\"${COMMONS_NODE_PATH}\""
-    printf '%s\n' "export BLLVM_BENCH_ROOT=\"${BLLVM_BENCH_ROOT}\""
+    printf '%s\n' "export BLVM_BENCH_ROOT=\"${BLVM_BENCH_ROOT}\""
 fi

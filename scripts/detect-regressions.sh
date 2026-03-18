@@ -5,17 +5,17 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BLLVM_BENCH_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+BLVM_BENCH_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 source "$SCRIPT_DIR/shared/common.sh"
 
 CURRENT_JSON="${1:-}"
-HISTORY_DIR="${HISTORY_DIR:-$BLLVM_BENCH_ROOT/results/history}"
+HISTORY_DIR="${HISTORY_DIR:-$BLVM_BENCH_ROOT/results/history}"
 REGRESSION_THRESHOLD="${REGRESSION_THRESHOLD:-0.10}"  # 10% slowdown is considered a regression
 SIGNIFICANCE_LEVEL="${SIGNIFICANCE_LEVEL:-0.05}"  # 5% significance level
 
 if [ -z "$CURRENT_JSON" ]; then
     # Find latest consolidated JSON
-    CURRENT_JSON="$BLLVM_BENCH_ROOT/results/benchmark-results-consolidated-latest.json"
+    CURRENT_JSON="$BLVM_BENCH_ROOT/results/benchmark-results-consolidated-latest.json"
 fi
 
 if [ ! -f "$CURRENT_JSON" ]; then
@@ -167,7 +167,7 @@ if [ "$IMPROVEMENT_COUNT" -gt 0 ]; then
 fi
 
 # Save regression report
-REPORT_FILE="$BLLVM_BENCH_ROOT/results/regression-report-$(date +%Y%m%d-%H%M%S).json"
+REPORT_FILE="$BLVM_BENCH_ROOT/results/regression-report-$(date +%Y%m%d-%H%M%S).json"
 cat > "$REPORT_FILE" << EOF
 {
   "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",

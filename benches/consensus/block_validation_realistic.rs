@@ -195,6 +195,9 @@ fn benchmark_connect_block_realistic_100tx(c: &mut Criterion) {
     let (block, utxo_set, witnesses, _secret_keys) =
         create_realistic_test_block_with_signatures(100);
 
+    let ctx = blvm_consensus::block::BlockValidationContext::for_network(
+        blvm_consensus::types::Network::Mainnet,
+    );
     c.bench_function("connect_block_realistic_100tx", |b| {
         b.iter(|| {
             // Use height 1 to ensure assume-valid doesn't skip verification
@@ -203,8 +206,7 @@ fn benchmark_connect_block_realistic_100tx(c: &mut Criterion) {
                 black_box(&witnesses),
                 black_box(utxo_set.clone()),
                 black_box(1), // Height 1 = no assume-valid optimization
-                black_box(None),
-                black_box(blvm_consensus::types::Network::Mainnet),
+                &ctx,
             );
             // Ensure we're actually validating - use result to ensure it's computed
             black_box(result);
@@ -218,6 +220,9 @@ fn benchmark_connect_block_realistic_1000tx(c: &mut Criterion) {
     let (block, utxo_set, witnesses, _secret_keys) =
         create_realistic_test_block_with_signatures(1000);
 
+    let ctx = blvm_consensus::block::BlockValidationContext::for_network(
+        blvm_consensus::types::Network::Mainnet,
+    );
     c.bench_function("connect_block_realistic_1000tx", |b| {
         b.iter(|| {
             // Use height 1 to ensure assume-valid doesn't skip verification
@@ -226,8 +231,7 @@ fn benchmark_connect_block_realistic_1000tx(c: &mut Criterion) {
                 black_box(&witnesses),
                 black_box(utxo_set.clone()),
                 black_box(1), // Height 1 = no assume-valid optimization
-                black_box(None),
-                black_box(blvm_consensus::types::Network::Mainnet),
+                &ctx,
             );
             // Ensure we're actually validating - use result to ensure it's computed
             black_box(result);

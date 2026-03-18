@@ -115,15 +115,14 @@ mod helpers {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        match connect_block(
-            block,
-            &witnesses,
-            utxo_set,
-            height,
-            None,
+        let ctx = blvm_consensus::block::BlockValidationContext::from_connect_block_ibd_args(
+            None::<&[blvm_consensus::types::BlockHeader]>,
             network_time,
             network,
-        ) {
+            None,
+            None,
+        );
+        match connect_block(block, &witnesses, utxo_set, height, &ctx) {
             Ok((result, _, _)) => result,
             Err(e) => blvm_consensus::types::ValidationResult::Invalid(format!("{:?}", e)),
         }
@@ -821,15 +820,14 @@ async fn test_historical_blocks_differential() -> Result<()> {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        let blvm_result = match connect_block(
-            &block,
-            &witnesses,
-            utxo_set.clone(),
-            height,
-            None,
+        let ctx = blvm_consensus::block::BlockValidationContext::from_connect_block_ibd_args(
+            None::<&[blvm_consensus::types::BlockHeader]>,
             network_time,
             Network::Mainnet,
-        ) {
+            None,
+            None,
+        );
+        let blvm_result = match connect_block(&block, &witnesses, utxo_set.clone(), height, &ctx) {
             Ok((result, new_utxo_set, _undo_log)) => {
                 utxo_set = new_utxo_set; // Update UTXO set for next block
                 match result {

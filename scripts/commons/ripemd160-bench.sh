@@ -9,7 +9,7 @@ source "$SCRIPT_DIR/../shared/common.sh"
 
 OUTPUT_DIR=$(get_output_dir "${1:-$RESULTS_DIR}")
 mkdir -p "$OUTPUT_DIR"
-BENCH_DIR="$BLLVM_BENCH_ROOT"
+BENCH_DIR="$BLVM_BENCH_ROOT"
 OUTPUT_FILE="$OUTPUT_DIR/commons-ripemd160-bench-$(date +%Y%m%d-%H%M%S).json"
 
 echo "=== Bitcoin Commons RIPEMD160 Benchmark ==="

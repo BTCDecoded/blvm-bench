@@ -7,14 +7,14 @@ set +e
 
 # Source the main common.sh for path discovery
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BLLVM_BENCH_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
-source "$BLLVM_BENCH_ROOT/scripts/shared/common.sh"
+BLVM_BENCH_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+source "$BLVM_BENCH_ROOT/scripts/shared/common.sh"
 
 # Ensure paths are exported
 export CORE_PATH
 export COMMONS_CONSENSUS_PATH
 export COMMONS_NODE_PATH
-export BLLVM_BENCH_ROOT
+export BLVM_BENCH_ROOT
 
 # Check if tokei is available
 check_tokei() {

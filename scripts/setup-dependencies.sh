@@ -5,13 +5,13 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BLLVM_BENCH_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+BLVM_BENCH_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # Source path discovery
-eval "$(bash "$BLLVM_BENCH_ROOT/scripts/discover-paths.sh")"
+eval "$(bash "$BLVM_BENCH_ROOT/scripts/discover-paths.sh")"
 
 # Default clone location (can be overridden)
-CLONE_DIR="${BLLVM_BENCH_CLONE_DIR:-$BLLVM_BENCH_ROOT/../dependencies}"
+CLONE_DIR="${BLVM_BENCH_CLONE_DIR:-$BLVM_BENCH_ROOT/../dependencies}"
 mkdir -p "$CLONE_DIR"
 
 echo "╔══════════════════════════════════════════════════════════════╗"
@@ -128,7 +128,7 @@ echo "╚═══════════════════════�
 echo ""
 
 # Update config file with discovered/cloned paths
-CONFIG_FILE="$BLLVM_BENCH_ROOT/config/config.toml"
+CONFIG_FILE="$BLVM_BENCH_ROOT/config/config.toml"
 mkdir -p "$(dirname "$CONFIG_FILE")"
 
 cat > "$CONFIG_FILE" << EOF

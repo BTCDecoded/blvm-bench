@@ -32,7 +32,7 @@ echo "Core Benchmarks Discovery"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 CORE_COUNT=0
 CORE_MISSING=0
-for bench_script in "$BLLVM_BENCH_ROOT/scripts/core"/*.sh; do
+for bench_script in "$BLVM_BENCH_ROOT/scripts/core"/*.sh; do
     if [ -f "$bench_script" ]; then
         bench_name=$(basename "$bench_script" .sh)
         if [ -x "$bench_script" ]; then
@@ -53,7 +53,7 @@ echo "Commons Benchmarks Discovery"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 COMMONS_COUNT=0
 COMMONS_MISSING=0
-for bench_script in "$BLLVM_BENCH_ROOT/scripts/commons"/*.sh; do
+for bench_script in "$BLVM_BENCH_ROOT/scripts/commons"/*.sh; do
     if [ -f "$bench_script" ]; then
         bench_name=$(basename "$bench_script" .sh)
         if [ -x "$bench_script" ]; then

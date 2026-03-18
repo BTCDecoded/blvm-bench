@@ -402,15 +402,15 @@ async fn test_verify_utxo_set_blocks_0_15() -> Result<()> {
             }
         }
 
-        let (result, new_utxo_set, _undo_log) = connect_block(
-            &block,
-            &witnesses,
-            utxo_set.clone(),
-            height,
-            None,
+        let ctx = blvm_consensus::block::BlockValidationContext::from_connect_block_ibd_args(
+            None::<&[blvm_consensus::types::BlockHeader]>,
             network_time,
             Network::Mainnet,
-        )?;
+            None,
+            None,
+        );
+        let (result, new_utxo_set, _undo_log) =
+            connect_block(&block, &witnesses, utxo_set.clone(), height, &ctx)?;
 
         match result {
             blvm_consensus::types::ValidationResult::Valid => {

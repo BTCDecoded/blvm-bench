@@ -90,12 +90,24 @@ def main():
             "taproot": 0,
             "inscriptions": 0,
         },
+        "largwitness_and_witness_blocked": 0,
+        "blocked_txs_with_taproot_output": 0,
+        "block_txs_with_tapscript_op_if_violation": 0,
+        "tapscript_op_if_grandfathered": 0,
+        "tapscript_op_if_unspendable": 0,
+        "collateral_by_classification": {},
         "spam_txs": 0,
         "spam_by_type": {},
         "spam_and_rule_blocked": 0,
         "spam_and_not_rule_blocked": 0,
         "rule_blocked_and_not_spam": 0,
         "spam_by_confidence": {},
+        "spam_by_type_by_era": {
+            "pre_segwit": {},
+            "segwit": {},
+            "taproot": {},
+            "inscriptions": {},
+        },
     }
 
     for i, p in enumerate(inputs):
@@ -140,7 +152,18 @@ def main():
         acc["largwitness_spam_by_era"]["segwit"] += other.get("largwitness_spam_by_era", {}).get("segwit", 0)
         acc["largwitness_spam_by_era"]["taproot"] += other.get("largwitness_spam_by_era", {}).get("taproot", 0)
         acc["largwitness_spam_by_era"]["inscriptions"] += other.get("largwitness_spam_by_era", {}).get("inscriptions", 0)
+        acc["largwitness_and_witness_blocked"] += other.get("largwitness_and_witness_blocked", 0)
+        acc["blocked_txs_with_taproot_output"] += other.get("blocked_txs_with_taproot_output", 0)
+        acc["block_txs_with_tapscript_op_if_violation"] += other.get("block_txs_with_tapscript_op_if_violation", 0)
+        acc["tapscript_op_if_grandfathered"] += other.get("tapscript_op_if_grandfathered", 0)
+        acc["tapscript_op_if_unspendable"] += other.get("tapscript_op_if_unspendable", 0)
+        merge_maps(acc["collateral_by_classification"], other.get("collateral_by_classification", {}))
         merge_maps(acc["spam_by_type"], other.get("spam_by_type", {}))
+        for era in ("pre_segwit", "segwit", "taproot", "inscriptions"):
+            merge_maps(
+                acc["spam_by_type_by_era"][era],
+                other.get("spam_by_type_by_era", {}).get(era, {}),
+            )
         merge_maps(acc["spam_by_confidence"], other.get("spam_by_confidence", {}))
 
     with open(output, "w") as f:
@@ -180,6 +203,13 @@ def main():
         if largwitness_sum != largwitness_total:
             errors.append(
                 f"largwitness_spam_by_era sum ({largwitness_sum}) != spam_by_type.LargeWitness ({largwitness_total})"
+            )
+
+        collateral_class_sum = sum(acc.get("collateral_by_classification", {}).values())
+        # Only validate when batch files have collateral_by_classification (from rescan)
+        if collateral_class_sum > 0 and collateral_class_sum != acc.get("rule_blocked_and_not_spam", 0):
+            errors.append(
+                f"collateral_by_classification sum ({collateral_class_sum}) != rule_blocked_and_not_spam ({acc.get('rule_blocked_and_not_spam', 0)})"
             )
 
         if errors:

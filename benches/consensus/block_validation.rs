@@ -1,4 +1,4 @@
-use blvm_consensus::block::connect_block;
+use blvm_consensus::block::{connect_block, BlockValidationContext};
 use blvm_consensus::segwit::Witness;
 use blvm_consensus::{
     tx_inputs, tx_outputs, Block, BlockHeader, OutPoint, Transaction, TransactionInput,
@@ -30,6 +30,7 @@ fn benchmark_connect_block(c: &mut Criterion) {
     // Coinbase transaction doesn't need UTXOs, so empty set is fine
     let utxo_set = UtxoSet::new();
     let witnesses: Vec<Witness> = block.transactions.iter().map(|_| Vec::new()).collect();
+    let ctx = BlockValidationContext::for_network(blvm_consensus::types::Network::Mainnet);
     c.bench_function("connect_block", |b| {
         b.iter(|| {
             let _result = connect_block(
@@ -37,8 +38,7 @@ fn benchmark_connect_block(c: &mut Criterion) {
                 black_box(&witnesses),
                 black_box(utxo_set.clone()),
                 black_box(0),
-                black_box(None),
-                black_box(blvm_consensus::types::Network::Mainnet),
+                &ctx,
             );
             // Coinbase-only block, so validation should succeed
         })
@@ -107,6 +107,7 @@ fn benchmark_connect_block_multi_tx(c: &mut Criterion) {
         transactions: transactions.into_boxed_slice(),
     };
     let witnesses: Vec<Witness> = block.transactions.iter().map(|_| Vec::new()).collect();
+    let ctx = BlockValidationContext::for_network(blvm_consensus::types::Network::Mainnet);
     c.bench_function("connect_block_multi_tx", |b| {
         b.iter(|| {
             let _result = connect_block(
@@ -114,8 +115,7 @@ fn benchmark_connect_block_multi_tx(c: &mut Criterion) {
                 black_box(&witnesses),
                 black_box(utxo_set.clone()),
                 black_box(0),
-                black_box(None),
-                black_box(blvm_consensus::types::Network::Mainnet),
+                &ctx,
             );
             // Now with valid UTXOs, this should do actual validation work
         })

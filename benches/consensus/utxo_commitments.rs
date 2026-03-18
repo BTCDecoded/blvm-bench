@@ -1,18 +1,22 @@
 #[cfg(feature = "utxo-commitments")]
-use blvm_consensus::utxo_commitments::data_structures::UtxoCommitment;
-use blvm_consensus::utxo_commitments::verification::{verify_header_chain, verify_supply};
+use blvm_protocol::utxo_commitments::data_structures::UtxoCommitment;
+#[cfg(feature = "utxo-commitments")]
+use blvm_protocol::utxo_commitments::verification::{verify_header_chain, verify_supply};
 use blvm_consensus::{BlockHeader, Natural};
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
+#[cfg(feature = "utxo-commitments")]
 fn create_test_commitment(height: Natural) -> UtxoCommitment {
-    UtxoCommitment {
-        block_height: height,
-        block_hash: [0u8; 32],
-        total_supply: 50_0000_0000 * height as u64, // Simplified
-        merkle_root: [0u8; 32],
-        commitment_hash: [0u8; 32],
-    }
+    UtxoCommitment::new(
+        [0u8; 32],  // merkle_root
+        50_0000_0000 * height as u64,  // total_supply (simplified)
+        1,           // utxo_count
+        height,
+        [0u8; 32],   // block_hash
+    )
 }
+
+#[cfg(feature = "utxo-commitments")]
 fn create_test_header_chain(count: usize) -> Vec<BlockHeader> {
     (0..count)
         .map(|i| BlockHeader {
@@ -29,20 +33,31 @@ fn create_test_header_chain(count: usize) -> Vec<BlockHeader> {
             bits: 0x1d00ffff,
             nonce: 0,
         })
-        .collect::<Vec<_>>().into()
+        .collect()
+}
+
+#[cfg(feature = "utxo-commitments")]
 fn benchmark_verify_supply(c: &mut Criterion) {
     let commitment = create_test_commitment(100);
     c.bench_function("verify_supply", |b| {
-        b.iter(|| {
-            black_box(verify_supply(black_box(&commitment)));
+        b.iter(|| black_box(verify_supply(black_box(&commitment))));
     });
+}
+
+#[cfg(feature = "utxo-commitments")]
 fn benchmark_verify_header_chain(c: &mut Criterion) {
     let headers = create_test_header_chain(100);
     c.bench_function("verify_header_chain_100", |b| {
-            black_box(verify_header_chain(black_box(&headers)));
+        b.iter(|| black_box(verify_header_chain(black_box(&headers))));
+    });
+}
+
 #[cfg(not(feature = "utxo-commitments"))]
 fn benchmark_verify_supply(_c: &mut Criterion) {}
+
+#[cfg(not(feature = "utxo-commitments"))]
 fn benchmark_verify_header_chain(_c: &mut Criterion) {}
+
 criterion_group!(
     benches,
     benchmark_verify_supply,

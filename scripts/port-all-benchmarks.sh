@@ -5,8 +5,8 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BLLVM_BENCH_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-NODE_COMPARISON_ROOT="${NODE_COMPARISON_ROOT:-$BLLVM_BENCH_ROOT/../../..}"
+BLVM_BENCH_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+NODE_COMPARISON_ROOT="${NODE_COMPARISON_ROOT:-$BLVM_BENCH_ROOT/../../..}"
 
 echo "╔══════════════════════════════════════════════════════════════╗"
 echo "║  Porting All Benchmarks to bllvm-bench                        ║"
@@ -18,7 +18,7 @@ port_benchmark() {
     local type="$1"
     local bench_name="$2"
     local source_file="$NODE_COMPARISON_ROOT/benchmarks/${type}-${bench_name}.sh"
-    local target_dir="$BLLVM_BENCH_ROOT/scripts/${type}"
+    local target_dir="$BLVM_BENCH_ROOT/scripts/${type}"
     local target_file="$target_dir/${bench_name}.sh"
     
     if [ ! -f "$source_file" ]; then
@@ -57,7 +57,7 @@ port_benchmark() {
         grep -v "^BENCH_DIR=" | \
         grep -v "^CORE_DIR=" | \
         sed "s|\$PROJECT_ROOT/core|\$CORE_PATH|g" | \
-        sed "s|\$PROJECT_ROOT/commons/bllvm-bench|\$BLLVM_BENCH_ROOT|g" | \
+        sed "s|\$PROJECT_ROOT/commons/bllvm-bench|\$BLVM_BENCH_ROOT|g" | \
         sed "s|\$PROJECT_ROOT/commons/bllvm-consensus|\$COMMONS_CONSENSUS_PATH|g" | \
         sed "s|\$PROJECT_ROOT/commons/bllvm-node|\$COMMONS_NODE_PATH|g" | \
         sed "s|OUTPUT_DIR=\"\${1:-\$(dirname \"\$0\")/\.\./results\}\"|OUTPUT_DIR=\$(get_output_dir \"\${1:-\$RESULTS_DIR}\")|" | \
@@ -90,6 +90,6 @@ echo ""
 echo "✅ Porting complete!"
 echo ""
 echo "Review ported scripts in:"
-echo "  $BLLVM_BENCH_ROOT/scripts/core/"
-echo "  $BLLVM_BENCH_ROOT/scripts/commons/"
+echo "  $BLVM_BENCH_ROOT/scripts/core/"
+echo "  $BLVM_BENCH_ROOT/scripts/commons/"
 

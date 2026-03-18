@@ -161,14 +161,19 @@ async fn investigate_block(target_height: u64, target_tx: usize) -> Result<()> {
             // NOW call connect_block on the target block to see if it actually passes
             println!("\n🔍 Testing connect_block on block {}...", height);
             let network = Network::Mainnet;
+            let ctx = blvm_consensus::block::BlockValidationContext::from_connect_block_ibd_args(
+                None::<&[blvm_consensus::types::BlockHeader]>,
+                block.header.timestamp,
+                network,
+                None,
+                None,
+            );
             let (result, _, _) = blvm_consensus::block::connect_block(
                 &block,
                 &witnesses,
                 current_utxo.clone(),
                 height,
-                None,
-                block.header.timestamp,
-                network,
+                &ctx,
             )?;
             match &result {
                 blvm_consensus::types::ValidationResult::Valid => {
@@ -183,15 +188,15 @@ async fn investigate_block(target_height: u64, target_tx: usize) -> Result<()> {
 
         // Apply block to UTXO set
         let network = Network::Mainnet;
-        let (result, new_utxo, _) = blvm_consensus::block::connect_block(
-            &block,
-            &witnesses,
-            current_utxo,
-            height,
-            None,
+        let ctx = blvm_consensus::block::BlockValidationContext::from_connect_block_ibd_args(
+            None::<&[blvm_consensus::types::BlockHeader]>,
             block.header.timestamp,
             network,
-        )?;
+            None,
+            None,
+        );
+        let (result, new_utxo, _) =
+            blvm_consensus::block::connect_block(&block, &witnesses, current_utxo, height, &ctx)?;
 
         // Check result of connect_block
         match &result {

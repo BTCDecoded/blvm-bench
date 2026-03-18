@@ -8,8 +8,8 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Ensure we're in the bllvm-bench root (where run-benchmarks.sh is located)
 cd "$SCRIPT_DIR"
-# BLLVM_BENCH_ROOT is the same as SCRIPT_DIR since run-benchmarks.sh is in the root
-BLLVM_BENCH_ROOT="$SCRIPT_DIR"
+# BLVM_BENCH_ROOT is the same as SCRIPT_DIR since run-benchmarks.sh is in the root
+BLVM_BENCH_ROOT="$SCRIPT_DIR"
 
 # Source common functions (includes path discovery and RESULTS_DIR)
 if [ -f "scripts/shared/common.sh" ]; then
@@ -125,7 +125,7 @@ case "$SUITE" in
         
         # Block Validation
         if [ -n "$CORE_PATH" ]; then
-            BENCH_SCRIPT="$BLLVM_BENCH_ROOT/scripts/core/block-validation-bench.sh"
+            BENCH_SCRIPT="$BLVM_BENCH_ROOT/scripts/core/block-validation-bench.sh"
             if [ -f "$BENCH_SCRIPT" ]; then
                 run_benchmark "core-block-validation-bench" "$BENCH_SCRIPT" 300
             else
@@ -133,7 +133,7 @@ case "$SUITE" in
             fi
         fi
         if [ -n "$COMMONS_CONSENSUS_PATH" ]; then
-            BENCH_SCRIPT="$BLLVM_BENCH_ROOT/scripts/commons/block-validation-bench.sh"
+            BENCH_SCRIPT="$BLVM_BENCH_ROOT/scripts/commons/block-validation-bench.sh"
             if [ -f "$BENCH_SCRIPT" ]; then
                 run_benchmark "commons-block-validation-bench" "$BENCH_SCRIPT" 300
             else
@@ -143,7 +143,7 @@ case "$SUITE" in
         
         # Transaction Validation
         if [ -n "$CORE_PATH" ]; then
-            BENCH_SCRIPT="$BLLVM_BENCH_ROOT/scripts/core/transaction-validation-bench.sh"
+            BENCH_SCRIPT="$BLVM_BENCH_ROOT/scripts/core/transaction-validation-bench.sh"
             if [ -f "$BENCH_SCRIPT" ]; then
                 run_benchmark "core-transaction-validation-bench" "$BENCH_SCRIPT" 300
             else
@@ -151,7 +151,7 @@ case "$SUITE" in
             fi
         fi
         if [ -n "$COMMONS_CONSENSUS_PATH" ]; then
-            BENCH_SCRIPT="$BLLVM_BENCH_ROOT/scripts/commons/transaction-validation-bench.sh"
+            BENCH_SCRIPT="$BLVM_BENCH_ROOT/scripts/commons/transaction-validation-bench.sh"
             if [ -f "$BENCH_SCRIPT" ]; then
                 run_benchmark "commons-transaction-validation-bench" "$BENCH_SCRIPT" 300
             else
@@ -161,7 +161,7 @@ case "$SUITE" in
         
         # Mempool Operations
         if [ -n "$CORE_PATH" ]; then
-            BENCH_SCRIPT="$BLLVM_BENCH_ROOT/scripts/core/mempool-operations-bench.sh"
+            BENCH_SCRIPT="$BLVM_BENCH_ROOT/scripts/core/mempool-operations-bench.sh"
             if [ -f "$BENCH_SCRIPT" ]; then
                 run_benchmark "core-mempool-operations-bench" "$BENCH_SCRIPT" 300
             else
@@ -169,7 +169,7 @@ case "$SUITE" in
             fi
         fi
         if [ -n "$COMMONS_CONSENSUS_PATH" ]; then
-            BENCH_SCRIPT="$BLLVM_BENCH_ROOT/scripts/commons/mempool-operations-bench.sh"
+            BENCH_SCRIPT="$BLVM_BENCH_ROOT/scripts/commons/mempool-operations-bench.sh"
             if [ -f "$BENCH_SCRIPT" ]; then
                 run_benchmark "commons-mempool-operations-bench" "$BENCH_SCRIPT" 300
             else
@@ -178,7 +178,7 @@ case "$SUITE" in
         fi
         
         # Run all other ported benchmarks
-        for bench_script in "$BLLVM_BENCH_ROOT/scripts/core"/*.sh "$BLLVM_BENCH_ROOT/scripts/commons"/*.sh; do
+        for bench_script in "$BLVM_BENCH_ROOT/scripts/core"/*.sh "$BLVM_BENCH_ROOT/scripts/commons"/*.sh; do
             if [ -f "$bench_script" ]; then
                 bench_name=$(basename "$bench_script" .sh)
                 # Skip already run benchmarks
@@ -202,12 +202,12 @@ case "$SUITE" in
         echo "Running all available benchmarks for maximum coverage..."
         
         # Run special combined benchmarks first (RPC, Concurrent, Memory, Parallel)
-        if [ -d "$BLLVM_BENCH_ROOT/scripts/shared/benchmarks" ]; then
+        if [ -d "$BLVM_BENCH_ROOT/scripts/shared/benchmarks" ]; then
             echo ""
             echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
             echo "Running Special Combined Benchmarks"
             echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-            for bench_script in "$BLLVM_BENCH_ROOT/scripts/shared/benchmarks"/*.sh; do
+            for bench_script in "$BLVM_BENCH_ROOT/scripts/shared/benchmarks"/*.sh; do
                 if [ -f "$bench_script" ]; then
                     bench_name=$(basename "$bench_script" .sh)
                     run_benchmark "${bench_name}" "$bench_script" 600
@@ -221,7 +221,7 @@ case "$SUITE" in
             echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
             echo "Running Core Benchmarks"
             echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-            for bench_script in "$BLLVM_BENCH_ROOT/scripts/core"/*.sh; do
+            for bench_script in "$BLVM_BENCH_ROOT/scripts/core"/*.sh; do
                 if [ -f "$bench_script" ]; then
                     bench_name=$(basename "$bench_script" .sh)
                     run_benchmark "core-${bench_name}" "$bench_script" 600
@@ -237,7 +237,7 @@ case "$SUITE" in
             echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
             echo "Running Commons Benchmarks"
             echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-            for bench_script in "$BLLVM_BENCH_ROOT/scripts/commons"/*.sh; do
+            for bench_script in "$BLVM_BENCH_ROOT/scripts/commons"/*.sh; do
                 if [ -f "$bench_script" ]; then
                     bench_name=$(basename "$bench_script" .sh)
                     run_benchmark "commons-${bench_name}" "$bench_script" 600
@@ -265,7 +265,7 @@ case "$SUITE" in
         echo "Running Commons-only benchmarks..."
         
         # Run all Commons benchmarks
-        for bench_script in "$BLLVM_BENCH_ROOT/scripts/commons"/*.sh; do
+        for bench_script in "$BLVM_BENCH_ROOT/scripts/commons"/*.sh; do
             if [ -f "$bench_script" ]; then
                 bench_name=$(basename "$bench_script" .sh)
                 run_benchmark "commons-${bench_name}" "$bench_script" 300

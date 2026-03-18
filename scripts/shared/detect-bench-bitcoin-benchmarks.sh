@@ -43,7 +43,7 @@ echo "✅ Found $BENCH_COUNT unique benchmarks"
 echo ""
 
 # Create a JSON mapping file
-OUTPUT_FILE="${BLLVM_BENCH_ROOT:-$SCRIPT_DIR/../..}/scripts/shared/bench_bitcoin_benchmarks.json"
+OUTPUT_FILE="${BLVM_BENCH_ROOT:-$SCRIPT_DIR/../..}/scripts/shared/bench_bitcoin_benchmarks.json"
 
 # Build JSON object with benchmark names and categories
 cat > "$OUTPUT_FILE" << EOF

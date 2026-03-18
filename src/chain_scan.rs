@@ -8,9 +8,11 @@
 //! Uses the same block iteration as differential testing (chunked cache).
 //! Rule limits are configurable; defaults match BIP-110.
 
-use blvm_consensus::opcodes::{OP_0, OP_ENDIF, OP_IF, OP_RESERVED, OP_RETURN};
+use blvm_consensus::opcodes::{
+    OP_0, OP_ENDIF, OP_IF, OP_NOTIF, OP_PUSHDATA1, OP_PUSHDATA2, OP_PUSHDATA4, OP_RESERVED, OP_RETURN,
+};
 use blvm_consensus::segwit::Witness;
-use blvm_consensus::spam_filter::{SpamFilter, SpamFilterResult, SpamType};
+use blvm_protocol::spam_filter::{SpamFilter, SpamFilterResult, SpamType};
 use blvm_consensus::witness;
 
 /// Spam classification confidence (for debatable categories)
@@ -48,9 +50,12 @@ fn spam_confidence(detected_types: &[SpamType]) -> SpamConfidence {
         SpamConfidence::Likely
     }
 }
-use blvm_consensus::types::{Block, Transaction};
+use blvm_consensus::block::calculate_tx_id;
+use blvm_consensus::transaction::is_coinbase;
+use blvm_consensus::types::{Block, OutPoint, Transaction};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
+use rustc_hash::FxHashMap;
 use std::collections::HashMap;
 
 // Default limits (BIP-110)
@@ -64,6 +69,18 @@ pub const SEGWIT_START_HEIGHT: u64 = 481_824;
 pub const TAPROOT_START_HEIGHT: u64 = 709_632;
 /// First block with Ordinals inscription (Dec 2022). Used for post-inscriptions era stats.
 pub const INSCRIPTIONS_START_HEIGHT: u64 = 767_430;
+
+fn block_era(height: u64) -> &'static str {
+    if height >= INSCRIPTIONS_START_HEIGHT {
+        "inscriptions"
+    } else if height >= TAPROOT_START_HEIGHT {
+        "taproot"
+    } else if height >= SEGWIT_START_HEIGHT {
+        "segwit"
+    } else {
+        "pre_segwit"
+    }
+}
 
 fn witness_element_bucket(len: usize) -> &'static str {
     if len <= 256 {
@@ -185,6 +202,8 @@ pub struct TxScanResult {
     pub total_witness_size: usize,
     pub has_envelope: bool,
     pub has_large_op_return: bool,
+    /// Tx has Taproot script-path with Tapscript containing OP_IF/OP_NOTIF (BIP-110 forbids; any size)
+    pub has_tapscript_op_if_violation: bool,
     /// Witness element sizes for histogram bucketing
     pub witness_element_sizes: Vec<usize>,
 }
@@ -232,6 +251,15 @@ pub struct LargeWitnessSpamByEra {
     pub inscriptions: u64,
 }
 
+/// Spam counts by type, per era (Ordinals, Dust, BRC20, LargeWitness, etc.)
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SpamByTypeByEra {
+    pub pre_segwit: HashMap<String, u64>,
+    pub segwit: HashMap<String, u64>,
+    pub taproot: HashMap<String, u64>,
+    pub inscriptions: HashMap<String, u64>,
+}
+
 /// Per-block aggregated stats
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct BlockScanStats {
@@ -266,6 +294,20 @@ pub struct BlockScanStats {
     pub collateral_weight: u64,
     #[serde(default)]
     pub largwitness_spam: usize,
+    #[serde(default)]
+    pub largwitness_and_witness_blocked: usize,
+    #[serde(default)]
+    pub blocked_txs_with_taproot_output: usize,
+    #[serde(default)]
+    pub collateral_by_classification: HashMap<String, usize>,
+    #[serde(default)]
+    pub block_txs_with_tapscript_op_if_violation: usize,
+    /// Tapscript OP_IF: prevout created before activation (can still spend)
+    #[serde(default)]
+    pub tapscript_op_if_grandfathered: usize,
+    /// Tapscript OP_IF: prevout created at/after activation (would be stuck until BIP-110 expires)
+    #[serde(default)]
+    pub tapscript_op_if_unspendable: usize,
     // Spam cross-reference (when SpamFilter is used)
     #[serde(default)]
     pub spam_txs: usize,
@@ -279,6 +321,8 @@ pub struct BlockScanStats {
     pub rule_blocked_and_not_spam: usize,
     #[serde(default)]
     pub spam_by_confidence: HashMap<String, usize>,
+    #[serde(default)]
+    pub spam_by_type_by_era: SpamByTypeByEra,
 }
 
 /// Global scan results
@@ -334,6 +378,20 @@ pub struct ChainScanResults {
     pub blocked_weight_by_retarget: HashMap<u64, RetargetPeriodStats>,
     #[serde(default)]
     pub largwitness_spam_by_era: LargeWitnessSpamByEra,
+    #[serde(default)]
+    pub spam_by_type_by_era: SpamByTypeByEra,
+    #[serde(default)]
+    pub largwitness_and_witness_blocked: u64,
+    #[serde(default)]
+    pub blocked_txs_with_taproot_output: u64,
+    #[serde(default)]
+    pub collateral_by_classification: HashMap<String, u64>,
+    #[serde(default)]
+    pub block_txs_with_tapscript_op_if_violation: u64,
+    #[serde(default)]
+    pub tapscript_op_if_grandfathered: u64,
+    #[serde(default)]
+    pub tapscript_op_if_unspendable: u64,
     // Spam cross-reference (when SpamFilter is used)
     #[serde(default)]
     pub spam_txs: u64,
@@ -396,6 +454,130 @@ fn check_witness(witness: &Witness) -> (Vec<OutputSizeViolation>, usize, usize, 
     }
 
     (violations, max_element, total_size, element_sizes)
+}
+
+/// P2TR (Taproot) output: OP_1 (0x51) + 0x20 + 32-byte x-only pubkey = 34 bytes
+fn is_taproot_output(script: &[u8]) -> bool {
+    script.len() == 34 && script[0] == 0x51 && script[1] == 0x20
+}
+
+/// Transaction has at least one Taproot (P2TR) output
+fn has_taproot_output(tx: &Transaction) -> bool {
+    tx.outputs
+        .iter()
+        .any(|o| is_taproot_output(&o.script_pubkey))
+}
+
+/// Get the tapscript element from a Taproot script-path witness.
+/// Structure: [stack..., script, annex?, control_block]. We must check only the script, not stack items
+/// (signatures/hashes can contain 0x63/0x64 as data, causing false positives).
+fn get_tapscript_element(witness: &Witness) -> Option<&[u8]> {
+    if witness.len() < 2 {
+        return None;
+    }
+    let last = witness.last().unwrap();
+    if last.len() < 33 || (last.len() - 33) % 32 != 0 {
+        return None;
+    }
+    let script_idx = if witness.len() >= 3 {
+        let maybe_annex = &witness[witness.len() - 2];
+        if maybe_annex.first() == Some(&OP_RESERVED) {
+            witness.len() - 3
+        } else {
+            witness.len() - 2
+        }
+    } else {
+        witness.len() - 2
+    };
+    Some(&witness[script_idx])
+}
+
+/// Walk script and return true if OP_IF or OP_NOTIF appears as an opcode (not inside push data).
+/// Skips push opcodes: 0x01-0x4b (direct), OP_PUSHDATA1/2/4.
+fn script_has_op_if_or_notif_as_opcode(script: &[u8]) -> bool {
+    let mut i = 0;
+    while i < script.len() {
+        let opcode = script[i];
+        let advance = if opcode > 0 && opcode < OP_PUSHDATA1 {
+            // Direct push: opcode IS the length (1-75 bytes)
+            let len = opcode as usize;
+            if i + 1 + len > script.len() {
+                return false; // Truncated
+            }
+            1 + len
+        } else if opcode == OP_PUSHDATA1 {
+            if i + 1 >= script.len() {
+                return false;
+            }
+            let len = script[i + 1] as usize;
+            if i + 2 + len > script.len() {
+                return false;
+            }
+            2 + len
+        } else if opcode == OP_PUSHDATA2 {
+            if i + 2 >= script.len() {
+                return false;
+            }
+            let len = u16::from_le_bytes([script[i + 1], script[i + 2]]) as usize;
+            if i + 3 + len > script.len() {
+                return false;
+            }
+            3 + len
+        } else if opcode == OP_PUSHDATA4 {
+            if i + 4 >= script.len() {
+                return false;
+            }
+            let len = u32::from_le_bytes([
+                script[i + 1],
+                script[i + 2],
+                script[i + 3],
+                script[i + 4],
+            ]) as usize;
+            if i + 5 + len > script.len() {
+                return false;
+            }
+            5 + len
+        } else {
+            // Single-byte opcode
+            if opcode == OP_IF || opcode == OP_NOTIF {
+                return true;
+            }
+            1
+        };
+        i += advance;
+    }
+    false
+}
+
+/// Tapscript contains OP_IF or OP_NOTIF as opcodes (not as data in pushes).
+/// Excludes Ordinals envelope (OP_0 OP_IF at start).
+fn tapscript_contains_op_if_or_notif(script: &[u8]) -> bool {
+    if script.len() >= 2 && script[0] == OP_0 && script[1] == OP_IF {
+        return false;
+    }
+    script_has_op_if_or_notif_as_opcode(script)
+}
+
+/// Witness has Taproot script-path with tapscript (not stack items) containing OP_IF or OP_NOTIF.
+/// Only checks the actual tapscript element to avoid false positives from signatures/hashes.
+fn witness_has_tapscript_op_if(witness: &Witness) -> bool {
+    get_tapscript_element(witness)
+        .map(|script| tapscript_contains_op_if_or_notif(script))
+        .unwrap_or(false)
+}
+
+/// Input indices that have Taproot script-path witness with OP_IF/OP_NOTIF in tapscript.
+/// Used for grandfathered vs unspendable lookup (prevout creation height).
+fn tapscript_op_if_input_indices(_tx: &Transaction, witnesses: &[Vec<Witness>], tx_idx: usize) -> Vec<usize> {
+    let mut indices = Vec::new();
+    if let Some(wits) = witnesses.get(tx_idx) {
+        for (input_idx, w) in wits.iter().enumerate() {
+            if witness_has_tapscript_op_if(w) {
+                indices.push(input_idx);
+            }
+        }
+    }
+    indices
 }
 
 /// Check for annex (last witness element with OP_RESERVED prefix in Taproot)
@@ -510,6 +692,7 @@ pub fn analyze_tx(
     let mut total_witness_size = 0usize;
     let mut has_envelope = false;
     let mut has_large_op_return = false;
+    let mut has_tapscript_op_if_violation = false;
     let mut witness_element_sizes = Vec::new();
 
     for output in &tx.outputs {
@@ -534,6 +717,9 @@ pub fn analyze_tx(
                     has_envelope = true;
                     break;
                 }
+            }
+            if witness_has_tapscript_op_if(w) {
+                has_tapscript_op_if_violation = true;
             }
             let (v, max, total, sizes) = check_witness(w);
             violations.extend(v);
@@ -561,6 +747,7 @@ pub fn analyze_tx(
         total_witness_size,
         has_envelope,
         has_large_op_return,
+        has_tapscript_op_if_violation,
         witness_element_sizes,
     }
 }
@@ -609,12 +796,20 @@ pub fn analyze_block(
     let mut collateral_witness_element_histogram: HashMap<String, usize> = HashMap::new();
     let mut collateral_weight: u64 = 0;
     let mut largwitness_spam: usize = 0;
+    let mut largwitness_and_witness_blocked: usize = 0;
+    let mut blocked_txs_with_taproot_output: usize = 0;
+    let mut collateral_by_classification: HashMap<String, usize> = HashMap::new();
+    let mut spam_by_type_by_era: SpamByTypeByEra = SpamByTypeByEra::default();
 
-    for (result, w, spam_result) in tx_results {
+    for (i, (result, w, spam_result)) in tx_results.into_iter().enumerate() {
+        let tx = &block.transactions[i];
         stats.total_weight += w;
         if result.would_block {
             stats.blocked_txs += 1;
             stats.blocked_weight += w;
+            if has_taproot_output(tx) {
+                blocked_txs_with_taproot_output += 1;
+            }
             if has_output_violation(&result.violations) {
                 stats.blocked_txs_with_output_violation += 1;
                 stats.blocked_weight_with_output_violation += w;
@@ -628,9 +823,13 @@ pub fn analyze_block(
                 stats.blocked_weight_with_control_violation += w;
             }
         }
+        // BIP-110 OP_IF rule: count ALL txs with Tapscript containing OP_IF/OP_NOTIF (any size)
+        if result.has_tapscript_op_if_violation {
+            stats.block_txs_with_tapscript_op_if_violation += 1;
+        }
 
         let class_key = format!("{:?}", result.classification);
-        *classifications.entry(class_key).or_insert(0) += 1;
+        *classifications.entry(class_key.clone()).or_insert(0) += 1;
 
         for v in &result.violations {
             let key = format!("{:?}", v);
@@ -652,14 +851,25 @@ pub fn analyze_block(
         if let Some(sr) = spam_result {
             if sr.is_spam {
                 stats.spam_txs += 1;
+                let era = block_era(height);
                 for st in &sr.detected_types {
                     if *st != SpamType::NotSpam {
                         let key = format!("{:?}", st);
-                        *spam_by_type.entry(key).or_insert(0) += 1;
+                        *spam_by_type.entry(key.clone()).or_insert(0) += 1;
+                        let era_map = match era {
+                            "pre_segwit" => &mut spam_by_type_by_era.pre_segwit,
+                            "segwit" => &mut spam_by_type_by_era.segwit,
+                            "taproot" => &mut spam_by_type_by_era.taproot,
+                            _ => &mut spam_by_type_by_era.inscriptions,
+                        };
+                        *era_map.entry(key).or_insert(0) += 1u64;
                     }
                 }
                 if sr.detected_types.contains(&SpamType::LargeWitness) {
                     largwitness_spam += 1;
+                    if result.would_block && has_witness_violation(&result.violations) {
+                        largwitness_and_witness_blocked += 1;
+                    }
                 }
                 let confidence = spam_confidence(&sr.detected_types);
                 *spam_by_confidence
@@ -673,6 +883,9 @@ pub fn analyze_block(
             } else if result.would_block {
                 stats.rule_blocked_and_not_spam += 1;
                 collateral_weight += w;
+                *collateral_by_classification
+                    .entry(class_key.clone())
+                    .or_insert(0) += 1;
                 for v in &result.violations {
                     let key = format!("{:?}", v);
                     *collateral_violations_by_type.entry(key).or_insert(0) += 1;
@@ -696,6 +909,189 @@ pub fn analyze_block(
     stats.collateral_witness_element_histogram = collateral_witness_element_histogram;
     stats.collateral_weight = collateral_weight;
     stats.largwitness_spam = largwitness_spam;
+    stats.largwitness_and_witness_blocked = largwitness_and_witness_blocked;
+    stats.blocked_txs_with_taproot_output = blocked_txs_with_taproot_output;
+    stats.collateral_by_classification = collateral_by_classification;
+    stats.spam_by_type_by_era = spam_by_type_by_era;
+
+    stats
+}
+
+/// Analyze a block with outpoint index for grandfathered vs unspendable classification.
+/// Processes txs sequentially to maintain index. Use when --grandfathered is set.
+/// Only stores P2TR outputs in the index (tapscript OP_IF only affects Taproot spends) to reduce memory.
+pub fn analyze_block_with_outpoint_index(
+    block: &Block,
+    witnesses: &[Vec<Witness>],
+    height: u64,
+    spam_filter: Option<&SpamFilter>,
+    outpoint_index: &mut FxHashMap<OutPoint, u32>,
+    bip110_activation_height: u64,
+) -> BlockScanStats {
+    let mut stats = BlockScanStats {
+        height,
+        total_txs: block.transactions.len(),
+        ..Default::default()
+    };
+    let mut violations_by_type: HashMap<String, usize> = HashMap::new();
+    let mut classifications: HashMap<String, usize> = HashMap::new();
+    let mut spam_by_type: HashMap<String, usize> = HashMap::new();
+    let mut spam_by_confidence: HashMap<String, usize> = HashMap::new();
+    let mut witness_element_histogram: HashMap<String, usize> = HashMap::new();
+    let mut collateral_violations_by_type: HashMap<String, usize> = HashMap::new();
+    let mut collateral_witness_element_histogram: HashMap<String, usize> = HashMap::new();
+    let mut collateral_weight: u64 = 0;
+    let mut largwitness_spam: usize = 0;
+    let mut largwitness_and_witness_blocked: usize = 0;
+    let mut blocked_txs_with_taproot_output: usize = 0;
+    let mut collateral_by_classification: HashMap<String, usize> = HashMap::new();
+    let mut spam_by_type_by_era: SpamByTypeByEra = SpamByTypeByEra::default();
+
+    for (tx_idx, tx) in block.transactions.iter().enumerate() {
+        let tx_id = calculate_tx_id(tx);
+        // Only store P2TR outputs: tapscript OP_IF lookups only need prevouts that are Taproot spends.
+        // This reduces index from ~150M entries to ~30M, avoiding OOM.
+        for (vout, output) in tx.outputs.iter().enumerate() {
+            if is_taproot_output(&output.script_pubkey) {
+                outpoint_index.insert(
+                    OutPoint {
+                        hash: tx_id,
+                        index: vout as u32,
+                    },
+                    height as u32,
+                );
+            }
+        }
+
+        let result = analyze_tx(tx, witnesses, tx_idx);
+        let w = tx_weight(tx, witnesses, tx_idx);
+        let spam_result = spam_filter.map(|f| {
+            let tx_wits = witnesses.get(tx_idx).map(|w| w.as_slice());
+            f.is_spam_with_witness(tx, tx_wits, None)
+        });
+
+        stats.total_weight += w;
+        if result.would_block {
+            stats.blocked_txs += 1;
+            stats.blocked_weight += w;
+            if has_taproot_output(tx) {
+                blocked_txs_with_taproot_output += 1;
+            }
+            if has_output_violation(&result.violations) {
+                stats.blocked_txs_with_output_violation += 1;
+                stats.blocked_weight_with_output_violation += w;
+            }
+            if has_witness_violation(&result.violations) {
+                stats.blocked_txs_with_witness_violation += 1;
+                stats.blocked_weight_with_witness_violation += w;
+            }
+            if has_control_violation(&result.violations) {
+                stats.blocked_txs_with_control_violation += 1;
+                stats.blocked_weight_with_control_violation += w;
+            }
+        }
+        if result.has_tapscript_op_if_violation {
+            stats.block_txs_with_tapscript_op_if_violation += 1;
+            for input_idx in tapscript_op_if_input_indices(tx, witnesses, tx_idx) {
+                let prevout = tx.inputs[input_idx].prevout;
+                if let Some(&creation_height) = outpoint_index.get(&prevout) {
+                    if (creation_height as u64) < bip110_activation_height {
+                        stats.tapscript_op_if_grandfathered += 1;
+                    } else {
+                        stats.tapscript_op_if_unspendable += 1;
+                    }
+                }
+            }
+        }
+
+        let class_key = format!("{:?}", result.classification);
+        *classifications.entry(class_key.clone()).or_insert(0) += 1;
+        for v in &result.violations {
+            let key = format!("{:?}", v);
+            *violations_by_type.entry(key).or_insert(0) += 1;
+        }
+        for &sz in &result.witness_element_sizes {
+            let bucket = witness_element_bucket(sz).to_string();
+            *witness_element_histogram.entry(bucket).or_insert(0) += 1;
+        }
+        if result.max_witness_element > MAX_WITNESS_ELEMENT_SIZE {
+            stats.txs_with_witness_element_gt_256 += 1;
+        }
+        if result.has_large_op_return {
+            stats.txs_with_op_return_gt_83 += 1;
+        }
+
+        if let Some(sr) = spam_result {
+            if sr.is_spam {
+                stats.spam_txs += 1;
+                let era = block_era(height);
+                for st in &sr.detected_types {
+                    if *st != SpamType::NotSpam {
+                        let key = format!("{:?}", st);
+                        *spam_by_type.entry(key.clone()).or_insert(0) += 1;
+                        let era_map = match era {
+                            "pre_segwit" => &mut spam_by_type_by_era.pre_segwit,
+                            "segwit" => &mut spam_by_type_by_era.segwit,
+                            "taproot" => &mut spam_by_type_by_era.taproot,
+                            _ => &mut spam_by_type_by_era.inscriptions,
+                        };
+                        *era_map.entry(key).or_insert(0) += 1u64;
+                    }
+                }
+                if sr.detected_types.contains(&SpamType::LargeWitness) {
+                    largwitness_spam += 1;
+                    if result.would_block && has_witness_violation(&result.violations) {
+                        largwitness_and_witness_blocked += 1;
+                    }
+                }
+                let confidence = spam_confidence(&sr.detected_types);
+                *spam_by_confidence
+                    .entry(format!("{:?}", confidence))
+                    .or_insert(0) += 1;
+                if result.would_block {
+                    stats.spam_and_rule_blocked += 1;
+                } else {
+                    stats.spam_and_not_rule_blocked += 1;
+                }
+            } else if result.would_block {
+                stats.rule_blocked_and_not_spam += 1;
+                collateral_weight += w;
+                *collateral_by_classification
+                    .entry(class_key.clone())
+                    .or_insert(0) += 1;
+                for v in &result.violations {
+                    let key = format!("{:?}", v);
+                    *collateral_violations_by_type.entry(key).or_insert(0) += 1;
+                    if let OutputSizeViolation::WitnessElementOversized(len) = v {
+                        let bucket = collateral_witness_bucket(*len).to_string();
+                        *collateral_witness_element_histogram
+                            .entry(bucket)
+                            .or_insert(0) += 1;
+                    }
+                }
+            }
+        }
+
+        if !is_coinbase(tx) {
+            for input in &tx.inputs {
+                outpoint_index.remove(&input.prevout);
+            }
+        }
+    }
+
+    stats.violations_by_type = violations_by_type;
+    stats.classifications = classifications;
+    stats.spam_by_type = spam_by_type;
+    stats.spam_by_confidence = spam_by_confidence;
+    stats.witness_element_histogram = witness_element_histogram;
+    stats.collateral_violations_by_type = collateral_violations_by_type;
+    stats.collateral_witness_element_histogram = collateral_witness_element_histogram;
+    stats.collateral_weight = collateral_weight;
+    stats.largwitness_spam = largwitness_spam;
+    stats.largwitness_and_witness_blocked = largwitness_and_witness_blocked;
+    stats.blocked_txs_with_taproot_output = blocked_txs_with_taproot_output;
+    stats.collateral_by_classification = collateral_by_classification;
+    stats.spam_by_type_by_era = spam_by_type_by_era;
 
     stats
 }
@@ -796,6 +1192,32 @@ pub fn merge_block_into_results(results: &mut ChainScanResults, block: &BlockSca
         &mut results.largwitness_spam_by_era.pre_segwit
     };
     *lw_era += block.largwitness_spam as u64;
+
+    // Spam by type by era
+    for (k, v) in &block.spam_by_type_by_era.pre_segwit {
+        *results.spam_by_type_by_era.pre_segwit.entry(k.clone()).or_insert(0) += *v;
+    }
+    for (k, v) in &block.spam_by_type_by_era.segwit {
+        *results.spam_by_type_by_era.segwit.entry(k.clone()).or_insert(0) += *v;
+    }
+    for (k, v) in &block.spam_by_type_by_era.taproot {
+        *results.spam_by_type_by_era.taproot.entry(k.clone()).or_insert(0) += *v;
+    }
+    for (k, v) in &block.spam_by_type_by_era.inscriptions {
+        *results.spam_by_type_by_era.inscriptions.entry(k.clone()).or_insert(0) += *v;
+    }
+
+    results.largwitness_and_witness_blocked += block.largwitness_and_witness_blocked as u64;
+    results.blocked_txs_with_taproot_output += block.blocked_txs_with_taproot_output as u64;
+    results.block_txs_with_tapscript_op_if_violation += block.block_txs_with_tapscript_op_if_violation as u64;
+    results.tapscript_op_if_grandfathered += block.tapscript_op_if_grandfathered as u64;
+    results.tapscript_op_if_unspendable += block.tapscript_op_if_unspendable as u64;
+    for (k, v) in &block.collateral_by_classification {
+        *results
+            .collateral_by_classification
+            .entry(k.clone())
+            .or_insert(0) += *v as u64;
+    }
 
     results.spam_and_rule_blocked += block.spam_and_rule_blocked as u64;
     results.spam_and_not_rule_blocked += block.spam_and_not_rule_blocked as u64;
@@ -920,4 +1342,23 @@ pub fn merge_results_into(acc: &mut ChainScanResults, other: &ChainScanResults) 
     acc.largwitness_spam_by_era.segwit += other.largwitness_spam_by_era.segwit;
     acc.largwitness_spam_by_era.taproot += other.largwitness_spam_by_era.taproot;
     acc.largwitness_spam_by_era.inscriptions += other.largwitness_spam_by_era.inscriptions;
+
+    for (k, v) in &other.spam_by_type_by_era.pre_segwit {
+        *acc.spam_by_type_by_era.pre_segwit.entry(k.clone()).or_insert(0) += *v;
+    }
+    for (k, v) in &other.spam_by_type_by_era.segwit {
+        *acc.spam_by_type_by_era.segwit.entry(k.clone()).or_insert(0) += *v;
+    }
+    for (k, v) in &other.spam_by_type_by_era.taproot {
+        *acc.spam_by_type_by_era.taproot.entry(k.clone()).or_insert(0) += *v;
+    }
+    for (k, v) in &other.spam_by_type_by_era.inscriptions {
+        *acc.spam_by_type_by_era.inscriptions.entry(k.clone()).or_insert(0) += *v;
+    }
+
+    acc.largwitness_and_witness_blocked += other.largwitness_and_witness_blocked;
+    acc.blocked_txs_with_taproot_output += other.blocked_txs_with_taproot_output;
+    for (k, v) in &other.collateral_by_classification {
+        *acc.collateral_by_classification.entry(k.clone()).or_insert(0) += *v;
+    }
 }

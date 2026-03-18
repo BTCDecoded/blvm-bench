@@ -87,15 +87,15 @@ async fn investigate_block_110300() -> Result<()> {
             }
         }
 
-        let (result, new_utxo, _) = blvm_consensus::block::connect_block(
-            &block,
-            &witnesses,
-            current_utxo,
-            height,
-            None,
+        let ctx = blvm_consensus::block::BlockValidationContext::from_connect_block_ibd_args(
+            None::<&[blvm_consensus::types::BlockHeader]>,
             block.header.timestamp,
             network,
-        )?;
+            None,
+            None,
+        );
+        let (result, new_utxo, _) =
+            blvm_consensus::block::connect_block(&block, &witnesses, current_utxo, height, &ctx)?;
 
         if height == 110300 {
             println!("\n   Validation result: {:?}", result);

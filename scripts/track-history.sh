@@ -5,15 +5,15 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BLLVM_BENCH_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+BLVM_BENCH_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 source "$SCRIPT_DIR/shared/common.sh"
 
 CURRENT_JSON="${1:-}"
-HISTORY_DIR="${HISTORY_DIR:-$BLLVM_BENCH_ROOT/results/history}"
+HISTORY_DIR="${HISTORY_DIR:-$BLVM_BENCH_ROOT/results/history}"
 
 if [ -z "$CURRENT_JSON" ]; then
     # Find latest consolidated JSON
-    CURRENT_JSON="$BLLVM_BENCH_ROOT/results/benchmark-results-consolidated-latest.json"
+    CURRENT_JSON="$BLVM_BENCH_ROOT/results/benchmark-results-consolidated-latest.json"
 fi
 
 if [ ! -f "$CURRENT_JSON" ]; then

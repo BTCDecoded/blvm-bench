@@ -9,7 +9,7 @@ source "$SCRIPT_DIR/../shared/common.sh"
 
 OUTPUT_DIR=$(get_output_dir "${1:-$RESULTS_DIR}")
 mkdir -p "$OUTPUT_DIR"
-BLLVM_BENCH_DIR="$BLLVM_BENCH_ROOT"
+BLVM_BENCH_DIR="$BLVM_BENCH_ROOT"
 OUTPUT_FILE="$OUTPUT_DIR/commons-node-sync-rpc-$(date +%Y%m%d-%H%M%S).json"
 LOG_FILE="$OUTPUT_DIR/commons-node-sync-rpc-$(date +%Y%m%d-%H%M%S).log"
 
@@ -19,12 +19,12 @@ echo "Extracting results from bllvm-bench node_sync_and_rpc benchmark..."
 echo ""
 
 # Check if bllvm-bench exists
-if [ ! -d "$BLLVM_BENCH_DIR" ]; then
-    echo "❌ bllvm-bench directory not found: $BLLVM_BENCH_DIR"
+if [ ! -d "$BLVM_BENCH_DIR" ]; then
+    echo "❌ bllvm-bench directory not found: $BLVM_BENCH_DIR"
     exit 1
 fi
 
-cd "$BLLVM_BENCH_DIR"
+cd "$BLVM_BENCH_DIR"
 
 # Check if benchmark exists
 if [ ! -f "benches/integration/node_sync_and_rpc.rs" ]; then
@@ -46,7 +46,7 @@ else
 fi
 
 # Extract results from Criterion JSON output
-CRITERION_DIR="$BLLVM_BENCH_DIR/target/criterion"
+CRITERION_DIR="$BLVM_BENCH_DIR/target/criterion"
 BENCHMARK_NAME="sync_1000_blocks_and_rpc"
 
 # Initialize JSON structure

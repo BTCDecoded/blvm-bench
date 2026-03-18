@@ -169,6 +169,9 @@ fn bench_block_validation(c: &mut Criterion) {
                            // Small block (10 txs) - typical for quick blocks
     let block_10 = create_realistic_block(10);
     let witnesses_10: Vec<Witness> = block_10.transactions.iter().map(|_| Vec::new()).collect();
+    let ctx = blvm_consensus::block::BlockValidationContext::for_network(
+        blvm_consensus::types::Network::Mainnet,
+    );
     group.bench_function("10_txs", |b| {
         b.iter(|| {
             let utxo_set = UtxoSet::new();
@@ -177,8 +180,7 @@ fn bench_block_validation(c: &mut Criterion) {
                 black_box(&witnesses_10),
                 black_box(utxo_set),
                 black_box(0),
-                black_box(None),
-                black_box(blvm_consensus::types::Network::Mainnet),
+                &ctx,
             );
         })
     });
@@ -193,8 +195,7 @@ fn bench_block_validation(c: &mut Criterion) {
                 black_box(&witnesses_100),
                 black_box(utxo_set),
                 black_box(0),
-                black_box(None),
-                black_box(blvm_consensus::types::Network::Mainnet),
+                &ctx,
             );
         })
     });

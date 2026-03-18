@@ -5,11 +5,11 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BLLVM_BENCH_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+BLVM_BENCH_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 source "$SCRIPT_DIR/shared/common.sh"
 
-RESULTS_DIR="$BLLVM_BENCH_ROOT/results"
-DOCS_DATA_DIR="$BLLVM_BENCH_ROOT/docs/data"
+RESULTS_DIR="$BLVM_BENCH_ROOT/results"
+DOCS_DATA_DIR="$BLVM_BENCH_ROOT/docs/data"
 
 echo "╔══════════════════════════════════════════════════════════════╗"
 echo "║  Updating GitHub Pages Data                                  ║"
@@ -17,14 +17,14 @@ echo "╚═══════════════════════�
 echo ""
 
 # Ensure consolidated JSON exists
-if [ ! -f "$BLLVM_BENCH_ROOT/scripts/generate-consolidated-json.sh" ]; then
+if [ ! -f "$BLVM_BENCH_ROOT/scripts/generate-consolidated-json.sh" ]; then
     echo "❌ generate-consolidated-json.sh not found"
     exit 1
 fi
 
 # Generate consolidated JSON if needed
 echo "Generating consolidated JSON..."
-"$BLLVM_BENCH_ROOT/scripts/generate-consolidated-json.sh"
+"$BLVM_BENCH_ROOT/scripts/generate-consolidated-json.sh"
 
 # Find latest consolidated JSON
 LATEST_JSON="$RESULTS_DIR/benchmark-results-consolidated-latest.json"

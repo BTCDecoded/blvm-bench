@@ -71,15 +71,15 @@ async fn test_validate_checkpoints() -> Result<()> {
 
         // Full validation (no assume-valid)
         let network = blvm_consensus::types::Network::Mainnet;
-        let (result, new_utxo, _) = blvm_consensus::block::connect_block(
-            &block,
-            &witnesses,
-            utxo_set,
-            height,
-            None,
+        let ctx = blvm_consensus::block::BlockValidationContext::from_connect_block_ibd_args(
+            None::<&[blvm_consensus::types::BlockHeader]>,
             block.header.timestamp,
             network,
-        )?;
+            None,
+            None,
+        );
+        let (result, new_utxo, _) =
+            blvm_consensus::block::connect_block(&block, &witnesses, utxo_set, height, &ctx)?;
 
         utxo_set = new_utxo;
 

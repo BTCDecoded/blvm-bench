@@ -13,11 +13,11 @@ fi
 TYPE="$1"
 BENCH_NAME="$2"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BLLVM_BENCH_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-NODE_COMPARISON_ROOT="${NODE_COMPARISON_ROOT:-$BLLVM_BENCH_ROOT/../../..}"
+BLVM_BENCH_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+NODE_COMPARISON_ROOT="${NODE_COMPARISON_ROOT:-$BLVM_BENCH_ROOT/../../..}"
 
 SOURCE_FILE="$NODE_COMPARISON_ROOT/benchmarks/${TYPE}-${BENCH_NAME}.sh"
-TARGET_DIR="$BLLVM_BENCH_ROOT/scripts/${TYPE}"
+TARGET_DIR="$BLVM_BENCH_ROOT/scripts/${TYPE}"
 TARGET_FILE="$TARGET_DIR/${BENCH_NAME}.sh"
 
 if [ ! -f "$SOURCE_FILE" ]; then
@@ -56,10 +56,10 @@ echo "Porting ${TYPE}-${BENCH_NAME}..."
     grep -v "^SCRIPT_DIR=" | \
     grep -v "^PROJECT_ROOT=" | \
     sed "s|\$PROJECT_ROOT/core|\$CORE_PATH|g" | \
-    sed "s|\$PROJECT_ROOT/commons/bllvm-bench|\$BLLVM_BENCH_ROOT|g" | \
+    sed "s|\$PROJECT_ROOT/commons/bllvm-bench|\$BLVM_BENCH_ROOT|g" | \
     sed "s|\$PROJECT_ROOT/commons/bllvm-consensus|\$COMMONS_CONSENSUS_PATH|g" | \
     sed "s|\$PROJECT_ROOT/commons/bllvm-node|\$COMMONS_NODE_PATH|g" | \
-    sed "s|\$BENCH_DIR|\$BLLVM_BENCH_ROOT|g" | \
+    sed "s|\$BENCH_DIR|\$BLVM_BENCH_ROOT|g" | \
     sed "s|OUTPUT_DIR=\"\${1:-\$(dirname \"\$0\")/\.\./results\}\"|# OUTPUT_DIR already set|" | \
     sed "s|OUTPUT_DIR=\$(cd \"\$OUTPUT_DIR\" 2>/dev/null && pwd|# OUTPUT_DIR already set|" | \
     sed "s|OUTPUT_DIR=\$(cd \"\$OUTPUT_DIR\" && pwd|# OUTPUT_DIR already set|" | \

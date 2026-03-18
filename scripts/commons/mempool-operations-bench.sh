@@ -10,7 +10,7 @@ source "$SCRIPT_DIR/../shared/common.sh"
 OUTPUT_DIR=$(get_output_dir "${1:-$RESULTS_DIR}")
 mkdir -p "$OUTPUT_DIR"
 OUTPUT_FILE="$OUTPUT_DIR/commons-mempool-operations-bench-$(date +%Y%m%d-%H%M%S).json"
-BENCH_DIR="$BLLVM_BENCH_ROOT"
+BENCH_DIR="$BLVM_BENCH_ROOT"
 
 echo "=== Bitcoin Commons Mempool Operations Benchmark ==="
 echo ""
@@ -132,7 +132,7 @@ for bench_dir in "$CRITERION_DIR"/accept_to_memory_pool* "$CRITERION_DIR"/is_sta
             TIME_NS_INT=$(awk "BEGIN {printf \"%.0f\", $TIME_NS}" 2>/dev/null || echo "0")
             
             # Extract statistical data
-            STATS=$("$BLLVM_BENCH_ROOT/scripts/shared/extract-criterion-stats.sh" "$bench_dir/base/estimates.json")
+            STATS=$("$BLVM_BENCH_ROOT/scripts/shared/extract-criterion-stats.sh" "$bench_dir/base/estimates.json")
             
             # Use direct number substitution (no --argjson needed)
             BENCHMARKS=$(echo "$BENCHMARKS" | jq --arg name "$BENCH_NAME" \

@@ -10,7 +10,7 @@ OUTPUT_DIR=$(get_output_dir "${1:-$RESULTS_DIR}")
 mkdir -p "$OUTPUT_DIR"
 
 PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BENCH_DIR="$BLLVM_BENCH_ROOT"
+BENCH_DIR="$BLVM_BENCH_ROOT"
 
 OUTPUT_FILE="$OUTPUT_DIR/commons-block-serialization-bench-$(date +%Y%m%d-%H%M%S).json"
 
