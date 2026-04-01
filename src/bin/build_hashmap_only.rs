@@ -13,9 +13,7 @@ fn main() -> Result<()> {
     // Force line buffering
     let _ = std::io::stdout().flush();
 
-    let chunks_dir = std::env::var("BLOCK_CACHE_DIR")
-        .unwrap_or_else(|_| "/run/media/acolyte/Extra/blockchain".to_string());
-    let chunks_dir = PathBuf::from(chunks_dir);
+    let chunks_dir = blvm_bench::require_block_cache_dir()?;
 
     println!("🔨 Building hash map from ALL chunks (PARALLEL + MT decompression)...");
     println!("   Chunks directory: {}", chunks_dir.display());

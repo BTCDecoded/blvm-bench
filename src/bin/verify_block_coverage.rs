@@ -11,8 +11,7 @@ use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 fn main() -> Result<()> {
-    let chunks_dir = std::env::var("BLOCK_CACHE_DIR")
-        .unwrap_or_else(|_| "/run/media/acolyte/Extra/blockchain".to_string());
+    let chunks_dir = blvm_bench::require_block_cache_dir()?.to_string_lossy().into_owned();
     let chunks_dir = PathBuf::from(&chunks_dir);
 
     println!("🔍 Block Coverage Verification");

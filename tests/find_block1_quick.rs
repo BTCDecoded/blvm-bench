@@ -8,12 +8,10 @@ use blvm_bench::chunk_index::build_block_index;
 use std::path::PathBuf;
 
 #[test]
+#[ignore = "local chunk cache: set BLOCK_CACHE_DIR and run with --ignored"]
 #[cfg(feature = "differential")]
 fn find_block1_quick() -> Result<()> {
-    let chunks_dir = std::env::var("BLOCK_CACHE_DIR")
-        .ok()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/run/media/acolyte/Extra/blockchain"));
+    let chunks_dir = PathBuf::from(std::env::var("BLOCK_CACHE_DIR").expect("BLOCK_CACHE_DIR"));
 
     println!("🔍 Searching for block 1 in chunks at: {:?}", chunks_dir);
 

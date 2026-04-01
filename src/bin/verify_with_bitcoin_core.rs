@@ -3,7 +3,7 @@
 
 use anyhow::{Context, Result};
 use blvm_bench::chunked_cache::ChunkedBlockIterator;
-use blvm_bench::start9_rpc_client::Start9RpcClient;
+use blvm_bench::remote_core_rpc::RemoteCoreRpcClient;
 use blvm_consensus::block::calculate_tx_id;
 use blvm_consensus::serialization::block::deserialize_block_with_witnesses;
 use blvm_consensus::serialization::transaction::serialize_transaction;
@@ -22,9 +22,7 @@ async fn main() -> Result<()> {
     let tx_idx: usize = args[2].parse()?;
     let input_idx: usize = args[3].parse()?;
 
-    let chunks_dir = std::env::var("BLOCK_CACHE_DIR")
-        .unwrap_or_else(|_| "/run/media/acolyte/Extra/blockchain".to_string());
-    let chunks_dir = PathBuf::from(chunks_dir);
+    let chunks_dir = blvm_bench::require_block_cache_dir()?;
 
     println!("🔍 Verifying transaction with Bitcoin Core:");
     println!("  Block: {}", block_height);
@@ -72,9 +70,9 @@ async fn main() -> Result<()> {
     println!("    Prevout index: {}", prevout_idx);
     println!("");
 
-    // Connect to Bitcoin Core via Start9 RPC
-    println!("🔌 Connecting to Bitcoin Core via Start9 RPC...");
-    let rpc_client = Start9RpcClient::new();
+    // Connect to Bitcoin Core via SSH+nsenter remote-Core RPC
+    println!("🔌 Connecting to Bitcoin Core via remote-Core RPC (REMOTE_CORE_* env)...");
+    let rpc_client = RemoteCoreRpcClient::new();
 
     // Test connection
     match rpc_client.get_block_count().await {

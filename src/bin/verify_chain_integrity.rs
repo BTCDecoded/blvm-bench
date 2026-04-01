@@ -8,17 +8,11 @@
 
 use anyhow::{Context, Result};
 use blvm_bench::chunked_cache::{load_chunk_metadata, ChunkedBlockIterator};
+use blvm_consensus::constants::GENESIS_BLOCK_HASH;
 use clap::Parser;
 use sha2::{Digest, Sha256};
 use std::path::PathBuf;
 use std::time::Instant;
-
-/// Bitcoin mainnet genesis block hash (double SHA256 of header, reversed)
-const GENESIS_HASH: [u8; 32] = [
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x19, 0xd6, 0x68, 0x9c, 0x08, 0x5a, 0xe1, 0x65,
-    0x83, 0x1e, 0x93, 0x4f, 0xf7, 0x63, 0xae, 0x46, 0xa2, 0xa6, 0xc1, 0x72, 0xb3, 0xf1, 0xb6,
-    0x0a, 0x8c, 0xe2, 0x6f,
-];
 
 fn block_hash_from_header(header: &[u8]) -> [u8; 32] {
     let first = Sha256::digest(header);
@@ -51,8 +45,7 @@ struct Args {
 
 fn main() -> Result<()> {
     let args = Args::parse();
-    let chunks_dir = PathBuf::from(std::env::var("BLOCK_CACHE_DIR")
-        .unwrap_or_else(|_| "/run/media/acolyte/Extra/blockchain".to_string()));
+    let chunks_dir = blvm_bench::require_block_cache_dir()?;
 
     let metadata = load_chunk_metadata(&chunks_dir)?
         .ok_or_else(|| anyhow::anyhow!("No chunk metadata (chunks.meta)"))?;
@@ -94,9 +87,9 @@ fn main() -> Result<()> {
 
         // Genesis check
         if height == 0 {
-            if block_hash != GENESIS_HASH {
+            if block_hash != GENESIS_BLOCK_HASH {
                 eprintln!("❌ Genesis hash mismatch!");
-                eprintln!("   Expected: {}", hex::encode(GENESIS_HASH));
+                eprintln!("   Expected: {}", hex::encode(GENESIS_BLOCK_HASH));
                 eprintln!("   Got:      {}", hex::encode(block_hash));
                 anyhow::bail!("Genesis block is not Bitcoin mainnet genesis");
             }

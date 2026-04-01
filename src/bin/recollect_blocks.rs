@@ -1,6 +1,6 @@
 //! Recollect blocks from Bitcoin Core blk*.dat files
 //!
-//! This reads blocks directly from the local copy of Start9's encrypted block files,
+//! This reads blocks directly from the local copy of XOR-packaged encrypted block files,
 //! applies XOR decryption, chains by prev_hash to determine height, and stores in chunks.
 
 use anyhow::{Context, Result};
@@ -9,17 +9,14 @@ use std::collections::HashMap;
 use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
 
-// Use local copy of blk files (encrypted - we decrypt with XOR)
-const BITCOIN_DATA_DIR: &str = "/run/media/acolyte/Extra/bitcoin_blk_files";
-const CHUNKS_DIR: &str = "/run/media/acolyte/Extra/blockchain";
 const BLOCK_MAGIC: [u8; 4] = [0xf9, 0xbe, 0xb4, 0xd9];
 const BLOCKS_PER_CHUNK: usize = 125_000;
 
-// Start9 XOR encryption keys (alternating every 4 bytes)
+// XOR encryption keys (alternating every 4 bytes)
 const XOR_KEY1: [u8; 4] = [0x84, 0x22, 0xe9, 0xad];
 const XOR_KEY2: [u8; 4] = [0xb7, 0x8f, 0xff, 0x14];
 
-/// Decrypt bytes using Start9's XOR scheme
+/// Decrypt bytes using the XOR scheme used by packaged blk trees
 fn xor_decrypt(data: &mut [u8], file_offset: u64) {
     let key1_u32 = u32::from_le_bytes(XOR_KEY1);
     let key2_u32 = u32::from_le_bytes(XOR_KEY2);
@@ -67,16 +64,15 @@ fn xor_decrypt(data: &mut [u8], file_offset: u64) {
 }
 
 fn main() -> Result<()> {
+    let blocks_dir = blvm_bench::block_cache_env::require_bitcoin_blk_dir()?;
+    let chunks_dir = blvm_bench::require_block_cache_dir()?;
+
     println!("🔨 Recollecting blocks from Bitcoin Core data (XOR encrypted)...");
-    println!("   Source: {}", BITCOIN_DATA_DIR);
-    println!("   Target: {}", CHUNKS_DIR);
+    println!("   Source: {}", blocks_dir.display());
+    println!("   Target: {}", chunks_dir.display());
 
-    let blocks_dir = PathBuf::from(BITCOIN_DATA_DIR);
-    let chunks_dir = PathBuf::from(CHUNKS_DIR);
-
-    // Check if blk files exist
     if !blocks_dir.exists() {
-        anyhow::bail!("Bitcoin blk files not found at {}.", BITCOIN_DATA_DIR);
+        anyhow::bail!("Bitcoin blk files not found at {}.", blocks_dir.display());
     }
 
     // Find all blk files

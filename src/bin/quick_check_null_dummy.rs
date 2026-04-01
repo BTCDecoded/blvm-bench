@@ -1,4 +1,6 @@
-//! Quick check: Load block 481929, tx 168, input 0 and inspect the dummy element
+//! Quick check: mainnet post–SegWit (BIP141/BIP147) block — tx 168, input 0 (CHECKMULTISIG dummy inspection).
+//!
+//! `INVESTIGATION_HEIGHT` is an ad-hoc incident height, not a network activation constant.
 
 use anyhow::{Context, Result};
 use blvm_bench::chunked_cache::ChunkedBlockIterator;
@@ -6,12 +8,15 @@ use blvm_consensus::block::calculate_tx_id;
 use blvm_consensus::serialization::block::deserialize_block_with_witnesses;
 use std::path::PathBuf;
 
+/// Ad-hoc mainnet height for null-dummy tooling (well after BIP141/BIP147 / SegWit activation).
+const INVESTIGATION_HEIGHT_POST_SEGWIT_MAINNET: u64 = 481_929;
+
 fn main() -> Result<()> {
-    let block_height = 481929u64;
+    let block_height = INVESTIGATION_HEIGHT_POST_SEGWIT_MAINNET;
     let tx_idx = 168;
     let input_idx = 0;
 
-    let chunks_dir = PathBuf::from("/run/media/acolyte/Extra/blockchain");
+    let chunks_dir = blvm_bench::require_block_cache_dir()?;
 
     println!(
         "🔍 Quick check: Block {}, tx {}, input {}",
@@ -25,7 +30,7 @@ fn main() -> Result<()> {
         .next_block()?
         .ok_or_else(|| anyhow::anyhow!("Block {} not found", block_height))?;
 
-    let (block, witnesses) =
+    let (block, _witnesses) =
         deserialize_block_with_witnesses(&block_data).context("Failed to deserialize block")?;
 
     let tx = &block.transactions[tx_idx];

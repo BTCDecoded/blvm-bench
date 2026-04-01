@@ -18,9 +18,7 @@ fn main() -> Result<()> {
     let tx_idx: usize = args[2].parse()?;
     let input_idx: usize = args[3].parse()?;
 
-    let chunks_dir = std::env::var("BLOCK_CACHE_DIR")
-        .unwrap_or_else(|_| "/run/media/acolyte/Extra/blockchain".to_string());
-    let chunks_dir = PathBuf::from(chunks_dir);
+    let chunks_dir = blvm_bench::require_block_cache_dir()?;
 
     println!("🔍 Investigating unmatched transaction:");
     println!("  Block: {}", block_height);

@@ -19,9 +19,7 @@ fn main() -> Result<()> {
     let tx_idx: usize = args[2].parse()?;
     let input_idx: usize = args[3].parse()?;
 
-    let chunks_dir = std::env::var("BLOCK_CACHE_DIR")
-        .unwrap_or_else(|_| "/run/media/acolyte/Extra/blockchain".to_string());
-    let chunks_dir = PathBuf::from(chunks_dir);
+    let chunks_dir = blvm_bench::require_block_cache_dir()?;
 
     println!("🔍 Verifying txid consistency:");
     println!("  Block: {}", block_height);
@@ -98,7 +96,7 @@ fn main() -> Result<()> {
                 println!("");
 
                 // Check if output index is valid
-                if prevout_idx < search_tx.outputs.len() as u64 {
+                if (prevout_idx as usize) < search_tx.outputs.len() {
                     println!(
                         "  ✅ Output index {} is valid (transaction has {} outputs)",
                         prevout_idx,

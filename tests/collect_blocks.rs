@@ -11,6 +11,7 @@ use std::path::PathBuf;
 /// Collect blocks only (no validation during collection)
 /// Validation happens during chunking
 #[tokio::test]
+#[ignore = "local BITCOIN_DATA_DIR / BLOCK_CACHE_DIR: run with --ignored"]
 #[cfg(feature = "differential")]
 async fn collect_blocks_only() -> Result<()> {
     println!("🚀 Starting collection-only mode");
@@ -102,11 +103,19 @@ async fn collect_blocks_only() -> Result<()> {
 
 /// Create final chunk from remaining temp file blocks
 #[tokio::test]
+#[ignore = "local temp chunk + BLOCK_CACHE_DIR: run with --ignored"]
 #[cfg(feature = "differential")]
 async fn create_final_chunk() -> Result<()> {
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
 
-    let temp_file = Path::new("/home/acolyte/.cache/blvm-bench/blvm-bench-blocks-temp.bin");
+    let temp_file: PathBuf = std::env::var("BLVM_BENCH_BLOCKS_TEMP")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            dirs::cache_dir()
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join("blvm-bench")
+                .join("blvm-bench-blocks-temp.bin")
+        });
     let metadata_file = temp_file.with_extension("bin.meta");
 
     if !temp_file.exists() {
@@ -138,7 +147,8 @@ async fn create_final_chunk() -> Result<()> {
     }
 
     // Check if chunk_9 already exists
-    let chunk_file = Path::new("/run/media/acolyte/Extra/blockchain/chunk_9.bin.zst");
+    let chunk_root = PathBuf::from(std::env::var("BLOCK_CACHE_DIR").expect("BLOCK_CACHE_DIR"));
+    let chunk_file = chunk_root.join("chunk_9.bin.zst");
     if chunk_file.exists() {
         println!("⚠️  chunk_9 already exists - skipping");
         return Ok(());
@@ -146,7 +156,7 @@ async fn create_final_chunk() -> Result<()> {
 
     // Create chunk_9 with remaining blocks
     println!("📦 Creating chunk_9 with {} blocks...", count);
-    BlockFileReader::create_and_move_chunk_from_file(temp_file, 9, count as usize)?;
+    BlockFileReader::create_and_move_chunk_from_file(&temp_file, 9, count as usize)?;
 
     println!("✅ Created chunk_9 with {} blocks", count);
 

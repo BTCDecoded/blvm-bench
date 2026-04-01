@@ -4,13 +4,12 @@
 //! guaranteeing correct ordering. Slower than local file reading but always correct.
 
 use anyhow::{Context, Result};
-use blvm_bench::start9_rpc_client::Start9RpcClient;
+use blvm_bench::remote_core_rpc::RemoteCoreRpcClient;
 use std::io::{BufWriter, Write};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use tokio::time::{timeout, Duration};
 
-const CHUNKS_DIR: &str = "/run/media/acolyte/Extra/blockchain";
 const BLOCKS_PER_CHUNK: u64 = 125_000;
 const SAVE_INTERVAL: u64 = 1000; // Save progress every 1000 blocks
 
@@ -20,14 +19,15 @@ async fn main() -> Result<()> {
         eprintln!("   ❌ PANIC: {:?}", panic_info);
     }));
 
+    let chunks_dir = blvm_bench::require_block_cache_dir()?;
+
     println!("🔨 Collecting blockchain chunks via RPC...");
-    println!("   Target: {}", CHUNKS_DIR);
+    println!("   Target: {}", chunks_dir.display());
     println!("   Blocks per chunk: {}", BLOCKS_PER_CHUNK);
 
-    let chunks_dir = PathBuf::from(CHUNKS_DIR);
     std::fs::create_dir_all(&chunks_dir)?;
 
-    let rpc_client = Start9RpcClient::new();
+    let rpc_client = RemoteCoreRpcClient::new();
 
     // Get chain height
     let chain_height = rpc_client
@@ -222,7 +222,7 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn fetch_block(client: &Start9RpcClient, height: u64) -> Result<Vec<u8>> {
+async fn fetch_block(client: &RemoteCoreRpcClient, height: u64) -> Result<Vec<u8>> {
     // Get block hash
     let hash = client
         .get_block_hash(height)

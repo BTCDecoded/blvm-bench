@@ -7,12 +7,10 @@ use std::io::{BufReader, Read};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
-const CHUNKS_DIR: &str = "/run/media/acolyte/Extra/blockchain";
-
 fn main() -> Result<()> {
     println!("🔍 Diagnosing chunk contents...\n");
 
-    let chunks_dir = PathBuf::from(CHUNKS_DIR);
+    let chunks_dir = blvm_bench::require_block_cache_dir()?;
 
     // Find all chunk files
     let mut chunk_files: Vec<(usize, PathBuf)> = Vec::new();

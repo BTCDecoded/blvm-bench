@@ -27,11 +27,10 @@ fn get_chunk_for_height(index: &BlockIndex, height: u64) -> Option<usize> {
 }
 
 fn main() -> Result<()> {
-    let failures_file =
-        PathBuf::from("/run/media/acolyte/Extra/blockchain/sort_merge_data/failures.log");
-    let output_file =
-        PathBuf::from("/run/media/acolyte/Extra/blockchain/sort_merge_data/failures_with_hex.log");
-    let chunks_dir = PathBuf::from("/run/media/acolyte/Extra/blockchain");
+    let sm = blvm_bench::block_cache_env::sort_merge_data_dir()?;
+    let failures_file = sm.join("failures.log");
+    let output_file = sm.join("failures_with_hex.log");
+    let chunks_dir = blvm_bench::require_block_cache_dir()?;
 
     println!("📦 Preparing failures.log with TX hex...");
     println!();

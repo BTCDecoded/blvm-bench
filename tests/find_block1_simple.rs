@@ -10,6 +10,7 @@ use std::fs::File;
 use std::io::{BufReader, Read, Seek, SeekFrom};
 
 #[test]
+#[ignore = "local Bitcoin Core blocks: set BITCOIN_DATA_DIR and run with --ignored"]
 #[cfg(feature = "differential")]
 fn find_block1_simple() -> Result<()> {
     const XOR_KEY1: [u8; 4] = [0x84, 0x22, 0xe9, 0xad];
@@ -26,7 +27,8 @@ fn find_block1_simple() -> Result<()> {
     println!("Genesis hash: {}", hex::encode(&genesis_hash_be));
     println!("Block 1 hash: {}", hex::encode(&block1_hash_be));
 
-    let blocks_dir = "/home/acolyte/mnt/bitcoin-start9/blocks";
+    let bitcoin_data = std::env::var("BITCOIN_DATA_DIR").expect("BITCOIN_DATA_DIR");
+    let blocks_dir = format!("{}/blocks", bitcoin_data.trim_end_matches('/'));
 
     for file_num in 0..20 {
         let filename = format!("{}/blk{:05}.dat", blocks_dir, file_num);

@@ -3,7 +3,8 @@
 use anyhow::{Context, Result};
 use blvm_bench::chunked_cache::ChunkedBlockIterator;
 use blvm_bench::sort_merge::merge_join::JoinedPrevout;
-use blvm_bench::sort_merge::verify::get_script_flags;
+use blvm_consensus::block::calculate_script_flags_for_block_network;
+use blvm_consensus::witness::is_witness_empty;
 use blvm_consensus::bip113::get_median_time_past;
 use blvm_consensus::script::{verify_script_with_context_full, SigVersion};
 use blvm_consensus::segwit::Witness;
@@ -26,8 +27,8 @@ fn main() -> Result<()> {
     println!("🔍 Finding script errors in block {}...", block_height);
 
     // Load block
-    let chunks_dir = Path::new("/run/media/acolyte/Extra/blockchain/chunks");
-    let mut block_iter = ChunkedBlockIterator::new(chunks_dir, Some(block_height), Some(1))?
+    let chunks_dir = blvm_bench::require_block_cache_dir()?;
+    let mut block_iter = ChunkedBlockIterator::new(&chunks_dir, Some(block_height), Some(1))?
         .ok_or_else(|| anyhow::anyhow!("Failed to create block iterator"))?;
 
     let block_data = block_iter
@@ -43,12 +44,11 @@ fn main() -> Result<()> {
         deserialize_block_with_witnesses(&block_data).context("Failed to deserialize block")?;
 
     // Load prevouts
-    let prevouts_file =
-        Path::new("/run/media/acolyte/Extra/blockchain/sort_merge_data/joined_sorted.bin");
+    let prevouts_file = blvm_bench::block_cache_env::sort_merge_data_dir()?.join("joined_sorted.bin");
 
     // Use PrevoutReader to read prevouts for this block
     use blvm_bench::sort_merge::verify::PrevoutReader;
-    let mut prevout_reader = PrevoutReader::new(prevouts_file)?;
+    let mut prevout_reader = PrevoutReader::new(&prevouts_file)?;
     prevout_reader.skip_to_block(block_height as u32)?;
     let block_prevouts = prevout_reader.read_block_prevouts(block_height as u32)?;
 
@@ -68,7 +68,6 @@ fn main() -> Result<()> {
         );
     }
 
-    let flags = get_script_flags(block_height, Network::Mainnet);
     let network = Network::Mainnet;
 
     // Try to verify all scripts and catch errors
@@ -78,17 +77,16 @@ fn main() -> Result<()> {
         }
 
         let tx_witnesses = witnesses.get(tx_idx);
+        let wits = tx_witnesses.map(|w| w.as_slice()).unwrap_or(&[]);
+        let has_witness = wits.iter().any(|wit| !is_witness_empty(wit));
+        let tx_flags =
+            calculate_script_flags_for_block_network(tx, has_witness, block_height, network);
 
         for (input_idx, input) in tx.inputs.iter().enumerate() {
             if let Some(prevout) = prevout_map.get(&(tx_idx as u32, input_idx as u32)) {
                 let prevout_script = prevout.script_pubkey.clone();
                 let witness_stack: Option<&Witness> =
                     tx_witnesses.and_then(|witnesses| witnesses.get(input_idx));
-
-                let mut tx_flags = flags;
-                if witness_stack.is_some() && block_height >= 481824 {
-                    tx_flags |= 0x800; // SCRIPT_VERIFY_WITNESS
-                }
 
                 // Build all prevouts for this transaction
                 let mut all_prevouts = Vec::new();
@@ -106,6 +104,12 @@ fn main() -> Result<()> {
                     }
                 }
 
+                let prevout_values: Vec<i64> = all_prevouts.iter().map(|o| o.value).collect();
+                let prevout_script_pubkeys: Vec<&[u8]> = all_prevouts
+                    .iter()
+                    .map(|o| o.script_pubkey.as_slice())
+                    .collect();
+
                 match verify_script_with_context_full(
                     &input.script_sig,
                     &prevout_script,
@@ -113,11 +117,17 @@ fn main() -> Result<()> {
                     tx_flags,
                     tx,
                     input_idx,
-                    &all_prevouts,
+                    &prevout_values,
+                    &prevout_script_pubkeys,
                     Some(block_height),
                     median_time_past,
                     network,
                     SigVersion::Base,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
                 ) {
                     Ok(true) => {}
                     Ok(false) => {}

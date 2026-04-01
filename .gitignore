@@ -29,6 +29,8 @@ Thumbs.db
 # Config (user-specific)
 config.toml
 !config.toml.example
+.env
+.cargo/config.toml
 
 # Perf output
 /tmp/perf-*.csv
@@ -51,16 +53,12 @@ chunks/
 test-data/
 cache/
 
-# Start9-specific files (local testing only, not for repo)
-*start9*
+# Optional local helper scripts (vendor-specific names; do not ignore crate sources)
 mount-start9.sh
 start9-*.sh
 start9-env.sh
 populate-cache-start9.sh
 populate-cache-from-start9.sh
-src/start9_rpc_client.rs
-tests/start9_test.rs
-src/ssh_block_reader.rs
 
 # Development notes and analysis docs (not for repo)
 *.md

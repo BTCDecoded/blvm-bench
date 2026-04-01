@@ -2,7 +2,7 @@
 //! BATCHED VERSION: Sends multiple txs per RPC call for speed
 
 use anyhow::Result;
-use blvm_bench::start9_rpc_client::Start9RpcClient;
+use blvm_bench::remote_core_rpc::RemoteCoreRpcClient;
 use std::collections::HashSet;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
@@ -27,11 +27,9 @@ async fn main() -> Result<()> {
         .and_then(|i| args.get(i + 1))
         .and_then(|s| s.parse().ok());
 
-    // Try the pre-processed file first (has tx hex), fall back to original
-    let hex_file =
-        PathBuf::from("/run/media/acolyte/Extra/blockchain/sort_merge_data/failures_with_hex.log");
-    let original_file =
-        PathBuf::from("/run/media/acolyte/Extra/blockchain/sort_merge_data/failures.log");
+    let sm = blvm_bench::block_cache_env::sort_merge_data_dir()?;
+    let hex_file = sm.join("failures_with_hex.log");
+    let original_file = sm.join("failures.log");
     let failures_file = if hex_file.exists() {
         hex_file
     } else {
@@ -48,7 +46,7 @@ async fn main() -> Result<()> {
 
     // Initialize RPC
     println!("Initializing...");
-    let rpc_client = Start9RpcClient::new();
+    let rpc_client = RemoteCoreRpcClient::new();
     if let Ok(r) = rpc_client
         .call("getblockcount", serde_json::json!([]))
         .await

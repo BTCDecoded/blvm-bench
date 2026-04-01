@@ -38,15 +38,12 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    // Configuration
-    let block_cache_dir = PathBuf::from(get_env(
-        "BLOCK_CACHE_DIR",
-        "/run/media/acolyte/Extra/blockchain",
-    ));
-    let data_dir = PathBuf::from(get_env(
-        "SORT_MERGE_DIR",
-        "/run/media/acolyte/Extra/blockchain/sort_merge_data",
-    ));
+    let block_cache_dir = blvm_bench::require_block_cache_dir()?;
+    let data_dir = std::env::var("SORT_MERGE_DIR")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| block_cache_dir.join("sort_merge_data"));
     let start_height: u64 = get_env("START_HEIGHT", "0").parse()?;
     let end_height: u64 = get_env("END_HEIGHT", "912723").parse()?;
     let progress_interval: u64 = get_env("PROGRESS_INTERVAL", "10000").parse()?;
@@ -250,9 +247,7 @@ fn print_usage() {
     println!("  clean        Remove intermediate files");
     println!();
     println!("Environment variables:");
-    println!(
-        "  BLOCK_CACHE_DIR    Block cache directory (default: /run/media/acolyte/Extra/blockchain)"
-    );
+    println!("  BLOCK_CACHE_DIR    Block cache directory (required)");
     println!("  SORT_MERGE_DIR     Data directory for intermediate files");
     println!("  START_HEIGHT       Starting block height (default: 0)");
     println!("  END_HEIGHT         Ending block height (default: 912723)");

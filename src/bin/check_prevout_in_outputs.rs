@@ -124,9 +124,7 @@ fn main() -> Result<()> {
     let outputs_file = if args.len() >= 3 {
         PathBuf::from(&args[2])
     } else {
-        let data_dir = std::env::var("SORT_MERGE_DIR")
-            .unwrap_or_else(|_| "/run/media/acolyte/Extra/blockchain/sort_merge_data".to_string());
-        PathBuf::from(data_dir).join("outputs_sorted.bin")
+        blvm_bench::block_cache_env::sort_merge_data_dir()?.join("outputs_sorted.bin")
     };
 
     println!("Searching for txid: {}", hex::encode(&txid));

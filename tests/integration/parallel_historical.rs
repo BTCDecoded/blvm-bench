@@ -93,8 +93,8 @@ async fn test_historical_blocks_parallel() -> Result<()> {
         blvm_bench::parallel_differential::BlockDataSource::Rpc(_) => {
             println!("✅ Using RPC (slower but works everywhere)");
         }
-        blvm_bench::parallel_differential::BlockDataSource::Start9Rpc(_) => {
-            println!("✅ Using Start9 RPC (for encrypted files)");
+        blvm_bench::parallel_differential::BlockDataSource::RemoteCoreRpc(_) => {
+            println!("✅ Using remote-Core RPC (for encrypted / XOR-packaged files)");
         }
     }
     

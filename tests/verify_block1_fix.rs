@@ -8,21 +8,10 @@ use blvm_bench::chunk_index::build_block_index;
 use std::path::PathBuf;
 
 #[test]
+#[ignore = "local chunk cache: set BLOCK_CACHE_DIR and run with --ignored"]
 #[cfg(feature = "differential")]
 fn verify_block1_fix() -> Result<()> {
-    // Try to find chunks directory
-    let chunks_dir = if let Ok(dir) = std::env::var("BLOCK_CACHE_DIR") {
-        PathBuf::from(dir)
-    } else {
-        // Try common locations
-        let paths = vec![
-            PathBuf::from("/run/media/acolyte/Extra/blockchain"),
-            PathBuf::from("/home/acolyte/.cache/blvm-bench/chunks"),
-        ];
-        paths.into_iter().find(|p| p.exists()).ok_or_else(|| {
-            anyhow::anyhow!("No chunks directory found. Set BLOCK_CACHE_DIR or ensure chunks exist")
-        })?
-    };
+    let chunks_dir = PathBuf::from(std::env::var("BLOCK_CACHE_DIR").expect("BLOCK_CACHE_DIR"));
 
     println!("🔍 Testing block 1 detection and chaining...");
     println!("   Chunks directory: {:?}", chunks_dir);

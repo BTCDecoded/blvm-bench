@@ -1,10 +1,11 @@
+use anyhow::Result;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let failures_file = "/run/media/acolyte/Extra/blockchain/sort_merge_data/failures.log";
-    let file = File::open(failures_file)?;
+fn main() -> Result<()> {
+    let failures_file = blvm_bench::block_cache_env::sort_merge_data_dir()?.join("failures.log");
+    let file = File::open(&failures_file)?;
     let reader = BufReader::new(file);
 
     let mut block_counts: HashMap<u64, u64> = HashMap::new();

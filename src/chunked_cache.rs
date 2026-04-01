@@ -784,27 +784,33 @@ pub fn load_chunked_cache(
 }
 
 /// Get chunk directory path
-/// 
-/// Checks multiple locations in priority order:
-/// 1. BLOCK_CACHE_DIR environment variable
-/// 2. Secondary drive location (/run/media/acolyte/Extra/blockchain)
-/// 3. Default cache directory (~/.cache/blvm-bench/chunks)
+///
+/// 1. `BLOCK_CACHE_DIR` if set, exists, and looks like a chunk dir (`chunks.meta` or `chunk_*.bin.zst`)
+/// 2. Else default cache directory (`~/.cache/blvm-bench/chunks`)
 pub fn get_chunks_dir() -> Option<PathBuf> {
-    // Check environment variable first
     if let Ok(env_dir) = std::env::var("BLOCK_CACHE_DIR") {
+        if env_dir.is_empty() {
+            return fallback_cache_chunks_dir();
+        }
         let path = PathBuf::from(env_dir);
-        if path.exists() {
+        if path.exists()
+            && (path.join("chunks.meta").exists()
+                || std::fs::read_dir(&path).ok().is_some_and(|rd| {
+                    rd.flatten().any(|e| {
+                        e.file_name()
+                            .to_string_lossy()
+                            .starts_with("chunk_")
+                    })
+                }))
+        {
             return Some(path);
         }
     }
-    
-    // Check secondary drive location (where chunks are actually stored)
-    let secondary_dir = PathBuf::from("/run/media/acolyte/Extra/blockchain");
-    if secondary_dir.exists() && secondary_dir.join("chunk_0.bin.zst").exists() {
-        return Some(secondary_dir);
-    }
-    
-    // Fallback to default cache directory
+
+    fallback_cache_chunks_dir()
+}
+
+fn fallback_cache_chunks_dir() -> Option<PathBuf> {
     dirs::cache_dir()
         .or_else(|| dirs::home_dir().map(|h| h.join(".cache")))
         .map(|cache| cache.join("blvm-bench").join("chunks"))

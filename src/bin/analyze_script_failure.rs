@@ -3,8 +3,7 @@
 
 use anyhow::{Context, Result};
 use blvm_bench::chunked_cache::ChunkedBlockIterator;
-use blvm_bench::start9_rpc_client::Start9RpcClient;
-use blvm_consensus::block::calculate_script_flags_for_block;
+use blvm_bench::remote_core_rpc::RemoteCoreRpcClient;
 use blvm_consensus::block::calculate_tx_id;
 use blvm_consensus::script::{verify_script_with_context_full, SigVersion};
 use blvm_consensus::serialization::block::deserialize_block_with_witnesses;
@@ -25,7 +24,7 @@ async fn main() -> Result<()> {
     let tx_idx: usize = args[2].parse()?;
     let input_idx: usize = args[3].parse()?;
 
-    let chunks_dir = PathBuf::from("/run/media/acolyte/Extra/blockchain");
+    let chunks_dir = blvm_bench::require_block_cache_dir()?;
 
     println!("🔍 Analyzing script failure:");
     println!("  Block: {}", block_height);
@@ -60,8 +59,7 @@ async fn main() -> Result<()> {
     use std::fs::File;
     use std::io::{BufReader, Read, Seek, SeekFrom};
 
-    let joined_file =
-        PathBuf::from("/run/media/acolyte/Extra/blockchain/sort_merge_data/joined_sorted.bin");
+    let joined_file = blvm_bench::block_cache_env::sort_merge_data_dir()?.join("joined_sorted.bin");
     let file = File::open(&joined_file)?;
     let file_size = file.metadata()?.len();
     let mut reader = BufReader::new(file);
@@ -139,6 +137,10 @@ async fn main() -> Result<()> {
         );
         println!("  Script flags: 0x{:x}", flags);
 
+        let prevout_values: Vec<i64> = prevouts.iter().map(|o| o.value).collect();
+        let prevout_script_pubkeys: Vec<&[u8]> =
+            prevouts.iter().map(|o| o.script_pubkey.as_slice()).collect();
+
         match verify_script_with_context_full(
             &input.script_sig,
             &joined.script_pubkey,
@@ -146,11 +148,17 @@ async fn main() -> Result<()> {
             flags,
             tx,
             input_idx,
-            &prevouts,
+            &prevout_values,
+            &prevout_script_pubkeys,
             Some(block_height),
             None,
             Network::Mainnet,
             SigVersion::Base,
+            None,
+            None,
+            None,
+            None,
+            None,
         ) {
             Ok(true) => {
                 println!("  ✅ BLVM verification: PASSED");
@@ -203,7 +211,7 @@ async fn main() -> Result<()> {
         // Verify with Bitcoin Core
         println!("");
         println!("🔐 Verifying with Bitcoin Core...");
-        let rpc_client = Start9RpcClient::new();
+        let rpc_client = RemoteCoreRpcClient::new();
 
         match rpc_client.get_block_hash(block_height).await {
             Ok(block_hash) => {

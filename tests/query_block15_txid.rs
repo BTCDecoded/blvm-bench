@@ -1,12 +1,12 @@
 //! Quick test to query Bitcoin Core for block 15's coinbase txid
 
 use anyhow::Result;
-use blvm_bench::start9_rpc_client::Start9RpcClient;
+use blvm_bench::remote_core_rpc::RemoteCoreRpcClient;
 use serde_json::json;
 
 #[tokio::test]
 async fn test_query_block15_coinbase() -> Result<()> {
-    let client = Start9RpcClient::new();
+    let client = RemoteCoreRpcClient::new();
 
     // Get block 1 first to verify its prev_hash
     let block1_hash_result = client.call("getblockhash", json!([1])).await?;

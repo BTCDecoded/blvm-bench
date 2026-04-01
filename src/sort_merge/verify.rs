@@ -20,60 +20,18 @@ use blvm_consensus::transaction::is_coinbase;
 use blvm_consensus::types::{Network, TransactionOutput, ByteString, BlockHeader};
 use blvm_consensus::script::{verify_script_with_context_full, SigVersion};
 use blvm_consensus::segwit::Witness;
+use blvm_consensus::activation::{ForkActivationTable, IsForkActive};
 use blvm_consensus::bip113::get_median_time_past;
-use blvm_consensus::constants::{
-    BIP16_P2SH_ACTIVATION_MAINNET,
-    BIP66_ACTIVATION_MAINNET,
-    BIP65_ACTIVATION_MAINNET,
-    BIP147_ACTIVATION_MAINNET,
-};
+use blvm_consensus::block::calculate_base_script_flags_for_block_network;
+use blvm_consensus::types::ForkId;
 
 use crate::chunked_cache::ChunkedBlockIterator;
 use super::merge_join::JoinedPrevout;
 use hex;
 
-/// Calculate script verification flags based on block height
-/// Simplified version - uses height-based activation
-pub fn get_script_flags(height: u64, _network: Network) -> u32 {
-    let mut flags = 0u32;
-    
-    // P2SH (BIP16) - activated at height 173805 on mainnet
-    if height >= BIP16_P2SH_ACTIVATION_MAINNET {
-        flags |= 0x01; // SCRIPT_VERIFY_P2SH
-    }
-    
-    // DERSIG (BIP66) - height 363725 on mainnet
-    // CRITICAL FIX: BIP66 also enables SCRIPT_VERIFY_STRICTENC (0x02) and SCRIPT_VERIFY_LOW_S (0x08)
-    // This was missing and caused signature verification failures!
-    if height >= BIP66_ACTIVATION_MAINNET {
-        flags |= 0x02 | 0x04 | 0x08; // SCRIPT_VERIFY_STRICTENC | SCRIPT_VERIFY_DERSIG | SCRIPT_VERIFY_LOW_S
-    }
-    
-    // CHECKLOCKTIMEVERIFY (BIP65) - height 388381
-    if height >= BIP65_ACTIVATION_MAINNET {
-        flags |= 0x200; // SCRIPT_VERIFY_CHECKLOCKTIMEVERIFY
-    }
-    
-    // CHECKSEQUENCEVERIFY (BIP112) and NULLDUMMY (BIP147) - activated with SegWit at height 481824
-    // CRITICAL FIX: These should be enabled together at BIP147 activation, not separately
-    if height >= BIP147_ACTIVATION_MAINNET {
-        flags |= 0x10 | 0x400; // SCRIPT_VERIFY_NULLDUMMY | SCRIPT_VERIFY_CHECKSEQUENCEVERIFY
-    }
-    
-    // WITNESS (BIP141) - height 481824
-    // Note: SCRIPT_VERIFY_WITNESS is set per-transaction based on witness presence,
-    // but we enable the base flag here. The actual flag is set in calculate_script_flags_for_block
-    // based on whether the transaction has witness data.
-    // For step6, we don't have per-transaction witness info here, so we enable it if past activation.
-    // However, this is handled in verify_script_with_context_full which uses calculate_script_flags_for_block.
-    // So we don't set it here to avoid double-setting.
-    
-    // Taproot (BIP341) - height 709632
-    // Note: Taproot flag (0x8000) is set per-transaction in calculate_script_flags_for_block
-    // based on whether outputs are P2TR. We don't set it here globally.
-    // The flag is SCRIPT_VERIFY_WITNESS_PUBKEYTYPE (0x8000), not 0x20000
-    
-    flags
+/// Base script flags for `(height, network)` — matches `blvm-consensus` block connect / `script_cache`.
+pub fn get_script_flags(height: u64, network: Network) -> u32 {
+    calculate_base_script_flags_for_block_network(height, network)
 }
 
 /// Prevout reader that streams sorted prevout data
@@ -366,10 +324,9 @@ pub fn verify_scripts(
         // OPTIMIZATION: Calculate base script flags once per block (same for all transactions)
         // Transaction-specific flags (witness, Taproot) are added per-transaction below
         let base_flags = get_script_flags(height, network);
-        
-        // OPTIMIZATION: Pre-calculate height-based flags once per block (same for all transactions)
-        let height_has_segwit = height >= 481824;
-        let height_has_taproot = height >= 709632;
+        let activation = ForkActivationTable::from_network(network);
+        let height_has_segwit = activation.is_fork_active(ForkId::SegWit, height);
+        let height_has_taproot = activation.is_fork_active(ForkId::Taproot, height);
         
         // OPTIMIZATION: Cache coinbase status to avoid repeated is_coinbase() calls
         // Build tx_prevouts with coinbase flags
@@ -423,7 +380,7 @@ pub fn verify_scripts(
                             for (output_idx, output) in tx.outputs.iter().enumerate() {
                                 let outpoint = OutPoint {
                                     hash: tx_id,
-                                    index: output_idx as u64,
+                                    index: output_idx as u32,
                                 };
                                 intra_block_utxos.insert(outpoint, TransactionOutput {
                                     value: output.value,
@@ -482,7 +439,7 @@ pub fn verify_scripts(
                                     for (output_idx, output) in tx.outputs.iter().enumerate() {
                                         let outpoint = OutPoint {
                                             hash: tx_id,
-                                            index: output_idx as u64,
+                                            index: output_idx as u32,
                                         };
                                         intra_block_utxos.insert(outpoint, TransactionOutput {
                                             value: output.value,
@@ -592,18 +549,30 @@ pub fn verify_scripts(
                     let tx_flags = *tx_flags_base;
                     
                     let input = &tx.inputs[*input_idx];
+                    let prevout_values: Vec<i64> =
+                        all_prevouts_arc.iter().map(|o| o.value).collect();
+                    let prevout_script_pubkeys: Vec<&[u8]> = all_prevouts_arc
+                        .iter()
+                        .map(|o| o.script_pubkey.as_slice())
+                        .collect();
                     match verify_script_with_context_full(
                         &input.script_sig,
-                        prevout_script, // Use reference directly, no clone
+                        prevout_script,
                         witness_stack,
-                        tx_flags, // Use per-transaction flags with witness flag
+                        tx_flags,
                         tx,
                         *input_idx,
-                        all_prevouts_arc.as_slice(), // Use Arc'd prevouts
+                        &prevout_values,
+                        &prevout_script_pubkeys,
                         Some(height),
-                        median_time_past, // OPTIMIZATION: Calculated once per block (same for all txs in block)
+                        median_time_past,
                         network,
                         SigVersion::Base,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
                     ) {
                         Ok(true) => (true, None, 0u8), // Use u8 tag instead of string
                         Ok(false) => {

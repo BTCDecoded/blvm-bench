@@ -415,7 +415,7 @@ fn scan_cache_for_block(chunks_dir: &Path, height: u64) -> Result<Option<Vec<u8>
 pub async fn fetch_and_store_missing_block(
     chunks_dir: &Path,
     height: u64,
-    rpc_client: &crate::start9_rpc_client::Start9RpcClient,
+    rpc_client: &crate::remote_core_rpc::RemoteCoreRpcClient,
 ) -> Result<u64> {
     // Get block hash
     let block_hash_hex = rpc_client.get_block_hash(height).await

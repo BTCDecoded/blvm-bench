@@ -10,7 +10,7 @@ use blvm_bench::sort_merge::output_refs::OutputRef;
 
 fn main() -> Result<()> {
     let outputs_file =
-        PathBuf::from("/run/media/acolyte/Extra/blockchain/sort_merge_data/outputs_sorted.bin");
+        blvm_bench::block_cache_env::sort_merge_data_dir()?.join("outputs_sorted.bin");
     let n = std::env::args()
         .nth(1)
         .and_then(|s| s.parse().ok())

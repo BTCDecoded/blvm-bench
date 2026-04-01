@@ -11,7 +11,7 @@ fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
     if args.len() != 4 {
         eprintln!("Usage: {} <block_height> <tx_idx> <input_idx>", args[0]);
-        eprintln!("Example: {} 481929 168 0", args[0]);
+        eprintln!("Example: {} <mainnet_height_post_segwit_bip141> 168 0", args[0]);
         std::process::exit(1);
     }
 
@@ -19,7 +19,7 @@ fn main() -> Result<()> {
     let tx_idx: usize = args[2].parse()?;
     let input_idx: usize = args[3].parse()?;
 
-    let chunks_dir = PathBuf::from("/run/media/acolyte/Extra/blockchain");
+    let chunks_dir = blvm_bench::require_block_cache_dir()?;
 
     println!("🔍 Inspecting NULLDUMMY failure:");
     println!("  Block: {}", block_height);

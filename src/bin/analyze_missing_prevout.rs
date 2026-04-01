@@ -79,13 +79,9 @@ fn main() -> Result<()> {
     let tx_idx: usize = args[2].parse()?;
     let input_idx: usize = args[3].parse()?;
 
-    let chunks_dir = std::env::var("BLOCK_CACHE_DIR")
-        .unwrap_or_else(|_| "/run/media/acolyte/Extra/blockchain".to_string());
-    let chunks_dir = PathBuf::from(chunks_dir);
+    let chunks_dir = blvm_bench::require_block_cache_dir()?;
 
-    let outputs_file = std::env::var("SORT_MERGE_DIR")
-        .unwrap_or_else(|_| "/run/media/acolyte/Extra/blockchain/sort_merge_data".to_string());
-    let outputs_file = PathBuf::from(outputs_file).join("outputs_sorted.bin");
+    let outputs_file = blvm_bench::block_cache_env::sort_merge_data_dir()?.join("outputs_sorted.bin");
 
     println!("🔍 Analyzing missing prevout:");
     println!("  Block: {}", block_height);
@@ -169,7 +165,7 @@ fn main() -> Result<()> {
         println!("  Value: {} satoshis", output.value);
         println!("");
 
-        if output.output_idx as u64 != prevout_idx {
+        if output.output_idx != prevout_idx {
             println!("  ⚠️  WARNING: Output index mismatch!");
             println!(
                 "     Expected: {}, Found: {}",

@@ -17,12 +17,7 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    // Determine outputs file path
-    let outputs_file = {
-        let data_dir = std::env::var("SORT_MERGE_DIR")
-            .unwrap_or_else(|_| "/run/media/acolyte/Extra/blockchain/sort_merge_data".to_string());
-        PathBuf::from(data_dir).join("outputs_sorted.bin")
-    };
+    let outputs_file = blvm_bench::block_cache_env::sort_merge_data_dir()?.join("outputs_sorted.bin");
 
     println!(
         "Checking {} txids in: {}",

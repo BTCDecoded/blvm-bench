@@ -3,21 +3,25 @@
 //! CRITICAL: This module exists to prevent accidental deletion of chunks
 //! Chunks represent DAYS of work and MUST NEVER be deleted by code
 
+use crate::block_cache_env::block_cache_dir_from_env;
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 
-/// Chunk directories that MUST NEVER be deleted (final destinations only)
-/// Cache chunks are temporary and can be deleted after successful move
-const PROTECTED_CHUNK_DIRS: &[&str] = &[
-    "/run/media/acolyte/Extra/blockchain",
-];
+/// Roots under which chunk data must never be deleted (from `BLOCK_CACHE_DIR` only).
+fn protected_chunk_roots() -> Vec<PathBuf> {
+    block_cache_dir_from_env().into_iter().collect()
+}
 
 /// Check if a path is a protected chunk directory
 pub fn is_protected_chunk_dir(path: &Path) -> bool {
     let path_str = path.to_string_lossy();
-    PROTECTED_CHUNK_DIRS.iter().any(|&protected| {
-        path_str == protected || path_str.starts_with(&format!("{}/", protected))
-    })
+    for root in protected_chunk_roots() {
+        let r = root.to_string_lossy();
+        if path_str == r.as_ref() || path_str.starts_with(&format!("{}/", r.as_ref())) {
+            return true;
+        }
+    }
+    false
 }
 
 /// Validate that we're not trying to delete chunks
@@ -35,20 +39,22 @@ pub fn validate_no_chunk_deletion(operation: &str, path: &Path) -> Result<()> {
         );
     }
     
-    // Also check if path contains chunk files in protected locations
-    // Allow deletion from cache (temporary), but protect final destination
-    if path.to_string_lossy().contains("chunk_") && 
-       path.to_string_lossy().ends_with(".bin.zst") &&
-       path.to_string_lossy().contains("/run/media/acolyte/Extra/blockchain") {
-        anyhow::bail!(
-            "🚨🚨🚨 CRITICAL ERROR: Attempted to {} chunk file: {}\n\
-             🚨 CHUNK FILES MUST NEVER BE DELETED!\n\
-             🚨 This operation has been BLOCKED.",
-            operation,
-            path.display()
-        );
+    // Also protect chunk files under BLOCK_CACHE_DIR
+    if path.to_string_lossy().contains("chunk_") && path.to_string_lossy().ends_with(".bin.zst") {
+        if protected_chunk_roots()
+            .iter()
+            .any(|root| path.starts_with(root.as_path()))
+        {
+            anyhow::bail!(
+                "🚨🚨🚨 CRITICAL ERROR: Attempted to {} chunk file: {}\n\
+                 🚨 CHUNK FILES MUST NEVER BE DELETED!\n\
+                 🚨 This operation has been BLOCKED.",
+                operation,
+                path.display()
+            );
+        }
     }
-    
+
     Ok(())
 }
 

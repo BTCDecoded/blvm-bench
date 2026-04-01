@@ -11,32 +11,41 @@ async fn test_verify_utxo_set_blocks_0_15() -> Result<()> {
     println!("🔍 Verifying UTXO Set State for Blocks 0-15");
     println!("==========================================\n");
 
-    // Create block file reader for Start9 mount
+    use blvm_bench::block_cache_env;
     use blvm_bench::block_file_reader::Network as BlockFileNetwork;
-    let start9_mount = dirs::home_dir().map(|h| h.join("mnt/bitcoin-start9"));
-    let reader = if let Some(mount) = start9_mount.as_ref() {
-        if mount.exists() {
-            println!("✅ Using Start9 mount: {:?}", mount);
-            BlockFileReader::new(mount, BlockFileNetwork::Mainnet)?
-        } else {
-            anyhow::bail!("Start9 mount not found at {:?}", mount);
-        }
-    } else {
-        anyhow::bail!("Could not determine home directory");
-    };
+    use std::path::PathBuf;
 
-    let mut utxo_set: UtxoSet = UtxoSet::new();
-    let network_time = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs();
+    let mut data_dir: Option<PathBuf> = None;
+    for dir in block_cache_env::bitcoin_data_dir_candidates() {
+        if dir.join("blocks").is_dir() {
+            data_dir = Some(dir);
+            break;
+        }
+    }
+    if data_dir.is_none() {
+        if let Some(h) = dirs::home_dir() {
+            let d = h.join(".bitcoin");
+            if d.join("blocks").is_dir() {
+                data_dir = Some(d);
+            }
+        }
+    }
+    let data_dir = data_dir.ok_or_else(|| {
+        anyhow::anyhow!(
+            "No Bitcoin Core datadir with blocks/: set BITCOIN_DATA_DIR or BITCOIN_DATA_DIRS, or ensure ~/.bitcoin/blocks exists"
+        )
+    })?;
+    println!("✅ Using Bitcoin data dir: {:?}", data_dir);
+    let reader = BlockFileReader::new(&data_dir, BlockFileNetwork::Mainnet)?;
+
+    let mut utxo_set: UtxoSet = UtxoSet::default();
 
     // Track all coinbase txids from blocks 0-14 for comparison
     let mut previous_coinbase_txids: Vec<([u8; 32], u64)> = Vec::new();
 
     // Process blocks 0-15
     println!("📊 Processing blocks 0-15...\n");
-    println!("⚠️  CRITICAL: Reading directly from Start9 files (bypassing chunks)");
+    println!("⚠️  CRITICAL: Reading directly from blk*.dat (bypassing chunks)");
     println!("   This ensures we get ALL transactions, not just what's in the cache\n");
 
     // Temporarily disable chunk usage by setting BLOCK_CACHE_DIR to a non-existent path
@@ -404,7 +413,7 @@ async fn test_verify_utxo_set_blocks_0_15() -> Result<()> {
 
         let ctx = blvm_consensus::block::BlockValidationContext::from_connect_block_ibd_args(
             None::<&[blvm_consensus::types::BlockHeader]>,
-            network_time,
+            block.header.timestamp,
             Network::Mainnet,
             None,
             None,

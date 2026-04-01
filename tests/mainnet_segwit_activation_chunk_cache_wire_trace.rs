@@ -1,12 +1,18 @@
+//! Debug printout of tx_count varint and first-tx prefix at mainnet SegWit activation height.
+#![cfg(any(feature = "differential", feature = "scan"))]
+
 use blvm_bench::chunked_cache::ChunkedBlockIterator;
+use blvm_consensus::constants::SEGWIT_ACTIVATION_MAINNET;
 use blvm_consensus::serialization::decode_varint;
 use std::path::Path;
 
 #[test]
-fn trace_block_481824() {
-    let chunks_dir = Path::new("/run/media/acolyte/Extra/blockchain");
+#[ignore = "local chunk cache: set BLOCK_CACHE_DIR and run with --ignored"]
+fn chunk_cache_wire_trace_at_mainnet_segwit_activation() {
+    let root = std::env::var("BLOCK_CACHE_DIR").expect("BLOCK_CACHE_DIR");
+    let chunks_dir = std::path::Path::new(&root);
 
-    let mut iter = ChunkedBlockIterator::new(chunks_dir, Some(481824), None)
+    let mut iter = ChunkedBlockIterator::new(chunks_dir, Some(SEGWIT_ACTIVATION_MAINNET), None)
         .expect("ChunkedBlockIterator::new failed")
         .expect("No iterator returned");
 
@@ -22,7 +28,6 @@ fn trace_block_481824() {
         data[0], data[1], data[2], data[3]
     );
 
-    // Parse tx_count at offset 80
     let (tx_count, varint_len) = decode_varint(&data[80..]).expect("varint decode failed");
     println!("TX count: {} (varint len: {})", tx_count, varint_len);
 
@@ -33,7 +38,6 @@ fn trace_block_481824() {
         &data[offset..offset + 10.min(data.len() - offset)]
     );
 
-    // Check if first tx looks like SegWit (version then marker/flag)
     if data.len() >= offset + 6 {
         let tx_version = u32::from_le_bytes([
             data[offset],

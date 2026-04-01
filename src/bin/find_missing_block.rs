@@ -1,14 +1,12 @@
-use std::path::PathBuf;
+use anyhow::Result;
 
-fn main() {
-    let chunks_dir = PathBuf::from("/run/media/acolyte/Extra/blockchain");
+fn main() -> Result<()> {
+    let chunks_dir = blvm_bench::require_block_cache_dir()?;
 
-    // Load the index
     match blvm_bench::chunk_index::load_block_index(&chunks_dir) {
         Ok(Some(index)) => {
             println!("Index has {} entries", index.len());
 
-            // Check for missing blocks in range 0-912722
             let max_height = 912722u64;
             let mut missing = Vec::new();
             for h in 0..=max_height {
@@ -35,4 +33,5 @@ fn main() {
         Ok(None) => println!("No index found"),
         Err(e) => println!("Error loading index: {}", e),
     }
+    Ok(())
 }

@@ -6,7 +6,7 @@
 use anyhow::{Context, Result};
 use crate::chunk_index::{BlockIndex, BlockIndexEntry};
 use crate::chunked_cache::{load_chunk_metadata, decompress_chunk_streaming};
-use crate::start9_rpc_client::Start9RpcClient;
+use crate::remote_core_rpc::RemoteCoreRpcClient;
 use sha2::{Sha256, Digest};
 use std::io::Read;
 use std::path::Path;
@@ -19,7 +19,7 @@ pub async fn build_block_index_via_rpc(
 ) -> Result<BlockIndex> {
     println!("🔨 Building block index via RPC (optimized)...");
     
-    let rpc_client = Start9RpcClient::new();
+    let rpc_client = RemoteCoreRpcClient::new();
     
     // Get chain height
     let chain_height = rpc_client.get_block_count().await

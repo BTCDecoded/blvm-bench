@@ -20,13 +20,9 @@ fn main() -> Result<()> {
     let tx_idx: usize = args[2].parse().context("Invalid tx index")?;
     let input_idx: usize = args[3].parse().context("Invalid input index")?;
 
-    let chunks_dir = std::env::var("BLOCK_CACHE_DIR")
-        .unwrap_or_else(|_| "/run/media/acolyte/Extra/blockchain".to_string());
-    let chunks_dir = PathBuf::from(chunks_dir);
+    let chunks_dir = blvm_bench::require_block_cache_dir()?;
 
-    let prevouts_file = std::env::var("SORT_MERGE_DATA_DIR")
-        .unwrap_or_else(|_| "/run/media/acolyte/Extra/blockchain/sort_merge_data".to_string());
-    let prevouts_file = PathBuf::from(prevouts_file).join("joined_sorted.bin");
+    let prevouts_file = blvm_bench::block_cache_env::sort_merge_data_dir()?.join("joined_sorted.bin");
 
     println!("🔍 Debugging prevouts for:");
     println!("  Block: {}", block_height);
@@ -93,7 +89,7 @@ fn main() -> Result<()> {
         for (output_idx, output) in tx_iter.outputs.iter().enumerate() {
             let outpoint = blvm_consensus::types::OutPoint {
                 hash: tx_id,
-                index: output_idx as u64,
+                index: output_idx as u32,
             };
             intra_block_utxos.insert(
                 outpoint,

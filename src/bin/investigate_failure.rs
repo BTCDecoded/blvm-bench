@@ -3,10 +3,7 @@
 //! Usage: investigate_failure <block_height> <tx_idx> <input_idx>
 
 use anyhow::{Context, Result};
-use blvm_consensus::constants::{
-    BIP147_ACTIVATION_MAINNET, BIP16_P2SH_ACTIVATION_MAINNET, BIP65_ACTIVATION_MAINNET,
-    BIP66_ACTIVATION_MAINNET,
-};
+use blvm_consensus::block::calculate_script_flags_for_block_network;
 use blvm_consensus::script::{verify_script_with_context_full, SigVersion};
 use blvm_consensus::serialization::block::deserialize_block_with_witnesses;
 use blvm_consensus::transaction::is_coinbase;
@@ -15,37 +12,7 @@ use blvm_consensus::Witness;
 
 use blvm_bench::chunked_cache::ChunkedBlockIterator;
 use blvm_bench::sort_merge::verify::PrevoutReader;
-
-fn get_script_flags(height: u64) -> u32 {
-    let mut flags = 0u32;
-
-    if height >= BIP16_P2SH_ACTIVATION_MAINNET {
-        flags |= 1 << 0; // SCRIPT_VERIFY_P2SH
-    }
-
-    if height >= BIP66_ACTIVATION_MAINNET {
-        flags |= 1 << 2; // SCRIPT_VERIFY_DERSIG
-    }
-
-    if height >= BIP65_ACTIVATION_MAINNET {
-        flags |= 1 << 9; // SCRIPT_VERIFY_CHECKLOCKTIMEVERIFY
-    }
-
-    if height >= 419328 {
-        flags |= 1 << 10; // SCRIPT_VERIFY_CHECKSEQUENCEVERIFY
-    }
-
-    if height >= BIP147_ACTIVATION_MAINNET {
-        flags |= 1 << 11; // SCRIPT_VERIFY_WITNESS
-        flags |= 1 << 4; // SCRIPT_VERIFY_NULLDUMMY
-    }
-
-    if height >= 709632 {
-        flags |= 1 << 17; // SCRIPT_VERIFY_TAPROOT
-    }
-
-    flags
-}
+use blvm_consensus::witness::is_witness_empty;
 
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
@@ -65,8 +32,8 @@ fn main() -> Result<()> {
     println!("  Input index: {}", input_idx);
 
     // Load block
-    let chunks_dir = std::path::Path::new("/run/media/acolyte/Extra/blockchain");
-    let mut block_iter = ChunkedBlockIterator::new(chunks_dir, Some(block_height), Some(1))?
+    let chunks_dir = blvm_bench::require_block_cache_dir()?;
+    let mut block_iter = ChunkedBlockIterator::new(&chunks_dir, Some(block_height), Some(1))?
         .ok_or_else(|| anyhow::anyhow!("Failed to create block iterator"))?;
 
     let block_data = block_iter
@@ -122,7 +89,7 @@ fn main() -> Result<()> {
     );
 
     // Load prevouts for this block using PrevoutReader (efficient skip)
-    let prevouts_file = chunks_dir.join("sort_merge_data/joined_sorted.bin");
+    let prevouts_file = blvm_bench::block_cache_env::sort_merge_data_dir()?.join("joined_sorted.bin");
     let mut prevout_reader = PrevoutReader::new(&prevouts_file)?;
 
     // Skip to the block
@@ -164,16 +131,17 @@ fn main() -> Result<()> {
         println!("\n📝 No witness data for this input");
     }
 
-    // Get script flags
-    let flags = get_script_flags(block_height);
+    let wits = witnesses.get(tx_idx).map(|w| w.as_slice()).unwrap_or(&[]);
+    let has_witness = wits.iter().any(|wit| !is_witness_empty(wit));
+    let flags = calculate_script_flags_for_block_network(tx, has_witness, block_height, Network::Mainnet);
     println!("\n🏳️  Script flags: 0x{:x}", flags);
-    println!("  P2SH: {}", (flags & (1 << 0)) != 0);
-    println!("  DERSIG: {}", (flags & (1 << 2)) != 0);
-    println!("  CHECKLOCKTIMEVERIFY: {}", (flags & (1 << 9)) != 0);
-    println!("  CHECKSEQUENCEVERIFY: {}", (flags & (1 << 10)) != 0);
-    println!("  WITNESS: {}", (flags & (1 << 11)) != 0);
-    println!("  NULLDUMMY: {}", (flags & (1 << 4)) != 0);
-    println!("  TAPROOT: {}", (flags & (1 << 17)) != 0);
+    println!("  P2SH: {}", (flags & 0x01) != 0);
+    println!("  DERSIG: {}", (flags & 0x04) != 0);
+    println!("  CHECKLOCKTIMEVERIFY: {}", (flags & 0x200) != 0);
+    println!("  CHECKSEQUENCEVERIFY: {}", (flags & 0x400) != 0);
+    println!("  WITNESS: {}", (flags & 0x800) != 0);
+    println!("  NULLDUMMY: {}", (flags & 0x10) != 0);
+    println!("  WITNESS_PUBKEYTYPE (Taproot outputs): {}", (flags & 0x8000) != 0);
 
     // Build all prevouts for this transaction from block_prevouts
     println!("\n🔍 Building prevouts for transaction...");
@@ -199,6 +167,10 @@ fn main() -> Result<()> {
 
     // Verify script
     println!("\n🔐 Verifying script...");
+    let prevout_values: Vec<i64> = all_prevouts.iter().map(|o| o.value).collect();
+    let prevout_script_pubkeys: Vec<&[u8]> =
+        all_prevouts.iter().map(|o| o.script_pubkey.as_slice()).collect();
+
     match verify_script_with_context_full(
         &input.script_sig,
         &prevout.script_pubkey,
@@ -206,11 +178,17 @@ fn main() -> Result<()> {
         flags,
         tx,
         input_idx,
-        &all_prevouts,
+        &prevout_values,
+        &prevout_script_pubkeys,
         Some(block_height),
         None, // median_time_past
         Network::Mainnet,
         SigVersion::Base,
+        None,
+        None,
+        None,
+        None,
+        None,
     ) {
         Ok(true) => {
             println!("✅ Script verification PASSED");

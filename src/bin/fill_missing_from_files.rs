@@ -9,24 +9,35 @@ use std::collections::HashMap;
 use std::io::{BufReader, Read, Seek, SeekFrom};
 use std::path::PathBuf;
 
-const BITCOIN_DATA_DIR: &str = "/home/acolyte/mnt/bitcoin-start9";
 const BLOCK_MAGIC: [u8; 4] = [0xf9, 0xbe, 0xb4, 0xd9]; // Mainnet
 
 #[tokio::main]
 async fn main() -> Result<()> {
     println!("🔨 Filling missing blocks from local files...");
 
-    let chunks_dir = std::env::var("BLOCK_CACHE_DIR")
-        .unwrap_or_else(|_| "/run/media/acolyte/Extra/blockchain".to_string());
-    let chunks_dir = PathBuf::from(chunks_dir);
+    let chunks_dir = blvm_bench::require_block_cache_dir()?;
 
-    let bitcoin_data = PathBuf::from(BITCOIN_DATA_DIR);
+    let bitcoin_data = std::env::var("BITCOIN_DATA_DIR")
+        .map(PathBuf::from)
+        .map_err(|_| {
+            anyhow::anyhow!(
+                "Set BITCOIN_DATA_DIR to Bitcoin Core data directory (must contain a `blocks/` subdir with blk*.dat)"
+            )
+        })
+        .and_then(|p| {
+            if p.as_os_str().is_empty() {
+                Err(anyhow::anyhow!("BITCOIN_DATA_DIR is empty"))
+            } else {
+                Ok(p)
+            }
+        })?;
     let blocks_dir = bitcoin_data.join("blocks");
 
-    // Check if mounted
     if !blocks_dir.exists() {
-        anyhow::bail!("Bitcoin data not mounted at {}. Run:\n  sshfs start9@192.168.2.100:/embassy-data/package-data/volumes/bitcoind/data/main {}", 
-                      BITCOIN_DATA_DIR, BITCOIN_DATA_DIR);
+        anyhow::bail!(
+            "Bitcoin `blocks` directory not found at {} (check BITCOIN_DATA_DIR)",
+            blocks_dir.display()
+        );
     }
 
     // Load existing index
@@ -89,7 +100,7 @@ async fn main() -> Result<()> {
     // For now, let's do a hybrid: get hashes via RPC, then read blocks from files
 
     println!("\n🔍 Getting block hashes for missing heights via RPC...");
-    let rpc = blvm_bench::start9_rpc_client::Start9RpcClient::new();
+    let rpc = blvm_bench::remote_core_rpc::RemoteCoreRpcClient::new();
 
     // Get hashes in batches
     let mut height_to_hash: HashMap<u64, String> = HashMap::new();

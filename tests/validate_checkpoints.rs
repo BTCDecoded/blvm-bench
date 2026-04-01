@@ -8,10 +8,9 @@ use blvm_consensus::UtxoSet;
 use std::path::PathBuf;
 
 #[tokio::test]
+#[ignore = "local chunk cache + checkpoints: set BLOCK_CACHE_DIR and run with --ignored"]
 async fn test_validate_checkpoints() -> Result<()> {
-    let cache_dir = std::env::var("BLOCK_CACHE_DIR")
-        .unwrap_or_else(|_| "/run/media/acolyte/Extra/blockchain".to_string());
-    let cache_path = PathBuf::from(&cache_dir);
+    let cache_path = PathBuf::from(std::env::var("BLOCK_CACHE_DIR").expect("BLOCK_CACHE_DIR"));
 
     let manager = CheckpointManager::new(&cache_path)?;
 
@@ -55,7 +54,7 @@ async fn test_validate_checkpoints() -> Result<()> {
         max_height
     );
 
-    let mut utxo_set = UtxoSet::new();
+    let mut utxo_set = UtxoSet::default();
     let mut chunked_iter =
         ChunkedBlockIterator::new(&cache_path, Some(0), Some((max_height + 1) as usize))?
             .ok_or_else(|| anyhow::anyhow!("Failed to create block iterator"))?;

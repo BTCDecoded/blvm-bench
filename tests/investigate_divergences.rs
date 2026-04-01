@@ -10,29 +10,31 @@ use blvm_consensus::types::{Network, TransactionOutput};
 use std::path::PathBuf;
 
 #[tokio::test]
+#[ignore = "local chunk cache: set BLOCK_CACHE_DIR and run with --ignored"]
 async fn investigate_block_124276() -> Result<()> {
     investigate_block(124276, 4).await
 }
 
 #[tokio::test]
+#[ignore = "local chunk cache: set BLOCK_CACHE_DIR and run with --ignored"]
 async fn investigate_block_129878() -> Result<()> {
     investigate_block(129878, 7).await
 }
 
 #[tokio::test]
+#[ignore = "local chunk cache: set BLOCK_CACHE_DIR and run with --ignored"]
 async fn investigate_block_131326() -> Result<()> {
     investigate_block(131326, 8).await
 }
 
 #[tokio::test]
+#[ignore = "local chunk cache: set BLOCK_CACHE_DIR and run with --ignored"]
 async fn investigate_block_134181() -> Result<()> {
     investigate_block(134181, 62).await
 }
 
 async fn investigate_block(target_height: u64, target_tx: usize) -> Result<()> {
-    let cache_dir = std::env::var("BLOCK_CACHE_DIR")
-        .unwrap_or_else(|_| "/run/media/acolyte/Extra/blockchain".to_string());
-    let cache_path = PathBuf::from(&cache_dir);
+    let cache_path = PathBuf::from(std::env::var("BLOCK_CACHE_DIR").expect("BLOCK_CACHE_DIR"));
 
     let manager = CheckpointManager::new(&cache_path)?;
 
@@ -89,7 +91,7 @@ async fn investigate_block(target_height: u64, target_tx: usize) -> Result<()> {
                     if let Some(utxo) = current_utxo.get(&input.prevout) {
                         prevouts.push(TransactionOutput {
                             value: utxo.value,
-                            script_pubkey: utxo.script_pubkey.clone(),
+                            script_pubkey: utxo.script_pubkey.as_ref().to_vec(),
                         });
                     } else {
                         println!("   ❌ Input {} UTXO not found!", i);
@@ -125,15 +127,19 @@ async fn investigate_block(target_height: u64, target_tx: usize) -> Result<()> {
                             let sighash_byte = script_sig[first_push_len];
                             println!("      Sighash byte: 0x{:02x}", sighash_byte);
 
-                            match SighashType::from_byte(sighash_byte) {
-                                Ok(st) => println!("      Sighash type: {:?}", st),
-                                Err(e) => println!("      ⚠️  Sighash parse error: {:?}", e),
-                            }
+                            let st = SighashType::from_byte(sighash_byte);
+                            println!("      Sighash type: {:?}", st);
                         }
                     }
 
                     // Try to verify - flags=0 since P2SH/BIP66 not active at this height
                     let flags = 0;
+                    let prevout_values: Vec<i64> =
+                        prevouts.iter().map(|o| o.value as i64).collect();
+                    let prevout_script_pubkeys: Vec<&[u8]> = prevouts
+                        .iter()
+                        .map(|o| o.script_pubkey.as_slice())
+                        .collect();
                     let result = verify_script_with_context_full(
                         script_sig,
                         script_pubkey,
@@ -141,11 +147,17 @@ async fn investigate_block(target_height: u64, target_tx: usize) -> Result<()> {
                         flags,
                         tx,
                         i,
-                        &prevouts,
+                        &prevout_values,
+                        &prevout_script_pubkeys,
                         Some(target_height),
                         None,
                         Network::Mainnet,
                         SigVersion::Base,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
                     );
 
                     match result {

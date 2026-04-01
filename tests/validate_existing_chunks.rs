@@ -7,8 +7,10 @@ use std::io::Read;
 use std::path::Path;
 
 #[test]
+#[ignore = "local chunk cache: set BLOCK_CACHE_DIR and run with --ignored"]
 fn validate_existing_chunks() -> Result<()> {
-    let chunks_dir = Path::new("/run/media/acolyte/Extra/blockchain");
+    let root = std::env::var("BLOCK_CACHE_DIR").expect("BLOCK_CACHE_DIR");
+    let chunks_dir = Path::new(&root);
 
     let metadata = load_chunk_metadata(chunks_dir)?
         .ok_or_else(|| anyhow::anyhow!("No chunk metadata found"))?;

@@ -1,17 +1,24 @@
+//! Local chunked-cache smoke test: deserialize a window around mainnet SegWit activation.
+#![cfg(any(feature = "differential", feature = "scan"))]
+
 use blvm_bench::chunked_cache::ChunkedBlockIterator;
+use blvm_consensus::constants::SEGWIT_ACTIVATION_MAINNET;
 use blvm_consensus::serialization::block::deserialize_block_with_witnesses;
 use std::path::Path;
 
 #[test]
-fn test_block_481824() {
-    let chunks_dir = Path::new("/run/media/acolyte/Extra/blockchain");
+#[ignore = "local chunk cache: set BLOCK_CACHE_DIR and run with --ignored"]
+fn chunk_cache_deserialize_window_around_mainnet_segwit_activation() {
+    let root = std::env::var("BLOCK_CACHE_DIR").expect("BLOCK_CACHE_DIR");
+    let chunks_dir = std::path::Path::new(&root);
 
-    // Start from block 481820 (a few before the problem block)
-    let mut iter = ChunkedBlockIterator::new(chunks_dir, Some(481820), None)
+    let segwit = SEGWIT_ACTIVATION_MAINNET;
+    let start = segwit.saturating_sub(4);
+    let mut iter = ChunkedBlockIterator::new(chunks_dir, Some(start), None)
         .expect("ChunkedBlockIterator::new failed")
         .expect("No iterator returned");
 
-    for expected_height in 481820..481830 {
+    for expected_height in start..start + 10 {
         match iter.next_block() {
             Ok(Some(data)) => {
                 println!("Block {} has {} bytes", expected_height, data.len());

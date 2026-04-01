@@ -4,6 +4,15 @@
 //! While it's a development-only crate, it supports testing in production mode
 //! to ensure benchmarks reflect real-world performance.
 
+pub mod block_cache_env;
+
+pub use block_cache_env::{
+    bitcoin_data_dir_candidates, block_cache_dir_from_env, remote_core_ordered_blocks_cache_basename,
+    remote_core_ordered_blocks_cache_basenames, remote_core_rpc_env_ready,
+    remote_core_xor_blockfiles_hint, require_bitcoin_blk_dir, require_block_cache_dir,
+    require_block_cache_subdir, sort_merge_data_dir,
+};
+
 pub mod deep_analysis;
 /// Benchmark utilities and helpers
 pub mod utils;
@@ -17,18 +26,24 @@ pub mod shell;
 pub mod node_builder;
 #[cfg(any(feature = "differential", feature = "benchmark-helpers"))]
 pub mod node_rpc_client;
+/// Legacy module name; re-exports [`node_builder`](crate::node_builder).
+#[cfg(any(feature = "differential", feature = "benchmark-helpers"))]
+pub mod core_builder;
+/// Legacy module name; re-exports [`node_rpc_client`](crate::node_rpc_client).
+#[cfg(any(feature = "differential", feature = "benchmark-helpers"))]
+pub mod core_rpc_client;
 #[cfg(feature = "differential")]
 pub mod differential;
 #[cfg(any(feature = "differential", feature = "benchmark-helpers"))]
 pub mod regtest_node;
-// Archived: parallel_differential - not used in final sort-merge approach
-// #[cfg(feature = "differential")]
-// pub mod parallel_differential;
+#[cfg(feature = "differential")]
+pub mod parallel_differential;
+#[cfg(feature = "differential")]
+pub mod checkpoint_persistence;
 #[cfg(feature = "differential")]
 pub mod block_file_reader;
 pub mod chunk_protection;
-#[cfg(feature = "differential")]
-pub mod start9_rpc_client;
+pub mod remote_core_rpc;
 #[cfg(any(feature = "differential", feature = "scan"))]
 pub mod chunked_cache;
 #[cfg(any(feature = "differential", feature = "scan"))]

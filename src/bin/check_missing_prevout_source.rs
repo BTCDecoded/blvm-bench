@@ -22,9 +22,7 @@ fn main() -> Result<()> {
     let mut txid = [0u8; 32];
     hex::decode_to_slice(txid_hex, &mut txid).context("Invalid txid hex")?;
 
-    let chunks_dir = std::env::var("BLOCK_CACHE_DIR")
-        .unwrap_or_else(|_| "/run/media/acolyte/Extra/blockchain".to_string());
-    let chunks_dir = PathBuf::from(chunks_dir);
+    let chunks_dir = blvm_bench::require_block_cache_dir()?;
 
     let start_height: u64 = std::env::var("START_HEIGHT")
         .unwrap_or_else(|_| "0".to_string())

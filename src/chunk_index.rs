@@ -416,7 +416,7 @@ pub fn build_block_index(chunks_dir: &Path) -> Result<(BlockIndex, HashMap<[u8; 
             eprintln!("       {}: {}", i, hex::encode(&prev_hash[..8]));
         }
         eprintln!("   🔄 Chaining failed - blocks appear to be out of order in chunks");
-        eprintln!("   💡 This is expected for Start9 encrypted files where blocks are stored out of order");
+        eprintln!("   💡 This is expected for XOR-packaged block files where blocks are stored out of order");
         eprintln!("   💡 The index will be built using block hashes from RPC when available");
         eprintln!("   ⚠️  For now, returning partial index");
         eprintln!("   💡 To build full index, use build_block_index_via_rpc from async context");

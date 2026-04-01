@@ -51,6 +51,7 @@ fn spam_confidence(detected_types: &[SpamType]) -> SpamConfidence {
     }
 }
 use blvm_consensus::block::calculate_tx_id;
+use blvm_consensus::constants::{SEGWIT_ACTIVATION_MAINNET, TAPROOT_ACTIVATION_MAINNET};
 use blvm_consensus::transaction::is_coinbase;
 use blvm_consensus::types::{Block, OutPoint, Transaction};
 use rayon::prelude::*;
@@ -64,9 +65,9 @@ const MAX_OP_RETURN_SIZE: usize = 83;
 const MAX_WITNESS_ELEMENT_SIZE: usize = 256;
 const TAPROOT_CONTROL_MAX_SIZE: usize = 257;
 
-/// Era boundaries for breakdown stats
-pub const SEGWIT_START_HEIGHT: u64 = 481_824;
-pub const TAPROOT_START_HEIGHT: u64 = 709_632;
+/// Era boundaries for breakdown stats (mainnet consensus activation heights).
+pub const SEGWIT_START_HEIGHT: u64 = SEGWIT_ACTIVATION_MAINNET;
+pub const TAPROOT_START_HEIGHT: u64 = TAPROOT_ACTIVATION_MAINNET;
 /// First block with Ordinals inscription (Dec 2022). Used for post-inscriptions era stats.
 pub const INSCRIPTIONS_START_HEIGHT: u64 = 767_430;
 

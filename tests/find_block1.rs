@@ -7,8 +7,10 @@ use std::collections::HashMap;
 use std::path::Path;
 
 #[test]
+#[ignore = "local chunk cache: set BLOCK_CACHE_DIR and run with --ignored"]
 fn test_find_block1_in_chunks() -> Result<()> {
-    let chunks_dir = Path::new("/run/media/acolyte/Extra/blockchain");
+    let root = std::env::var("BLOCK_CACHE_DIR").expect("BLOCK_CACHE_DIR");
+    let chunks_dir = Path::new(&root);
 
     // Block 1 hash from Core (big-endian)
     let block1_hash_be =

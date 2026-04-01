@@ -1,6 +1,6 @@
 //! Blockchain Scanner
 //!
-//! Scans blockchain blocks from the chunked cache (Start9 format) to measure:
+//! Scans blockchain blocks from the chunked cache (XOR-packaged / reordered-blk format) to measure:
 //! - Output/witness size rule impact (default: BIP-110 limits)
 //! - Transaction type breakdown (monetary vs Ordinals vs presigned money)
 //!
@@ -8,11 +8,12 @@
 //!   BLOCK_CACHE_DIR=/path/to/blockchain cargo run --bin scan_chain --features scan
 //!   BLOCK_CACHE_DIR=/path cargo run --bin scan_chain --features scan -- --start 800000 --end 850000
 //!
-//! Default: /run/media/acolyte/Extra/blockchain
+//! Requires `BLOCK_CACHE_DIR` (or a populated `~/.cache/blvm-bench/chunks` fallback via `get_chunks_dir`).
 
 use anyhow::{Context, Result};
 use blvm_bench::chain_scan::{
     analyze_block, analyze_block_with_outpoint_index, merge_block_into_results, ChainScanResults,
+    INSCRIPTIONS_START_HEIGHT, SEGWIT_START_HEIGHT, TAPROOT_START_HEIGHT,
 };
 use blvm_consensus::types::OutPoint;
 use rustc_hash::FxHashMap;
@@ -93,7 +94,9 @@ fn main() -> Result<()> {
 
     let chunks_dir = get_chunks_dir()
         .filter(|p| p.exists())
-        .ok_or_else(|| anyhow::anyhow!("Chunks directory not found. Set BLOCK_CACHE_DIR or use /run/media/acolyte/Extra/blockchain"))?;
+        .ok_or_else(|| anyhow::anyhow!(
+            "Chunks directory not found. Set BLOCK_CACHE_DIR to your chunk cache root (see blvm-bench/.env.example)."
+        ))?;
 
     if chunks_dir.join("chunks.meta").exists() {
         if let Ok(Some(meta)) = load_chunk_metadata(&chunks_dir) {
@@ -286,8 +289,8 @@ fn main() -> Result<()> {
             0.0
         };
         eprintln!(
-            "  Post-inscriptions (≥767430): {:.2}% txs blocked, {:.2}% weight blocked",
-            pct_tx, pct_wt
+            "  Post-inscriptions (≥{}): {:.2}% txs blocked, {:.2}% weight blocked",
+            INSCRIPTIONS_START_HEIGHT, pct_tx, pct_wt
         );
     }
     if results.era_pre_segwit.blocks > 0
@@ -298,10 +301,30 @@ fn main() -> Result<()> {
         eprintln!();
         eprintln!("Era breakdown:");
         for (name, era) in [
-            ("Pre-SegWit (<481824)", &results.era_pre_segwit),
-            ("SegWit (481824-709631)", &results.era_segwit),
-            ("Taproot (709632-767429)", &results.era_taproot),
-            ("Inscriptions (≥767430)", &results.era_inscriptions),
+            (
+                format!("Pre-SegWit (<{SEGWIT_START_HEIGHT})"),
+                &results.era_pre_segwit,
+            ),
+            (
+                format!(
+                    "SegWit ({}-{})",
+                    SEGWIT_START_HEIGHT,
+                    TAPROOT_START_HEIGHT - 1
+                ),
+                &results.era_segwit,
+            ),
+            (
+                format!(
+                    "Taproot ({}-{})",
+                    TAPROOT_START_HEIGHT,
+                    INSCRIPTIONS_START_HEIGHT - 1
+                ),
+                &results.era_taproot,
+            ),
+            (
+                format!("Inscriptions (≥{INSCRIPTIONS_START_HEIGHT})"),
+                &results.era_inscriptions,
+            ),
         ] {
             if era.blocks > 0 {
                 let pct_tx = if era.total_txs > 0 {

@@ -8,8 +8,7 @@ use std::io::{BufReader, Read};
 use std::path::Path;
 
 fn main() -> Result<()> {
-    let chunks_dir = std::env::var("BLOCK_CACHE_DIR")
-        .unwrap_or_else(|_| "/run/media/acolyte/Extra/blockchain".to_string());
+    let chunks_dir = blvm_bench::require_block_cache_dir()?.to_string_lossy().into_owned();
     let chunks_dir = std::path::PathBuf::from(chunks_dir);
 
     let data_dir = chunks_dir.join("sort_merge_data");
@@ -52,7 +51,7 @@ fn main() -> Result<()> {
     // Find last output by reading backwards
     let mut last_output: Option<OutputRef> = None;
     let mut output_buf = vec![0u8; 256 * 1024];
-    let mut output_leftover = Vec::new();
+    let mut output_leftover: Vec<u8> = Vec::new();
 
     // Read all outputs to find the last one (simplified - just read last few)
     // For now, let's just check if inputs are greater than any output

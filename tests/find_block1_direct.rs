@@ -8,12 +8,12 @@ use blvm_bench::block_file_reader::{BlockFileReader, Network as BlockFileNetwork
 use sha2::{Digest, Sha256};
 
 #[test]
+#[ignore = "local Bitcoin Core data: set BITCOIN_DATA_DIR and run with --ignored"]
 #[cfg(feature = "differential")]
 fn find_block1_direct() -> Result<()> {
-    // Force reading from files by clearing BLOCK_CACHE_DIR env var
     std::env::remove_var("BLOCK_CACHE_DIR");
 
-    let data_dir = std::path::PathBuf::from("/home/acolyte/mnt/bitcoin-start9");
+    let data_dir = std::path::PathBuf::from(std::env::var("BITCOIN_DATA_DIR").expect("BITCOIN_DATA_DIR"));
     let reader = BlockFileReader::new(data_dir, BlockFileNetwork::Mainnet)?;
 
     let genesis_hash_be =

@@ -81,7 +81,7 @@ fn main() -> Result<()> {
                 shell::run_all()?;
             } else if let Some(suite) = suite {
                 println!("Running suite: {}", suite);
-                // TODO: Implement suite running
+                shell::run_benchmark(&suite)?;
             } else if let Some(script) = script {
                 shell::run_benchmark(&script)?;
             } else {

@@ -79,6 +79,11 @@ impl NodeBuilder {
     }
 
     /// Find existing node installation
+    /// Historical name used by differential integration tests.
+    pub fn find_existing_core(&self) -> Result<NodeBinaries> {
+        self.find_existing()
+    }
+
     pub fn find_existing(&self) -> Result<NodeBinaries> {
         // 1. Check cache first (fast path for self-hosted runner)
         if let Some(ref cache_dir) = self.cache_dir {
@@ -213,7 +218,7 @@ impl NodeBuilder {
     /// This will find existing Core or build it if needed
     pub async fn ensure_core_built(&self, _version: Option<&str>) -> Result<NodeBinaries> {
         // Try to find existing first
-        match self.find_existing_core() {
+        match self.find_existing() {
             Ok(binaries) => {
                 binaries.verify()?;
                 return Ok(binaries);
@@ -248,7 +253,7 @@ mod tests {
         // Skip in CI unless Core is available
         if std::env::var("CORE_PATH").is_ok() {
             let builder = NodeBuilder::new();
-            if let Ok(binaries) = builder.find_existing_core() {
+            if let Ok(binaries) = builder.find_existing() {
                 // Should verify successfully if Core is properly installed
                 let _ = binaries.verify();
             }

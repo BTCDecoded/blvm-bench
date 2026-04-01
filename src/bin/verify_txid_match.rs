@@ -21,9 +21,7 @@ fn main() -> Result<()> {
     let tx_idx: usize = args[2].parse()?;
     let input_idx: usize = args[3].parse()?;
 
-    let chunks_dir = std::env::var("BLOCK_CACHE_DIR")
-        .unwrap_or_else(|_| "/run/media/acolyte/Extra/blockchain".to_string());
-    let chunks_dir = PathBuf::from(chunks_dir);
+    let chunks_dir = blvm_bench::require_block_cache_dir()?;
 
     println!("Loading block {}...", block_height);
 
@@ -84,7 +82,7 @@ fn main() -> Result<()> {
                 let calculated_txid = calculate_tx_id(check_tx);
                 if calculated_txid == prevout_hash {
                     // Found it! Check if it has the right output index
-                    if prevout_idx < check_tx.outputs.len() as u64 {
+                    if (prevout_idx as usize) < check_tx.outputs.len() {
                         found_tx = Some((search_height, tx_i, check_tx.clone()));
                         break;
                     }
@@ -106,7 +104,7 @@ fn main() -> Result<()> {
                     let calculated_txid = calculate_tx_id(check_tx);
                     if calculated_txid == prevout_hash {
                         // Found it! Check if it has the right output index
-                        if prevout_idx < check_tx.outputs.len() as u64 {
+                        if (prevout_idx as usize) < check_tx.outputs.len() {
                             found_tx = Some((search_height, tx_i, check_tx.clone()));
                             break;
                         }
@@ -161,7 +159,7 @@ fn main() -> Result<()> {
             println!("   The merge-join fails because these don't match.");
         }
 
-        if prevout_idx < found_transaction.outputs.len() as u64 {
+        if (prevout_idx as usize) < found_transaction.outputs.len() {
             let output = &found_transaction.outputs[prevout_idx as usize];
             println!("\nOutput details:");
             println!("  Value: {} sat", output.value);

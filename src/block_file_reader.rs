@@ -86,16 +86,44 @@ const TEMP_FILE_INTEGRITY_CHECK_INTERVAL: usize = 10000;
 /// Tuned: 125000 blocks per chunk (matches chunking script)
 const INCREMENTAL_CHUNK_SIZE: usize = 125000;
 
-/// Secondary drive path for incremental chunking
-/// FALLBACK: If secondary drive is not mounted, use local cache directory
-const SECONDARY_CHUNK_DIR: &str = "/run/media/acolyte/Extra/blockchain";
+/// Default under-repo cache when `BLOCK_CACHE_DIR` is unset
 const FALLBACK_CHUNK_DIR: &str = ".cache/blvm-bench/chunks";
+
+fn incremental_chunk_destination() -> std::path::PathBuf {
+    std::env::var("BLOCK_CACHE_DIR")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from(FALLBACK_CHUNK_DIR))
+}
 
 /// Maximum block size for validation (Bitcoin max is ~4MB, but allow up to 10MB for safety)
 const MAX_VALID_BLOCK_SIZE: usize = 10 * 1024 * 1024;
 
 /// Minimum block size (magic + size + header = 88 bytes minimum)
 const MIN_VALID_BLOCK_SIZE: usize = 88;
+
+fn blvm_bench_cache_root() -> Option<PathBuf> {
+    dirs::cache_dir()
+        .or_else(|| dirs::home_dir().map(|h| h.join(".cache")))
+        .map(|c| c.join("blvm-bench"))
+}
+
+fn ordered_blocks_cache_path_for_write() -> Option<PathBuf> {
+    blvm_bench_cache_root()
+        .map(|d| d.join(crate::block_cache_env::remote_core_ordered_blocks_cache_basename()))
+}
+
+fn ordered_blocks_cache_path_for_read() -> Option<PathBuf> {
+    let root = blvm_bench_cache_root()?;
+    for name in crate::block_cache_env::remote_core_ordered_blocks_cache_basenames() {
+        let p = root.join(name);
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    None
+}
 
 /// Create a chunk from temp file and move to secondary drive
 /// Temp file contains exactly chunk_size blocks
@@ -107,8 +135,8 @@ impl BlockFileReader {
     ) -> Result<()> {
         use std::io::{Read, Write};
         
-        let chunks_dir = std::path::Path::new(SECONDARY_CHUNK_DIR);
-        std::fs::create_dir_all(chunks_dir)?;
+        let chunks_dir = incremental_chunk_destination();
+        std::fs::create_dir_all(&chunks_dir)?;
         
         let local_chunk = temp_file.parent()
             .unwrap_or_else(|| std::path::Path::new("."))
@@ -326,10 +354,12 @@ impl BlockFileReader {
             .map(|s| s.contains(".cache") || s.contains("temp"))
             .unwrap_or(false);
         
-        let is_final_destination = local_chunk.parent()
-            .and_then(|p| p.to_str())
-            .map(|s| s.contains("/run/media/acolyte/Extra/blockchain"))
-            .unwrap_or(false);
+        let is_final_destination = local_chunk.parent().map_or(false, |parent| {
+            std::env::var_os("BLOCK_CACHE_DIR")
+                .map(std::path::PathBuf::from)
+                .filter(|root| !root.as_os_str().is_empty())
+                .is_some_and(|root| parent.starts_with(&root))
+        });
         
         if is_final_destination {
             // Trying to delete from final destination - BLOCKED
@@ -419,7 +449,7 @@ impl BlockFileReader {
         block_files.sort(); // Process in order (blk00000.dat, blk00001.dat, etc.)
         
         // Set up local cache directory for incremental copying (if data_dir is remote/SSHFS)
-        let local_cache_dir = if data_dir.to_string_lossy().contains("bitcoin-start9") {
+        let local_cache_dir = if crate::block_cache_env::remote_core_xor_blockfiles_hint(data_dir.as_path()) {
             // This is a remote mount - use local cache
             let cache = dirs::cache_dir()
                 .or_else(|| dirs::home_dir().map(|h| h.join(".cache")))
@@ -504,20 +534,23 @@ impl BlockFileReader {
         })
     }
     
-    /// Auto-detect Bitcoin data directory
-    /// Defaults to standard paths (~/.bitcoin, /var/lib/bitcoind), with Start9 as fallback
+    /// Auto-detect Bitcoin data directory from `BITCOIN_DATA_DIR*` env, then common local paths.
     pub fn auto_detect(network: Network) -> Result<Self> {
-        // Check common locations - standard Bitcoin data paths
-        let possible_dirs = vec![
-            dirs::home_dir().map(|h| h.join(".bitcoin")), // Default data dir
+        let mut possible_dirs: Vec<PathBuf> = crate::block_cache_env::bitcoin_data_dir_candidates();
+        for extra in [
+            dirs::home_dir().map(|h| h.join(".bitcoin")),
             Some(PathBuf::from("/root/.bitcoin")),
             Some(PathBuf::from("/var/lib/bitcoind")),
-            // Start9 paths (fallback for local testing only)
-            dirs::home_dir().map(|h| h.join("mnt/bitcoin-start9")),
-            Some(PathBuf::from("/mnt/bitcoin-start9")),
-        ];
-        
-        for dir in possible_dirs.into_iter().flatten() {
+        ]
+        .into_iter()
+        .flatten()
+        {
+            if !possible_dirs.iter().any(|e| e == &extra) {
+                possible_dirs.push(extra);
+            }
+        }
+
+        for dir in possible_dirs {
             let blocks_dir = dir.join("blocks");
             if blocks_dir.exists() {
                 // Try to create reader - may fail due to permissions, but worth trying
@@ -539,12 +572,8 @@ impl BlockFileReader {
     /// 
     /// Note: This is slower than RPC for random access, but faster for sequential access
     /// because we can read blocks directly from disk without network overhead.
-    pub fn read_block_by_height(&self, height: u64) -> Result<Vec<u8>> {
-        // For now, we'll need to scan through blocks sequentially
-        // In the future, we could use the block index (blocks/index/*)
-        // or build our own index
-        
-        // TODO: Implement efficient height-to-block mapping
+    pub fn read_block_by_height(&self, _height: u64) -> Result<Vec<u8>> {
+        // Future: map height via Bitcoin Core LevelDB `blocks/index/*` or an internal height index.
         anyhow::bail!("Direct height lookup not yet implemented. Use read_block_by_hash or sequential reading.")
     }
     
@@ -555,18 +584,18 @@ impl BlockFileReader {
     /// 2. No RPC serialization overhead
     /// 3. Direct disk I/O (can be cached by OS)
     /// 
-    /// For Start9 encrypted files, blocks may be stored out of order.
+    /// For XOR-packaged `blk*.dat` trees, blocks may be stored out of order.
     /// This method reads all blocks and chains them by previous block hash.
     pub fn read_blocks_sequential(
         &self,
         start_height: Option<u64>,
         max_blocks: Option<usize>,
     ) -> Result<BlockIterator> {
-        // Check if this is a Start9 encrypted file (blocks stored out of order)
-        let is_start9 = self.data_dir.to_string_lossy().contains("bitcoin-start9");
-        
-        if is_start9 {
-            // For Start9, read all blocks and chain them by previous block hash
+        let xor_packaged =
+            crate::block_cache_env::remote_core_xor_blockfiles_hint(&self.data_dir);
+
+        if xor_packaged {
+            // Read all blocks and chain them by previous block hash
             BlockIterator::new_ordered(self, start_height, max_blocks)
         } else {
             // Standard format - blocks are in order
@@ -610,7 +639,7 @@ pub struct BlockIterator {
     start_height: Option<u64>,
     max_blocks: Option<usize>,
     blocks_read: usize,
-    // For Start9: ordered blocks (read all, then chain by prev hash)
+    // XOR-packaged trees: ordered blocks (read all, then chain by prev hash)
     ordered_blocks: Option<Vec<Vec<u8>>>,
     ordered_index: usize,
     // For chunked cache: streaming iterator (avoids loading all blocks into memory)
@@ -764,7 +793,7 @@ impl BlockIterator {
     }
     
     /// Create iterator that reads all blocks and orders them by previous block hash
-    /// This is needed for Start9 encrypted files where blocks are stored out of order
+    /// This is needed for XOR-packaged block files where blocks are stored out of order
     fn new_ordered(
         reader: &BlockFileReader,
         start_height: Option<u64>,
@@ -857,10 +886,8 @@ impl BlockIterator {
         use std::path::PathBuf;
         
         // Define cache file path (used for both old format and temp file location)
-        let cache_file = dirs::cache_dir()
-            .or_else(|| dirs::home_dir().map(|h| h.join(".cache")))
-            .map(|cache| cache.join("blvm-bench").join("start9_ordered_blocks.bin"));
-        
+        let cache_file = ordered_blocks_cache_path_for_read();
+
         // Check for chunked cache first (new format)
         // CRITICAL FIX: Use streaming iterator instead of loading all blocks into memory
         let chunks_dir = crate::chunked_cache::get_chunks_dir();
@@ -967,7 +994,7 @@ impl BlockIterator {
             println!("   (Blocks are stored out of order, so we need to read all to find the chain)");
             println!("   This is a one-time operation - results will be cached for future runs");
             
-            // For Start9, blocks are out of order, so we need to read ALL blocks
+            // XOR-packaged files: blocks are out of order, so we need to read ALL blocks
             // to find the ones we need. This is a one-time cost per file.
             // To avoid OOM, write blocks to temp file as we read them
             // Use cache directory if available (has more space), otherwise use temp dir
@@ -992,13 +1019,13 @@ impl BlockIterator {
             
             // CRITICAL FIX: Check for existing chunks and calculate starting point
             // This prevents overwriting existing chunks when restarting collection
-            let chunks_dir = std::path::Path::new(SECONDARY_CHUNK_DIR);
+            let chunks_dir = incremental_chunk_destination();
             let mut existing_chunks = Vec::new();
             let mut starting_block_count = 0;
             
             if chunks_dir.exists() {
                 // Find all existing chunks
-                for entry in std::fs::read_dir(chunks_dir)? {
+                for entry in std::fs::read_dir(&chunks_dir)? {
                     let entry = entry?;
                     let path = entry.path();
                     if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
@@ -1059,7 +1086,7 @@ impl BlockIterator {
                 }
             }
             
-            // CRITICAL FIX: For Start9 files, blocks are stored OUT OF ORDER
+            // CRITICAL FIX: XOR-packaged files store blocks OUT OF ORDER
             // We can't skip blocks during collection because we don't know their heights
             // until we parse and order them. So we collect ALL blocks, then chunk them.
             // If we have existing chunks, we still need to collect all blocks (they might
@@ -1290,7 +1317,8 @@ impl BlockIterator {
                 let mut blocks = Vec::with_capacity(2000);
                 let magic = network.magic_bytes();
                 // OPTIMIZATION: Check string once, cache result
-                let is_xor_encrypted = file_path.to_string_lossy().contains("bitcoin-start9");
+                let is_xor_encrypted =
+                    crate::block_cache_env::remote_core_xor_blockfiles_hint(file_path);
                 
                 // Pre-allocate search buffer for pattern matching (same as original)
                 // OPTIMIZATION: Reuse buffer instead of allocating each time
@@ -1317,7 +1345,7 @@ impl BlockIterator {
                         last_progress_time = Instant::now();
                     }
                     // CRITICAL FIX: Track file position BEFORE reading magic
-                    // This is needed for correct XOR key rotation in Start9 files
+                    // Needed for correct XOR key rotation in these files
                     let magic_start_pos = file_reader.seek(SeekFrom::Current(0)).unwrap_or(0);
                     
                     let mut magic_buf = [0u8; 4];
@@ -1327,7 +1355,7 @@ impl BlockIterator {
                         Err(_) => break, // Skip on error
                     }
                     
-                    // Check if file is XOR encrypted (Start9 format)
+                    // Check if file is XOR encrypted (packaged blk*.dat)
                     let mut encrypted_magic_bytes = magic_buf;
                     let is_encrypted = if is_xor_encrypted {
                         magic_buf == ENCRYPTED_MAGIC
@@ -1545,7 +1573,7 @@ impl BlockIterator {
                         }
                         block_data = full_block[8..].to_vec();
                         
-                        // For Start9, seek past any padding to find next block
+                        // Seek past any padding to find next block
                         let current_pos = file_reader.seek(SeekFrom::Current(0)).unwrap_or(0);
                         let mut test_magic_buf = [0u8; 4];
                         let mut need_search = true;
@@ -1839,7 +1867,7 @@ impl BlockIterator {
                                 // OPTIMIZATION: For collection-only mode, skip strict version validation
                                 // Version validation will happen during chunking when blocks are validated
                                 // This allows collection to proceed even if some blocks have questionable versions
-                                // (Start9 encrypted blocks may have edge cases that are valid after full processing)
+                                // (XOR-packaged blocks may have edge cases that are valid after full processing)
                                 // Only do basic sanity check - version should be in reasonable range
                                 if block_data.len() >= 4 {
                                     let version = u32::from_le_bytes([
@@ -1862,7 +1890,7 @@ impl BlockIterator {
                                 }
                                 
                                 // CRITICAL FIX: Don't skip blocks during collection!
-                                // Blocks are stored OUT OF ORDER in Start9 files, so we can't know
+                                // Blocks are stored OUT OF ORDER in XOR-packaged files, so we can't know
                                 // which block we're reading until we parse it. We need to collect
                                 // ALL blocks, then order them later. The chunking logic will handle
                                 // skipping blocks that are already in chunks.
@@ -2390,10 +2418,8 @@ impl BlockIterator {
             }
             
             // Define cache file path (for old format, if needed)
-            let cache_file = dirs::cache_dir()
-                .or_else(|| dirs::home_dir().map(|h| h.join(".cache")))
-                .map(|cache| cache.join("blvm-bench").join("start9_ordered_blocks.bin"));
-            
+            let cache_file = ordered_blocks_cache_path_for_write();
+
             // Check if chunked cache already exists - if so, skip building old format
             // CRITICAL: Also skip if temp file doesn't exist (was truncated after chunking)
             let chunks_dir = crate::chunked_cache::get_chunks_dir();
@@ -2617,9 +2643,7 @@ impl BlockIterator {
         // Get temp file path if needed
         let (temp_writer, temp_file_path) = if needs_temp_writer {
             use std::io::Write;
-            let cache_file = dirs::cache_dir()
-                .or_else(|| dirs::home_dir().map(|h| h.join(".cache")))
-                .map(|cache| cache.join("blvm-bench").join("start9_ordered_blocks.bin"));
+            let cache_file = ordered_blocks_cache_path_for_write();
             let temp_file = if let Some(ref cache_path) = cache_file {
                 if let Some(parent) = cache_path.parent() {
                     let _ = std::fs::create_dir_all(parent);
@@ -2715,7 +2739,7 @@ impl BlockIterator {
         let mut magic_buf = [0u8; 4];
         
         // Try to read magic bytes
-        // Start9 uses XOR encryption with ALTERNATING keys:
+        // XOR-packaged format uses ALTERNATING keys:
         // - KEY1: 0x8422e9ad (for bytes 0-3, 8-11, 16-19, ...)
         // - KEY2: 0xb78fff14 (for bytes 4-7, 12-15, 20-23, ...)
         // Keys alternate every 4 bytes starting from file offset 0
@@ -2726,7 +2750,7 @@ impl BlockIterator {
         let mut encrypted_magic_bytes = [0u8; 4]; // Save original encrypted magic for reconstruction
         
         // CRITICAL FIX: Track file position BEFORE reading magic
-        // This is needed for correct XOR key rotation in Start9 files
+        // Needed for correct XOR key rotation in XOR-packaged files
         // Use a loop to handle block boundary detection and retries
         let mut magic_start_pos = file.stream_position()?;
         let mut retry_count = 0;
@@ -2739,7 +2763,7 @@ impl BlockIterator {
             
             match file.read_exact(&mut magic_buf) {
                 Ok(_) => {
-                    // Check if file is XOR encrypted (Start9 format)
+                    // Check if file is XOR encrypted (packaged blk*.dat)
                     // Encrypted magic is 0x7d9c5d74
                     is_xor_encrypted = magic_buf == ENCRYPTED_MAGIC;
                     
@@ -2923,7 +2947,7 @@ impl BlockIterator {
             }
         }
         
-        // For Start9 encrypted files, decrypt the size field and use it as a HINT
+        // For XOR-packaged files, decrypt the size field and use it as a HINT
         // Then verify the next block's magic is at the expected position
         let block_data = if is_xor_encrypted {
             // CRITICAL FIX: Decrypt size field using correct key based on FILE OFFSET
@@ -3011,7 +3035,7 @@ impl BlockIterator {
                     }
                 }
                 
-                // For Start9, we need to seek past any padding to the next block
+                // Seek past any padding to the next block
                 // OPTIMIZATION: Use much larger search buffer (1MB) for faster searching
                 // First, try reading magic bytes at current position (most blocks are sequential)
                 let current_pos = file.stream_position()?;
@@ -3224,7 +3248,7 @@ impl BlockIterator {
             block_data
         };
         
-        // In Start9 format, the ENTIRE file is encrypted with ALTERNATING keys
+        // XOR-packaged format: the ENTIRE file is encrypted with ALTERNATING keys
         // Pattern: KEY1 (bytes 0-3), KEY2 (bytes 4-7), KEY1 (bytes 8-11), KEY2 (bytes 12-15), ...
         // Keys alternate every 4 bytes starting from file offset 0
         // CRITICAL: Key rotation is based on FILE OFFSET, not block offset!
@@ -3642,7 +3666,7 @@ impl Iterator for BlockIterator {
             }
         }
         
-        // If we have ordered blocks (Start9), use those
+        // If we have ordered blocks (XOR-packaged cache path), use those
         if let Some(ref ordered) = self.ordered_blocks {
             if self.ordered_index < ordered.len() {
                 let block_data = ordered[self.ordered_index].clone();
@@ -3890,13 +3914,15 @@ impl SharedBlockCache {
         
         // If RPC failed or not available, try DirectFile as fallback
         // Try known mount points directly (bypass auto-detect which may fail due to permissions)
-        let possible_dirs = vec![
-            dirs::home_dir().map(|h| h.join("mnt/bitcoin-start9")),
-            Some(PathBuf::from("/mnt/bitcoin-start9")),
-            dirs::home_dir().map(|h| h.join(".bitcoin")),
-        ];
-        
-        for dir in possible_dirs.into_iter().flatten() {
+        let mut possible_dirs = crate::block_cache_env::bitcoin_data_dir_candidates();
+        if let Some(h) = dirs::home_dir() {
+            let pb = h.join(".bitcoin");
+            if !possible_dirs.iter().any(|e| e == &pb) {
+                possible_dirs.push(pb);
+            }
+        }
+
+        for dir in possible_dirs {
             if dir.join("blocks").exists() {
                 if let Ok(reader) = BlockFileReader::new(&dir, Network::Mainnet) {
                     // Use sequential reading to find the block at this height

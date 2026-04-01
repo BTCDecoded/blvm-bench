@@ -1,11 +1,13 @@
 //! Direct signature verification test
 //! Tests a specific signature with specific flags to identify the root cause
 
+use blvm_consensus::activation::ForkActivationTable;
 use blvm_consensus::types::Network;
+use blvm_consensus::BIP66_ACTIVATION_MAINNET;
 use secp256k1::ecdsa::Signature;
 
 fn main() {
-    // Signature from failing transaction (block 363726, tx 275, input 0)
+    // Signature from a historic mainnet repro (post–BIP66 activation, tx index 275, input 0)
     // First signature from script_sig: 004730440220392b46c67976c4db35e347bc4f8bff5b5237720c510ea54301f9a8b11fc0431902206e25990fd863590d24cfd5dbdb9b4033bd75e680ff80abacbc641745c8899bad01
     let sig_hex = "30440220392b46c67976c4db35e347bc4f8bff5b5237720c510ea54301f9a8b11fc0431902206e25990fd863590d24cfd5dbdb9b4033bd75e680ff80abacbc641745c8899bad01";
     let signature_bytes = hex::decode(sig_hex).unwrap();
@@ -20,11 +22,12 @@ fn main() {
     println!("  DER length: {} bytes", der_sig.len());
     println!("  Sighash type: 0x{:02x}", sighash_byte);
 
-    // Test BIP66 check
+    // Test BIP66 check (strict DER): mainnet height with BIP66 enforced (activation at BIP66_ACTIVATION_MAINNET)
     println!("\n🔍 Testing BIP66 check...");
-    let height = 363726u64;
+    let height = BIP66_ACTIVATION_MAINNET + 1;
     let network = Network::Mainnet;
-    let bip66_result = blvm_consensus::bip_validation::check_bip66(der_sig, height, network);
+    let activation = ForkActivationTable::from_network(network);
+    let bip66_result = blvm_consensus::bip_validation::check_bip66(der_sig, height, &activation);
     println!("  BIP66 check result: {:?}", bip66_result);
 
     // Test signature parsing

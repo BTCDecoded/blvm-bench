@@ -106,7 +106,7 @@ pub fn validate_blvm_block(block: &Block, height: u64, network: Network) -> blvm
         .iter()
         .map(|tx| (0..tx.inputs.len()).map(|_| vec![]).collect())
         .collect();
-    let utxo_set = UtxoSet::new();
+    let utxo_set = UtxoSet::default();
     let ctx = blvm_consensus::block::BlockValidationContext::for_network(network);
     connect_block(block, &witnesses, utxo_set, height, &ctx)
 }

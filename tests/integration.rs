@@ -109,15 +109,12 @@ mod helpers {
         use blvm_consensus::segwit::Witness;
         use blvm_consensus::UtxoSet;
 
-        let witnesses: Vec<Witness> = block.transactions.iter().map(|_| Vec::new()).collect();
-        let utxo_set = UtxoSet::new();
-        let network_time = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
+        let witnesses: Vec<Vec<Witness>> =
+            block.transactions.iter().map(|_| Vec::new()).collect();
+        let utxo_set = UtxoSet::default();
         let ctx = blvm_consensus::block::BlockValidationContext::from_connect_block_ibd_args(
             None::<&[blvm_consensus::types::BlockHeader]>,
-            network_time,
+            block.header.timestamp,
             network,
             None,
             None,
@@ -754,7 +751,7 @@ async fn test_historical_blocks_differential() -> Result<()> {
         return Ok(());
     }
 
-    let mut utxo_set = UtxoSet::new();
+    let mut utxo_set = UtxoSet::default();
     let mut divergences = Vec::new();
     let mut tested = 0;
     let mut matched = 0;
@@ -924,9 +921,21 @@ async fn test_historical_blocks_differential() -> Result<()> {
         }
     }
 
-    // For now, don't fail on divergences - just report them
-    // This allows us to identify issues without breaking CI
-    // TODO: Make this configurable (fail on divergence vs just report)
+    // Default: report divergences but return Ok (exploratory runs / CI that only logs).
+    // Set DIFF_FAIL_ON_DIVERGENCE=1|true|yes to fail this test when any divergence occurs.
+    let fail_on_divergence = matches!(
+        std::env::var("DIFF_FAIL_ON_DIVERGENCE")
+            .unwrap_or_default()
+            .to_ascii_lowercase()
+            .as_str(),
+        "1" | "true" | "yes"
+    );
+    if fail_on_divergence && !divergences.is_empty() {
+        anyhow::bail!(
+            "{} block-level divergence(s); unset DIFF_FAIL_ON_DIVERGENCE or set to 0 to only report",
+            divergences.len()
+        );
+    }
 
     Ok(())
 }
@@ -934,25 +943,18 @@ async fn test_historical_blocks_differential() -> Result<()> {
 /// Fallback to parallel differential testing with chunks when RPC is unavailable
 #[cfg(feature = "differential")]
 async fn test_historical_blocks_parallel_fallback() -> Result<()> {
-    use blvm_bench::parallel_differential::{
-        run_differential_with_resume, run_parallel_differential, ParallelConfig, ResumableConfig,
-    };
+    use blvm_bench::parallel_differential::{run_parallel_differential, ParallelConfig};
     use std::sync::Arc;
 
-    // Check if RESUMABLE mode is enabled (recommended for large tests)
     let use_resumable = std::env::var("RESUMABLE")
         .ok()
         .and_then(|s| s.parse::<bool>().ok())
-        .unwrap_or(true); // Default to resumable for safety
+        .unwrap_or(false);
 
-    println!(
-        "🔄 Using {} differential testing with chunks",
-        if use_resumable {
-            "RESUMABLE"
-        } else {
-            "parallel"
-        }
-    );
+    if use_resumable {
+        println!("🔄 RESUMABLE=1 set but resumable differential is not implemented; using parallel differential");
+    }
+    println!("🔄 Using parallel differential testing with chunks");
 
     // Get configuration from environment
     let start_height: u64 = std::env::var("HISTORICAL_BLOCK_START")
@@ -1023,8 +1025,8 @@ async fn test_historical_blocks_parallel_fallback() -> Result<()> {
         blvm_bench::parallel_differential::BlockDataSource::Rpc(_) => {
             println!("✅ Using RPC (slower but works everywhere)");
         }
-        blvm_bench::parallel_differential::BlockDataSource::Start9Rpc(_) => {
-            println!("✅ Using Start9 RPC (for encrypted files)");
+        blvm_bench::parallel_differential::BlockDataSource::RemoteCoreRpc(_) => {
+            println!("✅ Using remote-Core RPC (for encrypted / XOR-packaged files)");
         }
     }
 
@@ -1033,34 +1035,18 @@ async fn test_historical_blocks_parallel_fallback() -> Result<()> {
     // Run differential test (resumable or parallel)
     println!("🚀 Starting differential validation...");
 
-    let results = if use_resumable {
-        let config = ResumableConfig {
-            parallel_config: ParallelConfig {
-                num_workers,
-                chunk_size,
-                use_checkpoints: false, // Resumable mode handles checkpoints differently
-            },
-            checkpoint_interval,
-            progress_save_interval: std::env::var("PROGRESS_SAVE_INTERVAL")
-                .ok()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(10000), // Save progress every 10k blocks (default, was 1k)
-            checkpoint_dir: cache_dir,
-        };
-
-        run_differential_with_resume(start_height, end_height, config, block_source).await?
-    } else {
-        let config = ParallelConfig {
-            num_workers,
-            chunk_size,
-            use_checkpoints: std::env::var("USE_CHECKPOINTS")
-                .ok()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(false),
-        };
-
-        run_parallel_differential(start_height, end_height, config, block_source).await?
+    let _ = checkpoint_interval; // reserved for future resumable mode
+    let config = ParallelConfig {
+        num_workers,
+        chunk_size,
+        use_checkpoints: std::env::var("USE_CHECKPOINTS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(false),
     };
+
+    let results =
+        run_parallel_differential(start_height, end_height, config, block_source).await?;
 
     // Check for divergences
     let total_tested: usize = results.iter().map(|r| r.tested).sum();

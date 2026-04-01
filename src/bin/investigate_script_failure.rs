@@ -3,10 +3,11 @@
 
 use anyhow::{Context, Result};
 use blvm_bench::chunked_cache::ChunkedBlockIterator;
-use blvm_bench::start9_rpc_client::Start9RpcClient;
+use blvm_bench::remote_core_rpc::RemoteCoreRpcClient;
 use blvm_consensus::block::calculate_tx_id;
 use blvm_consensus::script::{verify_script_with_context_full, SigVersion};
 use blvm_consensus::serialization::block::deserialize_block_with_witnesses;
+use blvm_consensus::witness::is_witness_empty;
 use blvm_consensus::serialization::transaction::serialize_transaction;
 use blvm_consensus::types::Network;
 use std::path::PathBuf;
@@ -24,9 +25,7 @@ async fn main() -> Result<()> {
     let tx_idx: usize = args[2].parse()?;
     let input_idx: usize = args[3].parse()?;
 
-    let chunks_dir = std::env::var("BLOCK_CACHE_DIR")
-        .unwrap_or_else(|_| "/run/media/acolyte/Extra/blockchain".to_string());
-    let chunks_dir = PathBuf::from(chunks_dir);
+    let chunks_dir = blvm_bench::require_block_cache_dir()?;
 
     println!("🔍 Investigating script verification failure:");
     println!("  Block: {}", block_height);
@@ -81,9 +80,7 @@ async fn main() -> Result<()> {
     use std::fs::File;
     use std::io::{BufReader, Read, Seek, SeekFrom};
 
-    let joined_file = std::env::var("SORT_MERGE_DIR")
-        .unwrap_or_else(|_| "/run/media/acolyte/Extra/blockchain/sort_merge_data".to_string());
-    let joined_file = PathBuf::from(joined_file).join("joined_sorted.bin");
+    let joined_file = blvm_bench::block_cache_env::sort_merge_data_dir()?.join("joined_sorted.bin");
 
     // Find the prevout in joined_sorted.bin using JoinedPrevout
     let file = File::open(&joined_file)?;
@@ -154,15 +151,18 @@ async fn main() -> Result<()> {
             }
         }
 
-        // Calculate script flags for this block
-        // Use the same script flags calculation as step6
-        use blvm_bench::sort_merge::verify;
-        let mut flags = verify::get_script_flags(block_height, Network::Mainnet);
+        let wits = tx_witnesses.map(|w| w.as_slice()).unwrap_or(&[]);
+        let has_witness = wits.iter().any(|wit| !is_witness_empty(wit));
+        let flags = blvm_consensus::block::calculate_script_flags_for_block_network(
+            tx,
+            has_witness,
+            block_height,
+            Network::Mainnet,
+        );
 
-        // Add witness flag if transaction has witness data
-        if tx_witnesses.is_some() {
-            flags |= 0x80; // SCRIPT_VERIFY_WITNESS
-        }
+        let prevout_values: Vec<i64> = prevouts.iter().map(|o| o.value).collect();
+        let prevout_script_pubkeys: Vec<&[u8]> =
+            prevouts.iter().map(|o| o.script_pubkey.as_slice()).collect();
 
         match verify_script_with_context_full(
             &input.script_sig,
@@ -171,11 +171,17 @@ async fn main() -> Result<()> {
             flags,
             tx,
             input_idx,
-            &prevouts,
+            &prevout_values,
+            &prevout_script_pubkeys,
             Some(block_height),
             None,
             Network::Mainnet,
             SigVersion::Base,
+            None,
+            None,
+            None,
+            None,
+            None,
         ) {
             Ok(true) => {
                 println!("  ✅ BLVM verification: PASSED");
@@ -194,7 +200,7 @@ async fn main() -> Result<()> {
         // Verify with Bitcoin Core
         println!("");
         println!("🔐 Verifying with Bitcoin Core...");
-        let rpc_client = Start9RpcClient::new();
+        let rpc_client = RemoteCoreRpcClient::new();
 
         // Get the block hash
         match rpc_client.get_block_hash(block_height).await {

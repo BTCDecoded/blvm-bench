@@ -2,19 +2,16 @@
 //! Usage: quick_check_failure <block> <tx_idx> <input_idx>
 
 use anyhow::{Context, Result};
-use blvm_consensus::constants::{
-    BIP147_ACTIVATION_MAINNET, BIP16_P2SH_ACTIVATION_MAINNET, BIP65_ACTIVATION_MAINNET,
-    BIP66_ACTIVATION_MAINNET,
-};
+use blvm_consensus::block::calculate_script_flags_for_block_network;
 use blvm_consensus::script::verify_script_with_context_full;
 use blvm_consensus::serialization::block::deserialize_block_with_witnesses;
 use blvm_consensus::transaction::is_coinbase;
 use blvm_consensus::types::{Network, TransactionOutput};
+use blvm_consensus::witness::is_witness_empty;
 use blvm_consensus::Witness;
 
 use blvm_bench::chunked_cache::ChunkedBlockIterator;
-use blvm_bench::sort_merge::merge_join::JoinedPrevout;
-use blvm_bench::sort_merge::verify::{get_script_flags, PrevoutReader};
+use blvm_bench::sort_merge::verify::PrevoutReader;
 
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
@@ -33,8 +30,8 @@ fn main() -> Result<()> {
     );
 
     // Load block
-    let chunks_dir = std::path::Path::new("/run/media/acolyte/Extra/blockchain");
-    let mut block_iter = ChunkedBlockIterator::new(chunks_dir, Some(block_height), Some(1))?
+    let chunks_dir = blvm_bench::require_block_cache_dir()?;
+    let mut block_iter = ChunkedBlockIterator::new(&chunks_dir, Some(block_height), Some(1))?
         .ok_or_else(|| anyhow::anyhow!("Failed to create block iterator"))?;
 
     let block_data = block_iter
@@ -95,17 +92,19 @@ fn main() -> Result<()> {
     let tx_witness = witnesses.get(tx_idx);
     let witness_stack: Option<&Witness> = tx_witness.and_then(|w| w.get(input_idx));
 
-    // Get flags
-    let flags = get_script_flags(block_height, Network::Mainnet);
-    let mut tx_flags = flags;
-    if witness_stack.is_some() && block_height >= 481824 {
-        tx_flags |= 0x800; // SCRIPT_VERIFY_WITNESS
-    }
+    let wits = witnesses.get(tx_idx).map(|w| w.as_slice()).unwrap_or(&[]);
+    let has_witness = wits.iter().any(|wit| !is_witness_empty(wit));
+    let tx_flags =
+        calculate_script_flags_for_block_network(tx, has_witness, block_height, Network::Mainnet);
 
     println!("Flags: 0x{:x}", tx_flags);
     println!("Script sig: {} bytes", input.script_sig.len());
     println!("Script pubkey: {} bytes", prevout.script_pubkey.len());
     println!("Witness: {:?}", witness_stack.map(|w| w.len()));
+
+    let prevout_values: Vec<i64> = all_prevouts.iter().map(|o| o.value).collect();
+    let prevout_script_pubkeys: Vec<&[u8]> =
+        all_prevouts.iter().map(|o| o.script_pubkey.as_slice()).collect();
 
     // Verify
     match verify_script_with_context_full(
@@ -115,11 +114,17 @@ fn main() -> Result<()> {
         tx_flags,
         tx,
         input_idx,
-        &all_prevouts,
+        &prevout_values,
+        &prevout_script_pubkeys,
         Some(block_height),
         None,
         Network::Mainnet,
         blvm_consensus::script::SigVersion::Base,
+        None,
+        None,
+        None,
+        None,
+        None,
     ) {
         Ok(true) => {
             println!("✅ PASSED - but test said it failed!");

@@ -9,9 +9,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 fn main() -> Result<()> {
-    let chunks_dir = std::env::var("BLOCK_CACHE_DIR")
-        .unwrap_or_else(|_| "/run/media/acolyte/Extra/blockchain".to_string());
-    let chunks_dir = PathBuf::from(chunks_dir);
+    let chunks_dir = blvm_bench::require_block_cache_dir()?;
 
     println!("🔧 Fixing missing blocks index...");
     println!("   Chunks directory: {}", chunks_dir.display());
