@@ -58,6 +58,9 @@ jobs:
           fetch-depth: 1
           token: ${{ secrets.REPO_ACCESS_TOKEN || secrets.GITHUB_TOKEN }}
 
+
+      - name: Strip [patch.crates-io] for crates.io-only CI
+        uses: BTCDecoded/rust-ci/strip-patch-crates-io@main
       - name: Setup Rust
         uses: actions-rs/toolchain@v1
         with:
@@ -393,6 +396,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+
+      - name: Strip [patch.crates-io] for crates.io-only CI
+        uses: BTCDecoded/rust-ci/strip-patch-crates-io@main
       - name: Generate benchmark matrix
         id: set-matrix
         run: |
@@ -544,6 +550,9 @@ jobs:
         with:
           fetch-depth: 1
 
+
+      - name: Strip [patch.crates-io] for crates.io-only CI
+        uses: BTCDecoded/rust-ci/strip-patch-crates-io@main
       - name: Setup Rust
         uses: actions-rs/toolchain@v1
         with:
@@ -794,6 +803,9 @@ jobs:
           fetch-depth: 1
           token: ${{ secrets.REPO_ACCESS_TOKEN || secrets.GITHUB_TOKEN }}
 
+
+      - name: Strip [patch.crates-io] for crates.io-only CI
+        uses: BTCDecoded/rust-ci/strip-patch-crates-io@main
       - name: Download all benchmark artifacts
         uses: actions/download-artifact@v4
         with:

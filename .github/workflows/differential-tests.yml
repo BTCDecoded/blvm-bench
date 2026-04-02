@@ -35,6 +35,9 @@ jobs:
           fetch-depth: 1
           token: ${{ secrets.REPO_ACCESS_TOKEN || secrets.GITHUB_TOKEN }}
 
+
+      - name: Strip [patch.crates-io] for crates.io-only CI
+        uses: BTCDecoded/rust-ci/strip-patch-crates-io@main
       - name: Setup Rust
         uses: actions-rs/toolchain@v1
         with:
