@@ -6,13 +6,13 @@
 //! Run with: cargo bench --bench blvm_optimizations --features production
 
 #[cfg(feature = "production")]
-use blvm_consensus::optimizations;
-use blvm_consensus::{
+use blvm_protocol::optimizations;
+use blvm_protocol::{
     mining::calculate_merkle_root,
     serialization::{block::serialize_block_header, transaction::serialize_transaction},
     types::{BlockHeader, OutPoint, Transaction, TransactionInput, TransactionOutput},
 };
-use blvm_consensus::{tx_inputs, tx_outputs};
+use blvm_protocol::{tx_inputs, tx_outputs};
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 
 /// Helper to create a test transaction
@@ -24,12 +24,12 @@ fn create_test_transaction() -> Transaction {
                 hash: [1; 32],
                 index: 0,
             },
-            script_sig: vec![blvm_consensus::opcodes::OP_1],
+            script_sig: vec![blvm_protocol::opcodes::OP_1],
             sequence: 0xffffffff,
         }],
         outputs: tx_outputs![TransactionOutput {
             value: 1000,
-            script_pubkey: vec![blvm_consensus::opcodes::OP_1],
+            script_pubkey: vec![blvm_protocol::opcodes::OP_1],
         }],
         lock_time: 0,
     }
@@ -71,7 +71,7 @@ fn bench_transaction_serialization(c: &mut Criterion) {
 /// Benchmark batch hash operations with different batch sizes
 #[cfg(feature = "production")]
 fn bench_batch_hashing(c: &mut Criterion) {
-    let group = c.benchmark_group("batch_hashing");
+    let mut group = c.benchmark_group("batch_hashing");
     for size in [10, 100, 1000, 2000].iter() {
         let transactions = create_test_transactions(*size);
         let serialized: Vec<Vec<u8>> = transactions.iter().map(serialize_transaction).collect();
@@ -136,7 +136,7 @@ fn bench_block_header_serialization(c: &mut Criterion) {
 /// Benchmark pre-allocation impact
 #[cfg(feature = "production")]
 fn bench_preallocation_impact(c: &mut Criterion) {
-    use blvm_consensus::optimizations::{prealloc_block_buffer, prealloc_tx_buffer};
+    use blvm_protocol::optimizations::{prealloc_block_buffer, prealloc_tx_buffer};
     let mut group = c.benchmark_group("preallocation");
     group.bench_function("prealloc_tx_buffer", |b| {
         b.iter(|| black_box(prealloc_tx_buffer()));

@@ -14,16 +14,16 @@ use std::collections::HashMap;
 
 use rayon::prelude::*;
 
-use blvm_consensus::serialization::block::{deserialize_block_with_witnesses, deserialize_block_header};
-use blvm_consensus::serialization::transaction::serialize_transaction;
-use blvm_consensus::transaction::is_coinbase;
-use blvm_consensus::types::{Network, TransactionOutput, ByteString, BlockHeader};
-use blvm_consensus::script::{verify_script_with_context_full, SigVersion};
-use blvm_consensus::segwit::Witness;
-use blvm_consensus::activation::{ForkActivationTable, IsForkActive};
-use blvm_consensus::bip113::get_median_time_past;
-use blvm_consensus::block::calculate_base_script_flags_for_block_network;
-use blvm_consensus::types::ForkId;
+use blvm_protocol::serialization::block::{deserialize_block_with_witnesses, deserialize_block_header};
+use blvm_protocol::serialization::transaction::serialize_transaction;
+use blvm_protocol::transaction::is_coinbase;
+use blvm_protocol::types::{Network, TransactionOutput, ByteString, BlockHeader};
+use blvm_protocol::script::{verify_script_with_context_full, SigVersion};
+use blvm_protocol::segwit::Witness;
+use blvm_protocol::activation::{ForkActivationTable, IsForkActive};
+use blvm_protocol::bip113::get_median_time_past;
+use blvm_protocol::block::calculate_base_script_flags_for_block_network;
+use blvm_protocol::types::ForkId;
 
 use crate::chunked_cache::ChunkedBlockIterator;
 use super::merge_join::JoinedPrevout;
@@ -213,7 +213,7 @@ pub fn verify_scripts(
     
     // OPTIMIZATION: Reusable buffers to avoid allocations per block
     // NOTE: prevout_map cannot be reused because it contains references to block_prevouts (block-scoped)
-    use blvm_consensus::types::{OutPoint, TransactionOutput};
+    use blvm_protocol::types::{OutPoint, TransactionOutput};
     use std::sync::Arc;
     let mut intra_block_utxos: std::collections::HashMap<OutPoint, TransactionOutput> = 
         std::collections::HashMap::with_capacity(1000);
@@ -374,7 +374,7 @@ pub fn verify_scripts(
                     // OPTIMIZATION: Build intra-block UTXOs lazily only when needed
                     if !intra_block_utxos_built {
                         intra_block_utxos.clear();
-                        use blvm_consensus::block::calculate_tx_id;
+                        use blvm_protocol::block::calculate_tx_id;
                         for (tx_idx, tx) in block.transactions.iter().enumerate() {
                             let tx_id = calculate_tx_id(tx);
                             for (output_idx, output) in tx.outputs.iter().enumerate() {
@@ -433,7 +433,7 @@ pub fn verify_scripts(
                             // OPTIMIZATION: Build intra-block UTXOs lazily only when needed
                             if !intra_block_utxos_built {
                                 intra_block_utxos.clear();
-                                use blvm_consensus::block::calculate_tx_id;
+                                use blvm_protocol::block::calculate_tx_id;
                                 for (tx_idx, tx) in block.transactions.iter().enumerate() {
                                     let tx_id = calculate_tx_id(tx);
                                     for (output_idx, output) in tx.outputs.iter().enumerate() {
@@ -497,13 +497,13 @@ pub fn verify_scripts(
             // This must be checked per-transaction, not per-block
             // OPTIMIZATION: Use pre-calculated height_has_taproot instead of checking height every time
             if height_has_taproot {
-                use blvm_consensus::constants::TAPROOT_SCRIPT_LENGTH;
+                use blvm_protocol::constants::TAPROOT_SCRIPT_LENGTH;
                 for output in &tx.outputs {
                     let script = &output.script_pubkey;
                     // P2TR format: OP_1 + PUSH_32_BYTES + 32-byte program = 34 bytes
                     if script.len() == TAPROOT_SCRIPT_LENGTH
-                        && script[0] == blvm_consensus::opcodes::OP_1
-                        && script[1] == blvm_consensus::opcodes::PUSH_32_BYTES
+                        && script[0] == blvm_protocol::opcodes::OP_1
+                        && script[1] == blvm_protocol::opcodes::PUSH_32_BYTES
                     {
                         tx_flags_base |= 0x8000; // SCRIPT_VERIFY_WITNESS_PUBKEYTYPE (Taproot)
                         break;

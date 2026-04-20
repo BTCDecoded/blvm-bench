@@ -2,9 +2,9 @@
 //! Load a block, check an input's prevout.hash, then find that transaction and calculate its txid
 
 use anyhow::{Context, Result};
-use blvm_consensus::block::calculate_tx_id;
-use blvm_consensus::serialization::block::deserialize_block_with_witnesses;
-use blvm_consensus::types::Network;
+use blvm_protocol::block::calculate_tx_id;
+use blvm_protocol::serialization::block::deserialize_block_with_witnesses;
+use blvm_protocol::types::Network;
 use std::path::PathBuf;
 
 fn main() -> Result<()> {
@@ -72,7 +72,7 @@ fn main() -> Result<()> {
         block_height
     );
 
-    let mut found_tx: Option<(u64, usize, blvm_consensus::types::Transaction)> = None;
+    let mut found_tx: Option<(u64, usize, blvm_protocol::types::Transaction)> = None;
 
     // Search backwards from current block
     for search_height in (0..=block_height).rev() {

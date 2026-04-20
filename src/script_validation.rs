@@ -5,9 +5,9 @@
 
 use anyhow::{bail, Result};
 use bitcoinconsensus::{verify_with_flags, VERIFY_ALL_PRE_TAPROOT};
-use blvm_consensus::script::{verify_script_with_context_full, SigVersion};
-use blvm_consensus::serialization::transaction::serialize_transaction;
-use blvm_consensus::types::{Block, ByteString, Network, Transaction};
+use blvm_protocol::script::{verify_script_with_context_full, SigVersion};
+use blvm_protocol::serialization::transaction::serialize_transaction;
+use blvm_protocol::types::{Block, ByteString, Network, Transaction};
 
 /// Script comparison result for one input.
 #[derive(Debug, Clone)]

@@ -7,8 +7,40 @@ use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::OnceLock;
 use std::collections::HashMap;
 use crate::chunk_index::{load_block_index, build_block_index, save_block_index, BlockIndex, BlockIndexEntry};
+use crate::node_rpc_client::{NodeRpcClient, RpcConfig};
+
+/// `KERNEL_DIFF_RPC_CHUNK_SKIP_MB` (MiB): if a zstd chunk seek would skip at least this many
+/// **decompressed** bytes, fetch the block via Bitcoin RPC (`getblockhash` + `getblock` verbosity 0)
+/// instead and switch to RPC for **all** remaining blocks in this iterator.  Requires
+/// `BITCOIN_RPC_*` (see [`RpcConfig::from_env`]).  `0` or unset = disabled (chunk-only).
+///
+/// In RPC mode, the next height is **prefetched** on a Tokio worker while the caller validates the
+/// current block (overlaps I/O with CPU). HTTP keep-alive + idle pool are enabled on [`NodeRpcClient`].
+fn rpc_chunk_skip_bytes_from_env() -> u64 {
+    if let Ok(s) = std::env::var("KERNEL_DIFF_RPC_CHUNK_SKIP_BYTES") {
+        if let Ok(n) = s.parse::<u64>() {
+            return n;
+        }
+    }
+    std::env::var("KERNEL_DIFF_RPC_CHUNK_SKIP_MB")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(0)
+        .saturating_mul(1024 * 1024)
+}
+
+fn global_tokio_runtime() -> &'static tokio::runtime::Runtime {
+    static RT: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
+    RT.get_or_init(|| {
+        tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .expect("tokio runtime for KERNEL_DIFF RPC chunk fallback")
+    })
+}
 
 /// Chunk metadata
 #[derive(Debug, Clone)]
@@ -153,6 +185,63 @@ pub fn load_chunk_blocks(chunk_data: &[u8]) -> Result<Vec<Vec<u8>>> {
     Ok(blocks)
 }
 
+/// Advise the kernel to drop page-cache pages for `path` using `POSIX_FADV_DONTNEED`.
+///
+/// Called **before** spawning the zstd subprocess that will read the chunk file, and again
+/// periodically during long seeks.  Because zstd owns its own file descriptor, we open the file
+/// separately just to make the syscall — `posix_fadvise` applies to the *page cache* (shared by
+/// all descriptors for the same inode), so our fd doesn't need to be the same one zstd uses.
+/// On non-Linux platforms this is a no-op.
+#[cfg(target_os = "linux")]
+fn fadvise_dontneed(path: &Path) {
+    use std::os::unix::io::IntoRawFd;
+    if let Ok(f) = std::fs::File::open(path) {
+        let fd = f.into_raw_fd();
+        unsafe {
+            // POSIX_FADV_DONTNEED = 4.  len=0 means "to end of file".
+            libc::posix_fadvise(fd, 0, 0, 4 /* POSIX_FADV_DONTNEED */);
+            libc::close(fd);
+        }
+    }
+}
+#[cfg(not(target_os = "linux"))]
+fn fadvise_dontneed(_path: &Path) {}
+
+/// Spawn `zstd -d --stdout` reading `chunk_file`, with clear errors when the **`zstd` binary** is
+/// missing (often reported as bare `No such file or directory` by the OS).
+fn spawn_zstd_decompress_stdout(chunk_file: &Path, multi_thread_decode: bool) -> Result<std::process::Child> {
+    use std::io::ErrorKind;
+    use std::process::{Command, Stdio};
+
+    let mut cmd = Command::new("zstd");
+    cmd.arg("-d").arg("--stdout").arg("-q");
+    if multi_thread_decode {
+        let zstd_threads = std::cmp::min(6, num_cpus::get().saturating_sub(2));
+        cmd.arg(format!("-T{}", zstd_threads));
+    }
+    cmd.arg(chunk_file)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+
+    cmd.spawn().map_err(|e| {
+        if e.kind() == ErrorKind::NotFound {
+            anyhow::anyhow!(
+                "cannot run the `zstd` decompressor: no executable named `zstd` on PATH (os error: {}). \
+                 Install the `zstd` package and ensure `zstd` works in your shell. \
+                 Chunk archive: {}",
+                e,
+                chunk_file.display()
+            )
+        } else {
+            anyhow::anyhow!(
+                "failed to spawn `zstd -d` on {}: {}",
+                chunk_file.display(),
+                e
+            )
+        }
+    })
+}
+
 /// Create a streaming iterator over blocks from chunked cache
 /// This yields blocks one at a time without loading all into memory
 /// Uses block index to ensure correct ordering by height
@@ -160,6 +249,9 @@ pub struct ChunkedBlockIterator {
     chunks_dir: PathBuf,
     metadata: ChunkMetadata,
     index: Arc<BlockIndex>, // Block index for correct ordering (Arc for sharing)
+    /// When true, each yielded block's header hash is checked against `chunks.index` (two SHA256s per block).
+    /// Set false when the index was already validated (e.g. `validate_utxo_chunk_cache_index`) for higher throughput.
+    verify_block_hash_against_index: bool,
     start_height: u64,
     end_height: u64,
     current_height: u64,
@@ -167,26 +259,67 @@ pub struct ChunkedBlockIterator {
     current_zstd_proc: Option<std::process::Child>,
     current_chunk_number: Option<usize>,
     current_offset: u64,
+    /// Path of the currently open chunk file; used by the seek loop to call FADV_DONTNEED
+    /// periodically so the 60 GB seek does not accumulate 5+ GiB of OS page cache.
+    current_chunk_file: Option<PathBuf>,
+    /// Tracks decompressed bytes read since the last fadvise_dontneed call during comparison
+    /// (not the seek phase).  We call DONTNEED roughly every 256 MiB of reads to keep the
+    /// chunk's compressed page-cache from accumulating during the multi-hour comparison loop.
+    fadvise_decompressed_since_last: u64,
+    /// If non-zero and [`Self::rpc_only_mode`] is false, a chunk seek of at least this many
+    /// **decompressed** bytes triggers RPC fallback (see module docs above).
+    rpc_chunk_skip_bytes: u64,
+    /// After a large seek was avoided via RPC, we keep using RPC — the zstd stream cannot
+    /// be advanced without decompressing, so chunk reads are abandoned for this run.
+    rpc_only_mode: bool,
+    /// Lazily created when RPC fallback first activates.
+    rpc_client: Option<Box<NodeRpcClient>>,
+    /// Background fetch for `current_height + 1` while the caller processes the current block.
+    rpc_prefetch: Option<tokio::task::JoinHandle<anyhow::Result<Vec<u8>>>>,
+    rpc_prefetch_height: Option<u64>,
 }
 
 impl ChunkedBlockIterator {
+    /// Height the iterator will return on the next successful [`Self::next_block`] call.
+    #[inline]
+    pub fn current_height(&self) -> u64 {
+        self.current_height
+    }
+
+    /// Raise [`Self::end_height`] so reading can continue after a lookahead window (e.g. header
+    /// prefetch through `H` with `--start == H+1`). Stream position must already be at `H+1`.
+    /// `compare_start` must match [`Self::current_height`]. `max_blocks` matches [`Self::new`]'s
+    /// third argument (exclusive end is `compare_start + max` capped by chain tip).
+    pub fn extend_end_for_compare(
+        &mut self,
+        compare_start: u64,
+        max_blocks: Option<usize>,
+    ) -> Result<()> {
+        anyhow::ensure!(
+            self.current_height == compare_start,
+            "extend_end_for_compare: iterator at height {} but --start is {}",
+            self.current_height,
+            compare_start
+        );
+        self.end_height = if let Some(max) = max_blocks {
+            (compare_start + max as u64).min(self.metadata.total_blocks)
+        } else {
+            self.metadata.total_blocks
+        };
+        Ok(())
+    }
+
     /// Create a new iterator with a pre-loaded block index (faster for repeated use)
     pub fn new_with_index(
         chunks_dir: &Path,
         index: Arc<BlockIndex>,
         start_height: Option<u64>,
         max_blocks: Option<usize>,
+        verify_block_hash_against_index: bool,
     ) -> Result<Option<Self>> {
-        eprintln!("   📍 DEBUG: ChunkedBlockIterator::new_with_index called with start_height={:?}, max_blocks={:?}", start_height, max_blocks);
         let metadata = match load_chunk_metadata(chunks_dir)? {
-            Some(m) => {
-                eprintln!("   📍 DEBUG: Loaded chunk metadata: {} chunks, {} total blocks", m.num_chunks, m.total_blocks);
-                m
-            },
-            None => {
-                eprintln!("   📍 DEBUG: No chunk metadata found");
-                return Ok(None);
-            },
+            Some(m) => m,
+            None => return Ok(None),
         };
 
         let start_height_val = start_height.unwrap_or(0);
@@ -203,10 +336,12 @@ impl ChunkedBlockIterator {
             }
         }
 
+        let rpc_chunk_skip_bytes = rpc_chunk_skip_bytes_from_env();
         Ok(Some(Self {
             chunks_dir: chunks_dir.to_path_buf(),
             metadata,
             index,
+            verify_block_hash_against_index,
             start_height: start_height_val,
             end_height: end_height_val,
             current_height: start_height_val,
@@ -214,13 +349,39 @@ impl ChunkedBlockIterator {
             current_zstd_proc: None,
             current_chunk_number: None,
             current_offset: 0,
+            current_chunk_file: None,
+            fadvise_decompressed_since_last: 0,
+            rpc_chunk_skip_bytes,
+            rpc_only_mode: false,
+            rpc_client: None,
+            rpc_prefetch: None,
+            rpc_prefetch_height: None,
         }))
     }
 
+    /// Same as [`Self::new`] but skips per-block header hash checks against the index (faster; trust `chunks.index`).
+    pub fn new_trust_chunk_index(
+        chunks_dir: &Path,
+        start_height: Option<u64>,
+        max_blocks: Option<usize>,
+    ) -> Result<Option<Self>> {
+        Self::new_with_hash_policy(chunks_dir, start_height, max_blocks, false)
+    }
+
+    /// After validating the chunk index, use [`Self::new_trust_chunk_index`] to avoid two SHA256s per block.
     pub fn new(
         chunks_dir: &Path,
         start_height: Option<u64>,
         max_blocks: Option<usize>,
+    ) -> Result<Option<Self>> {
+        Self::new_with_hash_policy(chunks_dir, start_height, max_blocks, true)
+    }
+
+    fn new_with_hash_policy(
+        chunks_dir: &Path,
+        start_height: Option<u64>,
+        max_blocks: Option<usize>,
+        verify_block_hash_against_index: bool,
     ) -> Result<Option<Self>> {
         // Load or build block index for correct ordering
             let index = match load_block_index(chunks_dir)? {
@@ -264,16 +425,9 @@ impl ChunkedBlockIterator {
                     idx
                 }
             };
-        eprintln!("   📍 DEBUG: ChunkedBlockIterator::new called with start_height={:?}, max_blocks={:?}", start_height, max_blocks);
         let metadata = match load_chunk_metadata(chunks_dir)? {
-            Some(m) => {
-                eprintln!("   📍 DEBUG: Loaded chunk metadata: {} chunks, {} total blocks", m.num_chunks, m.total_blocks);
-                m
-            },
-            None => {
-                eprintln!("   📍 DEBUG: No chunk metadata found");
-                return Ok(None);
-            },
+            Some(m) => m,
+            None => return Ok(None),
         };
 
         let start_height_val = start_height.unwrap_or(0);
@@ -290,10 +444,12 @@ impl ChunkedBlockIterator {
             }
         }
 
+        let rpc_chunk_skip_bytes = rpc_chunk_skip_bytes_from_env();
         Ok(Some(Self {
             chunks_dir: chunks_dir.to_path_buf(),
             metadata,
             index: Arc::new(index),
+            verify_block_hash_against_index,
             start_height: start_height_val,
             end_height: end_height_val,
             current_height: start_height_val,
@@ -301,101 +457,185 @@ impl ChunkedBlockIterator {
             current_zstd_proc: None,
             current_chunk_number: None,
             current_offset: 0,
+            current_chunk_file: None,
+            fadvise_decompressed_since_last: 0,
+            rpc_chunk_skip_bytes,
+            rpc_only_mode: false,
+            rpc_client: None,
+            rpc_prefetch: None,
+            rpc_prefetch_height: None,
         }))
     }
 
-    fn load_block_from_index(&mut self, height: u64) -> Result<Option<Vec<u8>>> {
-        if height < 100 {
-            eprintln!("   🔄 load_block_from_index({}) called", height);
+    fn ensure_rpc_client(&mut self) -> Result<&NodeRpcClient> {
+        if self.rpc_client.is_none() {
+            self.rpc_client = Some(Box::new(NodeRpcClient::new(RpcConfig::from_env())));
         }
-        
-        let entry = match self.index.get(&height) {
-            Some(e) => {
-                if height < 100 {
-                    eprintln!("   📍 Found index entry: chunk {}, offset {}", e.chunk_number, e.offset_in_chunk);
-                }
-                e
-            },
-            None => {
-                if height < 100 {
-                    eprintln!("   ⚠️  No index entry for height {}", height);
-                }
-                return Ok(None); // Block not in index
-            }
-        };
-        let _height = height; // For error context
+        Ok(self.rpc_client.as_deref().unwrap())
+    }
 
-        // Check if we need to switch chunks
+    fn enter_rpc_only_mode(&mut self) {
+        if self.rpc_only_mode {
+            return;
+        }
+        // Do not cancel rpc_prefetch here: load_block_from_index calls fetch_block_via_rpc (which
+        // schedules the next height) before this method.
+        if let Some(mut proc) = self.current_zstd_proc.take() {
+            let _ = proc.kill();
+            let _ = proc.wait();
+        }
+        self.current_chunk_reader = None;
+        self.current_chunk_number = None;
+        self.current_offset = 0;
+        if let Some(ref cf) = self.current_chunk_file.take() {
+            fadvise_dontneed(cf);
+        }
+        self.rpc_only_mode = true;
+        eprintln!(
+            "   📡 KERNEL_DIFF_RPC_CHUNK_SKIP: large chunk seek avoided — using getblock (RPC) for remaining blocks"
+        );
+        eprintln!(
+            "      Configure BITCOIN_RPC_HOST / BITCOIN_RPC_USER / BITCOIN_RPC_PASSWORD; unset KERNEL_DIFF_RPC_CHUNK_SKIP_MB to disable"
+        );
+    }
+
+    fn rpc_cancel_prefetch(&mut self) {
+        if let Some(handle) = self.rpc_prefetch.take() {
+            handle.abort();
+        }
+        self.rpc_prefetch_height = None;
+    }
+
+    fn rpc_schedule_prefetch(&mut self, next_height: u64) {
+        self.rpc_cancel_prefetch();
+        if next_height >= self.end_height {
+            return;
+        }
+        let Some(client) = self.rpc_client.as_ref().map(|b| (**b).clone()) else {
+            return;
+        };
+        let rt = global_tokio_runtime();
+        let handle = rt.spawn(async move {
+            client.getblock_bytes_at_height(next_height).await
+        });
+        self.rpc_prefetch_height = Some(next_height);
+        self.rpc_prefetch = Some(handle);
+    }
+
+    fn fetch_block_via_rpc(&mut self, height: u64) -> Result<Vec<u8>> {
+        let rt = global_tokio_runtime();
+        let client = self.ensure_rpc_client()?.clone();
+
+        if self.rpc_prefetch_height == Some(height) {
+            if let Some(handle) = self.rpc_prefetch.take() {
+                self.rpc_prefetch_height = None;
+                match rt.block_on(async { handle.await }) {
+                    Ok(Ok(block)) => {
+                        self.rpc_schedule_prefetch(height + 1);
+                        return Ok(block);
+                    }
+                    Ok(Err(e)) => {
+                        eprintln!(
+                            "   ⚠️  RPC prefetch failed at height {height}: {e}; retrying sync fetch"
+                        );
+                    }
+                    Err(join_err) => {
+                        eprintln!(
+                            "   ⚠️  RPC prefetch join at height {height}: {join_err}; retrying sync fetch"
+                        );
+                    }
+                }
+            } else {
+                self.rpc_prefetch_height = None;
+            }
+        } else {
+            self.rpc_cancel_prefetch();
+        }
+
+        let block = rt
+            .block_on(async { client.getblock_bytes_at_height(height).await })
+            .with_context(|| format!("RPC block fetch failed at height {height}"))?;
+        self.rpc_schedule_prefetch(height + 1);
+        Ok(block)
+    }
+
+    fn load_block_from_index(&mut self, height: u64) -> Result<Option<Vec<u8>>> {
+        if self.rpc_only_mode {
+            return Ok(Some(self.fetch_block_via_rpc(height)?));
+        }
+
+        let entry = match self.index.get(&height) {
+            Some(e) => e,
+            None => return Ok(None),
+        };
+        let _height = height;
+
         let need_new_chunk = self.current_chunk_number != Some(entry.chunk_number);
-        
+
+        // Decompressed bytes we would skip before the block payload (same as the seek loop below).
+        // If this exceeds KERNEL_DIFF_RPC_CHUNK_SKIP_* and RPC is configured, avoid opening the
+        // zstd stream / long seek and use getblock for this and all following heights.
+        let skip_bytes = entry
+            .offset_in_chunk
+            .saturating_sub(if need_new_chunk {
+                0
+            } else {
+                self.current_offset
+            });
+        if self.rpc_chunk_skip_bytes > 0 && skip_bytes >= self.rpc_chunk_skip_bytes {
+            // Fetch first so we stay on chunk path if RPC is misconfigured.
+            let block = self.fetch_block_via_rpc(height)?;
+            self.enter_rpc_only_mode();
+            return Ok(Some(block));
+        }
+
         if need_new_chunk {
-            eprintln!("   🔄 Need to switch chunks: current={:?}, needed={}", self.current_chunk_number, entry.chunk_number);
-            // Clean up previous chunk
-            eprintln!("   🔄 Cleaning up previous chunk...");
             if let Some(mut proc) = self.current_zstd_proc.take() {
-                eprintln!("   🔄 Killing previous zstd process (switching chunks)...");
-                let _ = proc.kill(); // Kill immediately - we're switching chunks anyway
-                let _ = proc.wait(); // Wait for it to die (should be instant)
-                eprintln!("   ✅ Previous zstd process killed");
+                let _ = proc.kill();
+                let _ = proc.wait();
             }
             self.current_chunk_reader = None;
-            eprintln!("   🔄 Checking if chunk_number is 999 (missing block)...");
-
-            // Check if this is a missing block (chunk_number 999)
-            if entry.chunk_number == 999 {
-                    eprintln!("   🔄 Loading missing block {} from chunk_missing (chunk_number=999)...", height);
-                    // Load from chunk_missing
-                    use crate::missing_blocks::get_missing_block;
-                    eprintln!("   🔄 About to call get_missing_block({})...", height);
-                    let load_start = std::time::Instant::now();
-                    let result = get_missing_block(&self.chunks_dir, height);
-                    let load_duration = load_start.elapsed();
-                    eprintln!("   ✅ get_missing_block({}) completed in {:.2}ms", height, load_duration.as_millis());
-                
-                match result? {
-                    Some(block_data) => {
-                        if height < 100 {
-                            eprintln!("   ✅ Got missing block {} ({} bytes)", height, block_data.len());
-                        }
-                        return Ok(Some(block_data));
-                    }
-                    None => {
-                        // Block not found - skip it and continue (don't bail)
-                        eprintln!("   ⚠️  Missing block {} not found in chunk_missing - skipping", height);
-                        return Ok(None); // Return None to skip this block
-                    }
-                }
+            // Drop residual page-cache pages for the chunk we just finished with.
+            if let Some(ref old_chunk_file) = self.current_chunk_file.take() {
+                fadvise_dontneed(old_chunk_file);
             }
-            
-            // Start new chunk
+
+            if entry.chunk_number == 999 {
+                use crate::missing_blocks::get_missing_block;
+                let result = get_missing_block(&self.chunks_dir, height);
+                return match result? {
+                    Some(block_data) => Ok(Some(block_data)),
+                    None => {
+                        eprintln!("   ⚠️  Missing block {} not found in chunk_missing — skipping", height);
+                        Ok(None)
+                    }
+                };
+            }
+
             let chunk_file = self.chunks_dir.join(format!("chunk_{}.bin.zst", entry.chunk_number));
             if !chunk_file.exists() {
                 anyhow::bail!("Chunk {} not found: {}", entry.chunk_number, chunk_file.display());
             }
+            eprintln!("   📦 Opening chunk {} for height {}", entry.chunk_number, height);
 
-            // OPTIMIZATION: Use multi-threaded zstd decompression
-            // Use 4-6 threads for decompression (balance between CPU and I/O)
-            // zstd -T0 uses all cores, but we want to leave cores for verification
-            let zstd_threads = std::cmp::min(6, num_cpus::get().saturating_sub(2)); // Leave 2 cores for verification
-            let mut zstd_proc = std::process::Command::new("zstd")
-                .arg("-d")
-                .arg("--stdout")
-                .arg("-q") // Quiet - avoid stderr output that could fill pipe and deadlock
-                .arg(format!("-T{}", zstd_threads)) // Multi-threaded decompression
-                .arg(&chunk_file)
-                .stdout(std::process::Stdio::piped())
-                .stderr(std::process::Stdio::null()) // Avoid deadlock: piped stderr fills and blocks zstd
-                .spawn()
-                .with_context(|| format!("Failed to start zstd for chunk {}", entry.chunk_number))?;
+            // Drop any existing page-cache pages for the chunk file before the zstd subprocess
+            // opens it.  Sequential read of a 60 GB file fills ~5 GiB of OS page cache and drives
+            // MemAvailable below the safety floor.  posix_fadvise(DONTNEED) keeps page-cache usage
+            // near-zero for data we've already consumed.
+            fadvise_dontneed(&chunk_file);
 
+            let mut zstd_proc = spawn_zstd_decompress_stdout(&chunk_file, true)?;
             let stdout = zstd_proc.stdout.take()
                 .ok_or_else(|| anyhow::anyhow!("Failed to get zstd stdout"))?;
-            let reader = std::io::BufReader::with_capacity(128 * 1024 * 1024, stdout);
+            // 16 MiB read-ahead is ample; the old 128 MiB buffer held unnecessary anonymous pages.
+            let reader = std::io::BufReader::with_capacity(16 * 1024 * 1024, stdout);
 
             self.current_chunk_reader = Some(reader);
             self.current_zstd_proc = Some(zstd_proc);
             self.current_chunk_number = Some(entry.chunk_number);
             self.current_offset = 0;
+            // Store chunk file path so the seek loop can call DONTNEED periodically.
+            self.current_chunk_file = Some(chunk_file);
         }
 
         // Seek to block offset (read and discard bytes until we reach offset)
@@ -431,9 +671,23 @@ impl ChunkedBlockIterator {
                 if curr_gb > prev_gb && total_gb > 0.1 {
                     eprintln!("   ⏳ Seeking in chunk {}: {:.1}GB / {:.1}GB...", entry.chunk_number,
                              skipped_so_far as f64 / 1e9, total_gb);
+                    // Every 8 GB of decompressed data skipped, tell the kernel to drop the
+                    // compressed chunk's page-cache pages we've already consumed.  The
+                    // compression ratio is ~4–6×, so 8 GB decompressed ≈ 1.5–2 GB of file
+                    // pages freed each time.  DONTNEED on the whole file is coarse but safe.
+                    if curr_gb % 8 == 0 {
+                        if let Some(ref cf) = self.current_chunk_file {
+                            fadvise_dontneed(cf);
+                        }
+                    }
                 }
             }
             self.current_offset = entry.offset_in_chunk;
+            // Seek done: drop all page-cache for the chunk — we're now positioned and the pages
+            // for the skipped region are no longer needed.
+            if let Some(ref cf) = self.current_chunk_file {
+                fadvise_dontneed(cf);
+            }
         } else if self.current_offset > entry.offset_in_chunk {
             // Can't seek backwards in a stream - need to restart chunk
             // This shouldn't happen if we're reading in order, but handle it
@@ -442,64 +696,52 @@ impl ChunkedBlockIterator {
         }
 
         // Read block length (4 bytes)
-        if height < 100 {
-            eprintln!("   🔄 Reading block length at offset {}...", self.current_offset);
-        }
-        
         let mut len_buf = [0u8; 4];
         use std::io::Read;
-        // CRITICAL FIX: Use read_exact but with better error context
-        let read_start = std::time::Instant::now();
         reader.read_exact(&mut len_buf)
-            .with_context(|| format!("Failed to read block length at height {} (offset {})", 
-                                    height, self.current_offset))?;
-        let read_duration = read_start.elapsed();
-        if height < 100 {
-            eprintln!("   ✅ Read block length in {:.2}ms", read_duration.as_millis());
-        } else if read_duration.as_secs() > 1 {
-            eprintln!("   ⚠️  Reading block length took {:.2}s for height {} (slow!)", read_duration.as_secs_f64(), height);
-        }
-        
+            .with_context(|| format!("Failed to read block length at height {} (offset {})",
+                                     height, self.current_offset))?;
+
         self.current_offset += 4;
-        
+
         let block_len = u32::from_le_bytes(len_buf) as usize;
         if block_len > 10 * 1024 * 1024 || block_len < 88 {
-            anyhow::bail!("Invalid block size: {} bytes (height {}, offset {})", 
+            anyhow::bail!("Invalid block size: {} bytes (height {}, offset {})",
                          block_len, height, self.current_offset);
-        }
-
-        if height < 100 {
-            eprintln!("   🔄 Reading block data ({} bytes) at offset {}...", block_len, self.current_offset);
         }
 
         // Read block data
         let mut block_data = vec![0u8; block_len];
         let data_read_start = std::time::Instant::now();
         reader.read_exact(&mut block_data)
-            .with_context(|| format!("Failed to read block data at height {} (offset {}, len {})", 
-                                    height, self.current_offset, block_len))?;
+            .with_context(|| format!("Failed to read block data at height {} (offset {}, len {})",
+                                     height, self.current_offset, block_len))?;
         let data_read_duration = data_read_start.elapsed();
-        if height < 100 {
-            eprintln!("   ✅ Read block data in {:.2}ms", data_read_duration.as_millis());
-        } else if data_read_duration.as_secs() > 1 {
-            eprintln!("   ⚠️  Reading block data took {:.2}s for height {} (slow!)", data_read_duration.as_secs_f64(), height);
+        if data_read_duration.as_secs() > 1 {
+            eprintln!("   ⚠️  Slow block read: height {} took {:.2}s ({} bytes)",
+                     height, data_read_duration.as_secs_f64(), block_len);
         }
-        
+
         self.current_offset += block_len as u64;
 
-        if height < 100 {
-            eprintln!("   ✅ load_block_from_index({}) completed successfully", height);
+        // During the comparison loop, sequential block reads fill the OS page cache with the
+        // compressed chunk file data (~4 MB/s of new page cache).  Call fadvise_dontneed every
+        // 256 MiB of decompressed reads to prevent this from eroding MemAvailable.
+        self.fadvise_decompressed_since_last += (block_len + 4) as u64;
+        if self.fadvise_decompressed_since_last >= 256 * 1024 * 1024 {
+            self.fadvise_decompressed_since_last = 0;
+            if let Some(ref cf) = self.current_chunk_file {
+                fadvise_dontneed(cf);
+            }
         }
-        
+
         Ok(Some(block_data))
     }
 
     pub fn next_block(&mut self) -> Result<Option<Vec<u8>>> {
         // CRITICAL FIX: Skip missing blocks instead of stopping
         loop {
-            // Check if we've reached the end
             if self.current_height >= self.end_height {
-                eprintln!("   📍 ChunkedIterator: Reached end_height {}", self.end_height);
                 return Ok(None);
             }
 
@@ -543,102 +785,54 @@ impl ChunkedBlockIterator {
             }
             
             // Fallback: Use index to load block (for non-sequential access or chunk boundaries)
-            let load_start = std::time::Instant::now();
-            
-            // Use index to load block at current height
             match self.load_block_from_index(self.current_height) {
                 Ok(Some(block)) => {
-                    let load_duration = load_start.elapsed();
-                    if self.current_height < 100 {
-                        eprintln!("   ✅ ChunkedIterator: load_block_from_index({}) completed in {:.2}ms, got {} bytes", 
-                                 self.current_height, load_duration.as_millis(), block.len());
-                    } else if load_duration.as_secs() > 1 {
-                        eprintln!("   ⚠️  ChunkedIterator: load_block_from_index({}) took {:.2}s (slow!)", 
-                                 self.current_height, load_duration.as_secs_f64());
-                    }
-                    
-                    // Verify block hash matches index
-                use sha2::{Digest, Sha256};
-                if block.len() >= 80 {
-                    let header = &block[0..80];
-                    let first_hash = Sha256::digest(header);
-                    let second_hash = Sha256::digest(&first_hash);
-                    let mut block_hash = [0u8; 32];
-                    block_hash.copy_from_slice(&second_hash);
-                    block_hash.reverse(); // Convert to big-endian
-                    
-                    if let Some(entry) = self.index.get(&self.current_height) {
-                        if block_hash != entry.block_hash {
-                            eprintln!("   ⚠️  WARNING: Block hash mismatch at height {}!", self.current_height);
-                            eprintln!("      Expected: {}", hex::encode(&entry.block_hash));
-                            eprintln!("      Got:      {}", hex::encode(&block_hash));
-                        }
-                    }
-                }
-                
-                let height = self.current_height;
-                self.current_height += 1;
-                
-                // DEBUG: Log first few blocks
-                if height < 5 {
-                    use sha2::{Digest, Sha256};
-                    if block.len() >= 80 {
+                    if self.verify_block_hash_against_index && block.len() >= 80 {
+                        use sha2::{Digest, Sha256};
                         let header = &block[0..80];
                         let first_hash = Sha256::digest(header);
                         let second_hash = Sha256::digest(&first_hash);
-                        let mut hash_bytes = second_hash.as_slice().to_vec();
-                        hash_bytes.reverse();
-                        eprintln!("   📍 DEBUG ChunkedIterator: Yielding block {} (height {}), block_hash (first 8) = {}", 
-                                 height, height, hex::encode(&hash_bytes[..8]));
+                        let mut block_hash = [0u8; 32];
+                        block_hash.copy_from_slice(&second_hash);
+                        block_hash.reverse();
+                        if let Some(entry) = self.index.get(&self.current_height) {
+                            if block_hash != entry.block_hash {
+                                eprintln!("   ⚠️  Block hash mismatch at height {}! expected={} got={}",
+                                         self.current_height,
+                                         hex::encode(entry.block_hash),
+                                         hex::encode(block_hash));
+                            }
+                        }
                     }
-                }
-                
-                // More frequent logging for early blocks to catch issues
-                if height < 100 && height % 10 == 0 {
-                    println!("     Loaded block {} (height {}) from chunks...", 
-                            height, height);
-                } else if height < 1000 && height % 100 == 0 {
-                    println!("     Loaded block {} (height {}) from chunks...", 
-                            height, height);
-                } else if height % 25000 == 0 {
-                    println!("     Loaded block {} (height {}) from chunks...", 
-                            height, height);
-                }
-                
-                    if height < 100 {
-                        eprintln!("   ✅ ChunkedIterator: Returning block {} ({} bytes)", height, block.len());
-                    }
+                    self.current_height += 1;
                     return Ok(Some(block));
                 }
                 Ok(None) => {
-                    // Block not in index - skip it and continue
-                    let missing_height = self.current_height;
-                    if missing_height < 100 || missing_height % 1000 == 0 {
-                        eprintln!("   ⚠️  Block {} missing from index - skipping", missing_height);
-                    }
+                    eprintln!("   ⚠️  Block {} missing from index — skipping", self.current_height);
                     self.current_height += 1;
-                    // Continue loop to try next block
                     continue;
                 }
                 Err(e) => {
-                    // Error loading block - log and skip
                     let error_height = self.current_height;
-                    let load_duration = load_start.elapsed();
-                    eprintln!("   ❌ Error loading block {} after {:.2}ms: {} - skipping", 
-                            error_height, load_duration.as_millis(), e);
-                    self.current_height += 1;
-                    // Continue loop to try next block
-                    continue;
+                    eprintln!("   ❌ Chunked cache: failed loading block at height {}.", error_height);
+                    eprintln!("       {:#}", e);
+                    return Err(e.context(format!(
+                        "chunked block read failed at height {} (common cause: missing `zstd` on PATH or missing chunk file)",
+                        error_height
+                    )));
                 }
             };
-            
-            // If we get here, we've processed the result
-            if self.current_height < 100 {
-                eprintln!("   📍 ChunkedIterator: Processed result for height {}, continuing loop", self.current_height - 1);
-            }
         }
     }
 
+}
+
+impl Drop for ChunkedBlockIterator {
+    fn drop(&mut self) {
+        if let Some(h) = self.rpc_prefetch.take() {
+            h.abort();
+        }
+    }
 }
 
 /// Load blocks from chunked cache (legacy - loads all into memory)
@@ -711,17 +905,8 @@ pub fn load_chunked_cache(
         
         // OPTIMIZATION: Stream decompression instead of loading entire chunk
         use std::io::{BufReader, Read};
-        use std::process::{Command, Stdio};
-        
-        let mut zstd_proc = Command::new("zstd")
-            .arg("-d")
-            .arg("--stdout")
-            .arg("-q")
-            .arg(&chunk_file)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
-            .with_context(|| format!("Failed to start zstd for chunk {}", chunk_num))?;
+
+        let mut zstd_proc = spawn_zstd_decompress_stdout(&chunk_file, false)?;
         
         let mut reader = BufReader::with_capacity(128 * 1024 * 1024, // 128MB buffer
             zstd_proc.stdout.take()

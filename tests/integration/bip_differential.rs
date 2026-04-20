@@ -4,7 +4,7 @@
 //! They catch consensus divergences by comparing validation results.
 
 use anyhow::Result;
-use blvm_consensus::types::Network;
+use blvm_protocol::types::Network;
 #[cfg(feature = "differential")]
 use blvm_bench::core_builder::CoreBuilder;
 #[cfg(feature = "differential")]

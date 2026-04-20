@@ -1,8 +1,8 @@
 //! Transaction ID Benchmark
 //! Matches Core's TransactionIdCalculation benchmark exactly
 
-use blvm_consensus::block::calculate_tx_id;
-use blvm_consensus::{
+use blvm_protocol::block::calculate_tx_id;
+use blvm_protocol::{
     tx_inputs, tx_outputs, OutPoint, Transaction, TransactionInput, TransactionOutput,
 };
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
@@ -36,11 +36,11 @@ fn create_test_transaction() -> Transaction {
         outputs: tx_outputs![
             TransactionOutput {
                 value: 90_000_000_000,     // 90 BTC (matches Core's 90 * COIN)
-                script_pubkey: vec![blvm_consensus::opcodes::OP_1],
+                script_pubkey: vec![blvm_protocol::opcodes::OP_1],
             },
             TransactionOutput {
                 value: 10_000_000_000,     // 10 BTC (matches Core's 10 * COIN)
-                script_pubkey: vec![blvm_consensus::opcodes::OP_1],
+                script_pubkey: vec![blvm_protocol::opcodes::OP_1],
             }
         ],
         lock_time: 0,

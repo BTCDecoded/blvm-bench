@@ -30,6 +30,8 @@ Thumbs.db
 config.toml
 !config.toml.example
 .env
+.env.local
+kernel-diff.local.env
 .cargo/config.toml
 
 # Perf output

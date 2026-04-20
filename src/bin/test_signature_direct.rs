@@ -1,9 +1,9 @@
 //! Direct signature verification test
 //! Tests a specific signature with specific flags to identify the root cause
 
-use blvm_consensus::activation::ForkActivationTable;
-use blvm_consensus::types::Network;
-use blvm_consensus::BIP66_ACTIVATION_MAINNET;
+use blvm_protocol::activation::ForkActivationTable;
+use blvm_protocol::constants::BIP66_ACTIVATION_MAINNET;
+use blvm_protocol::types::Network;
 use secp256k1::ecdsa::Signature;
 
 fn main() {
@@ -27,7 +27,7 @@ fn main() {
     let height = BIP66_ACTIVATION_MAINNET + 1;
     let network = Network::Mainnet;
     let activation = ForkActivationTable::from_network(network);
-    let bip66_result = blvm_consensus::bip_validation::check_bip66(der_sig, height, &activation);
+    let bip66_result = blvm_protocol::bip_validation::check_bip66(der_sig, height, &activation);
     println!("  BIP66 check result: {:?}", bip66_result);
 
     // Test signature parsing

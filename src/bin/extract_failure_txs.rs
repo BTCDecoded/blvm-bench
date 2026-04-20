@@ -3,8 +3,8 @@
 //! This is the OPTIMAL I/O pattern - same as step 6 but skips verification
 
 use anyhow::{Context, Result};
-use blvm_consensus::serialization::block::deserialize_block_with_witnesses;
-use blvm_consensus::serialization::transaction::serialize_transaction;
+use blvm_protocol::serialization::block::deserialize_block_with_witnesses;
+use blvm_protocol::serialization::transaction::serialize_transaction;
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{BufRead, BufReader, BufWriter, Write};

@@ -7,16 +7,16 @@
 //! 3. Forces full script verification (no assume-valid optimization)
 //! 4. Matches Core's ConnectBlock benchmark methodology
 
-use blvm_consensus::block::{calculate_tx_id, connect_block};
-use blvm_consensus::segwit::Witness;
-use blvm_consensus::transaction_hash::{calculate_transaction_sighash, SighashType};
-use blvm_consensus::{
+use blvm_protocol::block::{calculate_tx_id, connect_block};
+use blvm_protocol::transaction_hash::{calculate_transaction_sighash, SighashType};
+use blvm_protocol::{
     tx_inputs, tx_outputs, Block, BlockHeader, OutPoint, Transaction, TransactionInput,
-    TransactionOutput, UtxoSet, UTXO,
+    TransactionOutput, UtxoSet, UTXO, Witness,
 };
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use secp256k1::{Message, PublicKey, Secp256k1, SecretKey, Signing};
 use sha2::{Digest, Sha256};
+use std::sync::Arc;
 
 /// Create a P2WPKH scriptPubkey (OP_0 <20-byte hash>)
 fn create_p2wpkh_script_pubkey(pubkey: &PublicKey) -> Vec<u8> {
@@ -24,7 +24,7 @@ fn create_p2wpkh_script_pubkey(pubkey: &PublicKey) -> Vec<u8> {
     let mut hasher = Sha256::new();
     hasher.update(&pubkey_bytes);
     let hash = hasher.finalize();
-    let mut script = vec![blvm_consensus::opcodes::OP_0];
+    let mut script = vec![blvm_protocol::opcodes::OP_0];
     script.extend_from_slice(&hash[..20]); // 20-byte hash
     script
 }
@@ -38,7 +38,7 @@ fn create_p2wpkh_witness(
     prevouts: &[TransactionOutput],
 ) -> Vec<Vec<u8>> {
     // Calculate proper transaction sighash
-    let sighash = calculate_transaction_sighash(tx, input_index, prevouts, SighashType::All)
+    let sighash = calculate_transaction_sighash(tx, input_index, prevouts, SighashType::ALL)
         .expect("Failed to calculate sighash");
 
     let msg = Message::from_digest_slice(&sighash).expect("Invalid sighash");
@@ -55,7 +55,7 @@ fn create_p2wpkh_witness(
 /// Matches Core's CreateTestBlock approach
 fn create_realistic_test_block_with_signatures(
     num_txs: usize,
-) -> (Block, UtxoSet, Vec<Witness>, Vec<SecretKey>) {
+) -> (Block, UtxoSet, Vec<Vec<Witness>>, Vec<SecretKey>) {
     let secp = Secp256k1::new();
 
     // Generate keypairs for transactions
@@ -76,7 +76,7 @@ fn create_realistic_test_block_with_signatures(
                 hash: [0; 32],
                 index: 0xffffffff, // Coinbase
             },
-            script_sig: vec![blvm_consensus::opcodes::OP_1; 4],
+            script_sig: vec![blvm_protocol::opcodes::OP_1; 4],
             sequence: 0xffffffff,
         }],
         outputs: tx_outputs![TransactionOutput {
@@ -90,18 +90,19 @@ fn create_realistic_test_block_with_signatures(
     // Strategy: Create a chain where each transaction spends the first output of the previous transaction
     // Calculate coinbase transaction hash BEFORE moving it into vector
     let coinbase_tx_id = calculate_tx_id(&coinbase);
-    let mut utxo_set = UtxoSet::new();
+    let mut utxo_set = UtxoSet::default();
     let mut transactions = vec![coinbase];
     let coinbase_outpoint = OutPoint {
         hash: coinbase_tx_id,
         index: 0,
     };
     let coinbase_utxo = UTXO {
-        value: 50_000_000_000, // 50 BTC from coinbase
-        script_pubkey: create_p2wpkh_script_pubkey(&public_keys[0]),
+        value: 50_000_000_000,
+        script_pubkey: create_p2wpkh_script_pubkey(&public_keys[0]).into(),
         height: 0,
+        is_coinbase: true,
     };
-    utxo_set.insert(coinbase_outpoint.clone(), coinbase_utxo);
+    utxo_set.insert(coinbase_outpoint.clone(), Arc::new(coinbase_utxo));
 
     // Create transactions that form a chain
     let mut prev_outpoint = coinbase_outpoint;
@@ -146,14 +147,17 @@ fn create_realistic_test_block_with_signatures(
         // Create UTXO for next transaction to spend (using actual transaction hash)
         let utxo = UTXO {
             value: prev_output_value,
-            script_pubkey: next_script_pubkey,
+            script_pubkey: next_script_pubkey.into(),
             height: 0,
+            is_coinbase: false,
         };
-        utxo_set.insert(prev_outpoint.clone(), utxo);
+        utxo_set.insert(prev_outpoint.clone(), Arc::new(utxo));
     }
 
     // Now create proper witnesses with signatures for each transaction
-    let mut final_witnesses = vec![Vec::new()]; // Coinbase has empty witness
+    // One `Vec<Witness>` per transaction; each inner `Witness` is one input's witness stack.
+    let mut final_witnesses: Vec<Vec<Witness>> = Vec::with_capacity(transactions.len());
+    final_witnesses.push(vec![vec![]]); // coinbase: one input, empty stack
     for (i, tx) in transactions.iter().enumerate().skip(1) {
         // Get the previous output that this transaction spends
         let prevout = &tx.inputs[0].prevout;
@@ -162,7 +166,7 @@ fn create_realistic_test_block_with_signatures(
         // Create prevouts array for sighash calculation
         let prevouts = vec![TransactionOutput {
             value: prev_output.value,
-            script_pubkey: prev_output.script_pubkey.clone(),
+            script_pubkey: prev_output.script_pubkey.as_ref().to_vec(),
         }];
 
         // Determine which key to use for signing (based on which key owns the prevout)
@@ -171,7 +175,7 @@ fn create_realistic_test_block_with_signatures(
 
         // Create witness with proper signature
         let witness = create_p2wpkh_witness(&secp, &secret_keys[key_index], tx, 0, &prevouts);
-        final_witnesses.push(witness);
+        final_witnesses.push(vec![witness]);
     }
 
     let block = Block {
@@ -195,8 +199,8 @@ fn benchmark_connect_block_realistic_100tx(c: &mut Criterion) {
     let (block, utxo_set, witnesses, _secret_keys) =
         create_realistic_test_block_with_signatures(100);
 
-    let ctx = blvm_consensus::block::BlockValidationContext::for_network(
-        blvm_consensus::types::Network::Mainnet,
+    let ctx = blvm_protocol::block::BlockValidationContext::for_network(
+        blvm_protocol::types::Network::Mainnet,
     );
     c.bench_function("connect_block_realistic_100tx", |b| {
         b.iter(|| {
@@ -208,8 +212,7 @@ fn benchmark_connect_block_realistic_100tx(c: &mut Criterion) {
                 black_box(1), // Height 1 = no assume-valid optimization
                 &ctx,
             );
-            // Ensure we're actually validating - use result to ensure it's computed
-            black_box(result);
+            let _ = black_box(result);
         })
     });
 }
@@ -220,8 +223,8 @@ fn benchmark_connect_block_realistic_1000tx(c: &mut Criterion) {
     let (block, utxo_set, witnesses, _secret_keys) =
         create_realistic_test_block_with_signatures(1000);
 
-    let ctx = blvm_consensus::block::BlockValidationContext::for_network(
-        blvm_consensus::types::Network::Mainnet,
+    let ctx = blvm_protocol::block::BlockValidationContext::for_network(
+        blvm_protocol::types::Network::Mainnet,
     );
     c.bench_function("connect_block_realistic_1000tx", |b| {
         b.iter(|| {
@@ -233,8 +236,7 @@ fn benchmark_connect_block_realistic_1000tx(c: &mut Criterion) {
                 black_box(1), // Height 1 = no assume-valid optimization
                 &ctx,
             );
-            // Ensure we're actually validating - use result to ensure it's computed
-            black_box(result);
+            let _ = black_box(result);
         })
     });
 }

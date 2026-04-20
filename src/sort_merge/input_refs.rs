@@ -16,8 +16,8 @@ use std::io::{BufWriter, Write};
 use std::path::Path;
 use std::time::Instant;
 
-use blvm_consensus::serialization::block::deserialize_block_with_witnesses;
-use blvm_consensus::transaction::is_coinbase;
+use blvm_protocol::serialization::block::deserialize_block_with_witnesses;
+use blvm_protocol::transaction::is_coinbase;
 
 use crate::chunked_cache::ChunkedBlockIterator;
 

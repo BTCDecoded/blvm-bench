@@ -1,4 +1,5 @@
 //! Test to find block 1 in chunks by searching for its hash
+#![cfg(feature = "chunk-cache")]
 
 use anyhow::Result;
 use blvm_bench::chunk_index::build_block_index;

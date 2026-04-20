@@ -4,8 +4,8 @@
 use anyhow::{Context, Result};
 use blvm_bench::chunked_cache::ChunkedBlockIterator;
 use blvm_bench::sort_merge::output_refs::OutputRef;
-use blvm_consensus::block::calculate_tx_id;
-use blvm_consensus::serialization::block::deserialize_block_with_witnesses;
+use blvm_protocol::block::calculate_tx_id;
+use blvm_protocol::serialization::block::deserialize_block_with_witnesses;
 use std::fs::File;
 use std::io::{BufReader, Read, Seek, SeekFrom};
 use std::path::PathBuf;

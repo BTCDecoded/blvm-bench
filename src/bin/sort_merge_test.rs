@@ -16,7 +16,7 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use anyhow::Result;
-use blvm_consensus::types::Network;
+use blvm_protocol::types::Network;
 
 use blvm_bench::sort_merge::{
     input_refs::{extract_input_refs, sort_input_refs},

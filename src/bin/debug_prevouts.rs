@@ -4,8 +4,8 @@
 use anyhow::{Context, Result};
 use blvm_bench::chunked_cache::ChunkedBlockIterator;
 use blvm_bench::sort_merge::verify::PrevoutReader;
-use blvm_consensus::block::calculate_tx_id;
-use blvm_consensus::types::TransactionOutput;
+use blvm_protocol::block::calculate_tx_id;
+use blvm_protocol::types::TransactionOutput;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -40,7 +40,7 @@ fn main() -> Result<()> {
         .ok_or_else(|| anyhow::anyhow!("Block {} not found", block_height))?;
 
     let (block, _witnesses) =
-        blvm_consensus::serialization::block::deserialize_block_with_witnesses(&block_data)
+        blvm_protocol::serialization::block::deserialize_block_with_witnesses(&block_data)
             .context("Failed to deserialize block")?;
 
     let tx = block
@@ -87,7 +87,7 @@ fn main() -> Result<()> {
     for (tx_idx_iter, tx_iter) in block.transactions.iter().enumerate() {
         let tx_id = calculate_tx_id(tx_iter);
         for (output_idx, output) in tx_iter.outputs.iter().enumerate() {
-            let outpoint = blvm_consensus::types::OutPoint {
+            let outpoint = blvm_protocol::types::OutPoint {
                 hash: tx_id,
                 index: output_idx as u32,
             };

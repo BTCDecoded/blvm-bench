@@ -616,7 +616,7 @@ impl BlockFileReader {
             // OPTIMIZATION: Use blvm-consensus OptimizedSha256 (SHA-NI or AVX2) instead of sha2 crate
             if block_data.len() >= 80 {
                 let header = &block_data[0..80];
-                use blvm_consensus::crypto::OptimizedSha256;
+                use blvm_protocol::crypto::OptimizedSha256;
                 let hasher = OptimizedSha256::new();
                 let computed_hash = hasher.hash256(header); // Double SHA256
                 
@@ -3880,7 +3880,7 @@ impl SharedBlockCache {
                 // OPTIMIZATION: Use blvm-consensus OptimizedSha256 (SHA-NI or AVX2) instead of sha2 crate
                 if cached.len() >= 80 {
                     let header = &cached[0..80];
-                    use blvm_consensus::crypto::OptimizedSha256;
+                    use blvm_protocol::crypto::OptimizedSha256;
                     let hasher = OptimizedSha256::new();
                     let block_hash = hex::encode(hasher.hash256(header));
                     eprintln!("DEBUG get_or_fetch_block {}: Cached block hash = {}", height, block_hash);

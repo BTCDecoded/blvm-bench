@@ -3,7 +3,7 @@
 //! Benchmarks FIBRE block encoding, FEC encoding/decoding, and UDP packet handling.
 
 use blvm_node::network::fibre::FibreRelay;
-use blvm_protocol::{Block, BlockHeader};
+use blvm_protocol::{tx_inputs, tx_outputs, Block, BlockHeader, TransactionOutput};
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use sha2::Digest;
 use std::time::Duration;
@@ -16,22 +16,23 @@ fn create_test_block(size_kb: usize) -> Block {
     // Create minimal transactions to approximate size
     for _ in 0..tx_count.min(1000) {
         // Cap at 1000 txs
+        let script_pubkey = {
+            let mut s = vec![
+                blvm_protocol::opcodes::OP_DUP,
+                blvm_protocol::opcodes::OP_HASH160,
+                blvm_protocol::opcodes::PUSH_20_BYTES,
+            ];
+            s.extend_from_slice(&[0u8; 20]);
+            s.push(blvm_protocol::opcodes::OP_EQUALVERIFY);
+            s.push(blvm_protocol::opcodes::OP_CHECKSIG);
+            s
+        };
         transactions.push(blvm_protocol::Transaction {
             version: 1,
-            inputs: vec![],
-            outputs: vec![blvm_protocol::TransactionOutput {
+            inputs: tx_inputs![],
+            outputs: tx_outputs![TransactionOutput {
                 value: 1000,
-                script_pubkey: {
-                    let mut s = vec![
-                        blvm_consensus::opcodes::OP_DUP,
-                        blvm_consensus::opcodes::OP_HASH160,
-                        blvm_consensus::opcodes::PUSH_20_BYTES,
-                    ];
-                    s.extend_from_slice(&[0u8; 20]);
-                    s.push(blvm_consensus::opcodes::OP_EQUALVERIFY);
-                    s.push(blvm_consensus::opcodes::OP_CHECKSIG);
-                    s.into()
-                },
+                script_pubkey,
             }],
             lock_time: 0,
         });
@@ -56,7 +57,6 @@ fn bench_fibre_encode_block(c: &mut Criterion) {
 
     for size_kb in [100, 500, 1000].iter() {
         let block = create_test_block(*size_kb);
-        let mut relay = FibreRelay::new();
 
         group.bench_with_input(
             BenchmarkId::new("encode", format!("{}KB", size_kb)),

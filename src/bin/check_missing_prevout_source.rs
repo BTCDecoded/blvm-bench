@@ -3,8 +3,8 @@
 
 use anyhow::{Context, Result};
 use blvm_bench::chunked_cache::ChunkedBlockIterator;
-use blvm_consensus::block::calculate_tx_id;
-use blvm_consensus::serialization::block::deserialize_block_with_witnesses;
+use blvm_protocol::block::calculate_tx_id;
+use blvm_protocol::serialization::block::deserialize_block_with_witnesses;
 use std::path::PathBuf;
 
 fn main() -> Result<()> {
@@ -63,7 +63,7 @@ fn main() -> Result<()> {
                 println!("  Transaction index: {}", tx_idx);
                 println!(
                     "  Is coinbase: {}",
-                    blvm_consensus::transaction::is_coinbase(tx)
+                    blvm_protocol::transaction::is_coinbase(tx)
                 );
                 println!("  Outputs: {}", tx.outputs.len());
                 println!("  This transaction SHOULD be in outputs_sorted.bin!");

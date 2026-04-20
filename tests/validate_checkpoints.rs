@@ -4,7 +4,7 @@
 use anyhow::Result;
 use blvm_bench::checkpoint_persistence::CheckpointManager;
 use blvm_bench::chunked_cache::ChunkedBlockIterator;
-use blvm_consensus::UtxoSet;
+use blvm_protocol::UtxoSet;
 use std::path::PathBuf;
 
 #[tokio::test]
@@ -66,23 +66,21 @@ async fn test_validate_checkpoints() -> Result<()> {
 
         // Parse block with witnesses
         let (block, witnesses) =
-            blvm_consensus::serialization::block::deserialize_block_with_witnesses(&block_bytes)?;
+            blvm_protocol::serialization::block::deserialize_block_with_witnesses(&block_bytes)?;
 
         // Full validation (no assume-valid)
-        let network = blvm_consensus::types::Network::Mainnet;
-        let ctx = blvm_consensus::block::BlockValidationContext::from_connect_block_ibd_args(
-            None::<&[blvm_consensus::types::BlockHeader]>,
+        let network = blvm_protocol::types::Network::Mainnet;
+        let ctx = blvm_protocol::block::block_validation_context_for_connect_ibd(
+            None::<&[blvm_protocol::types::BlockHeader]>,
             block.header.timestamp,
             network,
-            None,
-            None,
         );
         let (result, new_utxo, _) =
-            blvm_consensus::block::connect_block(&block, &witnesses, utxo_set, height, &ctx)?;
+            blvm_protocol::block::connect_block(&block, &witnesses, utxo_set, height, &ctx)?;
 
         utxo_set = new_utxo;
 
-        if !matches!(result, blvm_consensus::ValidationResult::Valid) {
+        if !matches!(result, blvm_protocol::ValidationResult::Valid) {
             println!("❌ Block {} is INVALID: {:?}", height, result);
             return Err(anyhow::anyhow!("Block {} validation failed", height));
         }

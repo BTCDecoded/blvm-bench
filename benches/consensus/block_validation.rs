@@ -1,10 +1,11 @@
-use blvm_consensus::block::{connect_block, BlockValidationContext};
-use blvm_consensus::segwit::Witness;
-use blvm_consensus::{
+use blvm_protocol::block::{connect_block, BlockValidationContext};
+use blvm_protocol::segwit::Witness;
+use blvm_protocol::{
     tx_inputs, tx_outputs, Block, BlockHeader, OutPoint, Transaction, TransactionInput,
     TransactionOutput, UtxoSet, UTXO,
 };
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use std::sync::Arc;
 
 fn create_test_block() -> Block {
     Block {
@@ -28,14 +29,14 @@ fn create_test_block() -> Block {
 fn benchmark_connect_block(c: &mut Criterion) {
     let block = create_test_block();
     // Coinbase transaction doesn't need UTXOs, so empty set is fine
-    let utxo_set = UtxoSet::new();
-    let witnesses: Vec<Witness> = block.transactions.iter().map(|_| Vec::new()).collect();
-    let ctx = BlockValidationContext::for_network(blvm_consensus::types::Network::Mainnet);
+    let utxo_set = UtxoSet::default();
+    let witnesses: Vec<Vec<Witness>> = block.transactions.iter().map(|_| Vec::new()).collect();
+    let ctx = BlockValidationContext::for_network(blvm_protocol::types::Network::Mainnet);
     c.bench_function("connect_block", |b| {
         b.iter(|| {
             let _result = connect_block(
                 black_box(&block),
-                black_box(&witnesses),
+                black_box(witnesses.as_slice()),
                 black_box(utxo_set.clone()),
                 black_box(0),
                 &ctx,
@@ -54,18 +55,18 @@ fn benchmark_connect_block_multi_tx(c: &mut Criterion) {
                 hash: [0; 32],
                 index: 0xffffffff, // Coinbase
             },
-            script_sig: vec![blvm_consensus::opcodes::OP_1; 4],
+            script_sig: vec![blvm_protocol::opcodes::OP_1; 4],
             sequence: 0xffffffff,
         }],
         outputs: tx_outputs![TransactionOutput {
             value: 50_000_000_000,
-            script_pubkey: vec![blvm_consensus::opcodes::OP_1],
+            script_pubkey: vec![blvm_protocol::opcodes::OP_1],
         }],
         lock_time: 0,
     };
     // Add 10 regular transactions with inputs that reference UTXOs
     let mut transactions = vec![coinbase];
-    let mut utxo_set = UtxoSet::new();
+    let mut utxo_set = UtxoSet::default();
 
     for i in 0..10 {
         // Create a UTXO that will be spent by this transaction
@@ -75,22 +76,23 @@ fn benchmark_connect_block_multi_tx(c: &mut Criterion) {
         };
         let prev_utxo = UTXO {
             value: 10_000_000,
-            script_pubkey: vec![blvm_consensus::opcodes::OP_1; 25],
+            script_pubkey: vec![blvm_protocol::opcodes::OP_1; 25].into(),
             height: 0,
+            is_coinbase: false,
         };
-        utxo_set.insert(prev_outpoint.clone(), prev_utxo);
+        utxo_set.insert(prev_outpoint.clone(), Arc::new(prev_utxo));
 
         // Create transaction that spends the UTXO
         transactions.push(Transaction {
             version: 1,
             inputs: tx_inputs![TransactionInput {
                 prevout: prev_outpoint.clone(),
-                script_sig: vec![blvm_consensus::opcodes::OP_1; 20],
+                script_sig: vec![blvm_protocol::opcodes::OP_1; 20],
                 sequence: 0xffffffff,
             }],
             outputs: tx_outputs![TransactionOutput {
                 value: 5_000_000,
-                script_pubkey: vec![blvm_consensus::opcodes::OP_1; 25],
+                script_pubkey: vec![blvm_protocol::opcodes::OP_1; 25],
             }],
             lock_time: 0,
         });
@@ -106,13 +108,13 @@ fn benchmark_connect_block_multi_tx(c: &mut Criterion) {
         },
         transactions: transactions.into_boxed_slice(),
     };
-    let witnesses: Vec<Witness> = block.transactions.iter().map(|_| Vec::new()).collect();
-    let ctx = BlockValidationContext::for_network(blvm_consensus::types::Network::Mainnet);
+    let witnesses: Vec<Vec<Witness>> = block.transactions.iter().map(|_| Vec::new()).collect();
+    let ctx = BlockValidationContext::for_network(blvm_protocol::types::Network::Mainnet);
     c.bench_function("connect_block_multi_tx", |b| {
         b.iter(|| {
             let _result = connect_block(
                 black_box(&block),
-                black_box(&witnesses),
+                black_box(witnesses.as_slice()),
                 black_box(utxo_set.clone()),
                 black_box(0),
                 &ctx,

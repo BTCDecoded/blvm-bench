@@ -4,11 +4,11 @@
 use anyhow::{Context, Result};
 use blvm_bench::chunked_cache::ChunkedBlockIterator;
 use blvm_bench::remote_core_rpc::RemoteCoreRpcClient;
-use blvm_consensus::block::calculate_tx_id;
-use blvm_consensus::script::{verify_script_with_context_full, SigVersion};
-use blvm_consensus::serialization::block::deserialize_block_with_witnesses;
-use blvm_consensus::serialization::transaction::serialize_transaction;
-use blvm_consensus::types::Network;
+use blvm_protocol::block::calculate_tx_id;
+use blvm_protocol::script::{verify_script_with_context_full, SigVersion};
+use blvm_protocol::serialization::block::deserialize_block_with_witnesses;
+use blvm_protocol::serialization::transaction::serialize_transaction;
+use blvm_protocol::types::Network;
 use std::path::PathBuf;
 
 #[tokio::main]
@@ -114,13 +114,13 @@ async fn main() -> Result<()> {
         let mut prevouts = Vec::new();
         for (i, input) in tx.inputs.iter().enumerate() {
             if i == input_idx {
-                prevouts.push(blvm_consensus::types::TransactionOutput {
+                prevouts.push(blvm_protocol::types::TransactionOutput {
                     value: joined.value,
                     script_pubkey: joined.script_pubkey.clone(),
                 });
             } else {
                 // Placeholder for other inputs
-                prevouts.push(blvm_consensus::types::TransactionOutput {
+                prevouts.push(blvm_protocol::types::TransactionOutput {
                     value: 0,
                     script_pubkey: vec![],
                 });
@@ -129,7 +129,7 @@ async fn main() -> Result<()> {
 
         // Calculate script flags (optimization: just check witness presence, no flattening)
         let has_witness = tx_witnesses.map(|w| !w.is_empty()).unwrap_or(false);
-        let flags = blvm_consensus::block::calculate_script_flags_for_block_network(
+        let flags = blvm_protocol::block::calculate_script_flags_for_block_network(
             tx,
             has_witness,
             block_height,
@@ -183,11 +183,11 @@ async fn main() -> Result<()> {
 
                     // Check if it's a P2PKH script
                     if joined.script_pubkey.len() == 25
-                        && joined.script_pubkey[0] == blvm_consensus::opcodes::OP_DUP
-                        && joined.script_pubkey[1] == blvm_consensus::opcodes::OP_HASH160
-                        && joined.script_pubkey[2] == blvm_consensus::opcodes::PUSH_20_BYTES
-                        && joined.script_pubkey[23] == blvm_consensus::opcodes::OP_EQUALVERIFY
-                        && joined.script_pubkey[24] == blvm_consensus::opcodes::OP_CHECKSIG
+                        && joined.script_pubkey[0] == blvm_protocol::opcodes::OP_DUP
+                        && joined.script_pubkey[1] == blvm_protocol::opcodes::OP_HASH160
+                        && joined.script_pubkey[2] == blvm_protocol::opcodes::PUSH_20_BYTES
+                        && joined.script_pubkey[23] == blvm_protocol::opcodes::OP_EQUALVERIFY
+                        && joined.script_pubkey[24] == blvm_protocol::opcodes::OP_CHECKSIG
                     {
                         // OP_CHECKSIG
                         println!("  💡 This is a P2PKH script");

@@ -4,9 +4,9 @@
 use anyhow::Result;
 use blvm_bench::checkpoint_persistence::CheckpointManager;
 use blvm_bench::chunked_cache::ChunkedBlockIterator;
-use blvm_consensus::script::{verify_script_with_context_full, SigVersion};
-use blvm_consensus::transaction_hash::{calculate_transaction_sighash, SighashType};
-use blvm_consensus::types::{Network, TransactionOutput};
+use blvm_protocol::script::{verify_script_with_context_full, SigVersion};
+use blvm_protocol::transaction_hash::{calculate_transaction_sighash, SighashType};
+use blvm_protocol::types::{Network, TransactionOutput};
 use std::path::PathBuf;
 
 #[tokio::test]
@@ -72,7 +72,7 @@ async fn investigate_block(target_height: u64, target_tx: usize) -> Result<()> {
             .ok_or_else(|| anyhow::anyhow!("Block {} not found", height))?;
 
         let (block, witnesses) =
-            blvm_consensus::serialization::block::deserialize_block_with_witnesses(&block_bytes)?;
+            blvm_protocol::serialization::block::deserialize_block_with_witnesses(&block_bytes)?;
 
         if height == target_height {
             println!("\n🔍 Block {} details:", height);
@@ -173,14 +173,12 @@ async fn investigate_block(target_height: u64, target_tx: usize) -> Result<()> {
             // NOW call connect_block on the target block to see if it actually passes
             println!("\n🔍 Testing connect_block on block {}...", height);
             let network = Network::Mainnet;
-            let ctx = blvm_consensus::block::BlockValidationContext::from_connect_block_ibd_args(
-                None::<&[blvm_consensus::types::BlockHeader]>,
+            let ctx = blvm_protocol::block::block_validation_context_for_connect_ibd(
+                None::<&[blvm_protocol::types::BlockHeader]>,
                 block.header.timestamp,
                 network,
-                None,
-                None,
             );
-            let (result, _, _) = blvm_consensus::block::connect_block(
+            let (result, _, _) = blvm_protocol::block::connect_block(
                 &block,
                 &witnesses,
                 current_utxo.clone(),
@@ -188,10 +186,10 @@ async fn investigate_block(target_height: u64, target_tx: usize) -> Result<()> {
                 &ctx,
             )?;
             match &result {
-                blvm_consensus::types::ValidationResult::Valid => {
+                blvm_protocol::types::ValidationResult::Valid => {
                     println!("   ✅ Block {} PASSED connect_block!", height);
                 }
-                blvm_consensus::types::ValidationResult::Invalid(msg) => {
+                blvm_protocol::types::ValidationResult::Invalid(msg) => {
                     println!("   ❌ Block {} FAILED connect_block: {}", height, msg);
                 }
             }
@@ -200,25 +198,23 @@ async fn investigate_block(target_height: u64, target_tx: usize) -> Result<()> {
 
         // Apply block to UTXO set
         let network = Network::Mainnet;
-        let ctx = blvm_consensus::block::BlockValidationContext::from_connect_block_ibd_args(
-            None::<&[blvm_consensus::types::BlockHeader]>,
+        let ctx = blvm_protocol::block::block_validation_context_for_connect_ibd(
+            None::<&[blvm_protocol::types::BlockHeader]>,
             block.header.timestamp,
             network,
-            None,
-            None,
         );
         let (result, new_utxo, _) =
-            blvm_consensus::block::connect_block(&block, &witnesses, current_utxo, height, &ctx)?;
+            blvm_protocol::block::connect_block(&block, &witnesses, current_utxo, height, &ctx)?;
 
         // Check result of connect_block
         match &result {
-            blvm_consensus::types::ValidationResult::Valid => {
+            blvm_protocol::types::ValidationResult::Valid => {
                 if height == target_height {
                     println!("   ✅ Block {} PASSED connect_block!", height);
                 }
                 current_utxo = new_utxo;
             }
-            blvm_consensus::types::ValidationResult::Invalid(msg) => {
+            blvm_protocol::types::ValidationResult::Invalid(msg) => {
                 println!("   ❌ Block {} FAILED connect_block: {}", height, msg);
                 // Continue anyway to see if we can debug further
                 current_utxo = new_utxo;

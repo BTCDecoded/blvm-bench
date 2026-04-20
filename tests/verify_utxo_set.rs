@@ -1,10 +1,11 @@
 //! Test to verify UTXO set state by reading blocks 0-15 and checking transaction outputs
+#![cfg(feature = "differential")]
 
 use anyhow::Result;
 use blvm_bench::block_file_reader::BlockFileReader;
-use blvm_consensus::block::{calculate_tx_id, connect_block};
-use blvm_consensus::serialization::block::deserialize_block_with_witnesses;
-use blvm_consensus::types::{Network, UtxoSet};
+use blvm_protocol::block::{calculate_tx_id, connect_block};
+use blvm_protocol::serialization::block::deserialize_block_with_witnesses;
+use blvm_protocol::types::{Network, UtxoSet};
 
 #[tokio::test]
 async fn test_verify_utxo_set_blocks_0_15() -> Result<()> {
@@ -66,7 +67,7 @@ async fn test_verify_utxo_set_blocks_0_15() -> Result<()> {
         let coinbase_count = block
             .transactions
             .iter()
-            .filter(|tx| blvm_consensus::transaction::is_coinbase(tx))
+            .filter(|tx| blvm_protocol::transaction::is_coinbase(tx))
             .count();
         let non_coinbase_count = block.transactions.len() - coinbase_count;
 
@@ -212,7 +213,7 @@ async fn test_verify_utxo_set_blocks_0_15() -> Result<()> {
             println!("     Full expected:        c997a5e56e104102fa209c6a852dd90660a20b2d9c352423edce25857fcd3704");
 
             // Check serialization and manual hash calculation
-            use blvm_consensus::serialization::transaction::serialize_transaction;
+            use blvm_protocol::serialization::transaction::serialize_transaction;
             let serialized = serialize_transaction(coinbase_tx);
             println!("     Serialized size:     {} bytes", serialized.len());
             println!(
@@ -248,7 +249,7 @@ async fn test_verify_utxo_set_blocks_0_15() -> Result<()> {
             }
 
             // Manually calculate hash to verify
-            use blvm_consensus::crypto::OptimizedSha256;
+            use blvm_protocol::crypto::OptimizedSha256;
             let manual_hash = OptimizedSha256::new().hash256(&serialized);
             let manual_str: String = manual_hash
                 .iter()
@@ -280,7 +281,7 @@ async fn test_verify_utxo_set_blocks_0_15() -> Result<()> {
 
         // Log non-coinbase transactions and their outputs
         for (tx_idx, tx) in block.transactions.iter().enumerate() {
-            if !blvm_consensus::transaction::is_coinbase(tx) {
+            if !blvm_protocol::transaction::is_coinbase(tx) {
                 let tx_id = calculate_tx_id(tx);
                 let txid_str: String = tx_id.iter().take(8).map(|b| format!("{:02x}", b)).collect();
                 println!(
@@ -370,7 +371,7 @@ async fn test_verify_utxo_set_blocks_0_15() -> Result<()> {
             let tx_id = calculate_tx_id(tx);
             let txid_str: String = tx_id.iter().take(8).map(|b| format!("{:02x}", b)).collect();
 
-            if !blvm_consensus::transaction::is_coinbase(tx) {
+            if !blvm_protocol::transaction::is_coinbase(tx) {
                 // Check if inputs exist in temp_utxo_set
                 for (input_idx, input) in tx.inputs.iter().enumerate() {
                     let hash_str: String = input
@@ -396,7 +397,7 @@ async fn test_verify_utxo_set_blocks_0_15() -> Result<()> {
             }
 
             // Apply transaction to temp_utxo_set
-            use blvm_consensus::block::apply_transaction;
+            use blvm_protocol::block::apply_transaction;
             match apply_transaction(tx, temp_utxo_set.clone(), height) {
                 Ok((new_temp_utxo_set, _)) => {
                     temp_utxo_set = new_temp_utxo_set;
@@ -411,22 +412,20 @@ async fn test_verify_utxo_set_blocks_0_15() -> Result<()> {
             }
         }
 
-        let ctx = blvm_consensus::block::BlockValidationContext::from_connect_block_ibd_args(
-            None::<&[blvm_consensus::types::BlockHeader]>,
+        let ctx = blvm_protocol::block::block_validation_context_for_connect_ibd(
+            None::<&[blvm_protocol::types::BlockHeader]>,
             block.header.timestamp,
             Network::Mainnet,
-            None,
-            None,
         );
         let (result, new_utxo_set, _undo_log) =
             connect_block(&block, &witnesses, utxo_set.clone(), height, &ctx)?;
 
         match result {
-            blvm_consensus::types::ValidationResult::Valid => {
+            blvm_protocol::types::ValidationResult::Valid => {
                 utxo_set = new_utxo_set;
                 println!("  ✅ Block {} validated successfully", height);
             }
-            blvm_consensus::types::ValidationResult::Invalid(msg) => {
+            blvm_protocol::types::ValidationResult::Invalid(msg) => {
                 println!("  ❌ Block {} validation failed: {}", height, msg);
                 // Continue to see UTXO set state
             }
@@ -453,7 +452,7 @@ async fn test_verify_utxo_set_blocks_0_15() -> Result<()> {
     let mut target_hash_array = [0u8; 32];
     target_hash_array.copy_from_slice(&target_hash);
 
-    let target_outpoint = blvm_consensus::types::OutPoint {
+    let target_outpoint = blvm_protocol::types::OutPoint {
         hash: target_hash_array,
         index: 0,
     };

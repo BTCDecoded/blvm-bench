@@ -1,6 +1,8 @@
-use blvm_consensus::{tx_inputs, tx_outputs, Block, BlockHeader, Transaction, TransactionOutput};
+mod compact_block_support;
+
+use blvm_protocol::{tx_inputs, tx_outputs, Block, BlockHeader, Transaction, TransactionOutput};
+use compact_block_support::create_compact_block;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use blvm_node::network::compact_blocks::create_compact_block;
 use std::collections::HashSet;
 
 fn create_test_block_with_txs(tx_count: usize) -> Block {
@@ -19,7 +21,7 @@ fn create_test_block_with_txs(tx_count: usize) -> Block {
                 inputs: tx_inputs![],
                 outputs: tx_outputs![TransactionOutput {
                     value: 5000000000 + i as i64,
-                    script_pubkey: vec![blvm_consensus::opcodes::OP_1],
+                    script_pubkey: vec![blvm_protocol::opcodes::OP_1],
                 }],
                 lock_time: 0,
             })
@@ -27,6 +29,7 @@ fn create_test_block_with_txs(tx_count: usize) -> Block {
             .into_boxed_slice(),
     }
 }
+
 fn benchmark_compact_block_creation(c: &mut Criterion) {
     let block = create_test_block_with_txs(100);
     let prefilled_indices = HashSet::new();
@@ -39,12 +42,19 @@ fn benchmark_compact_block_creation(c: &mut Criterion) {
             ));
         })
     });
+}
+
 fn benchmark_compact_block_vs_full_block_size(c: &mut Criterion) {
     let block = create_test_block_with_txs(1000);
+    let prefilled_indices = HashSet::new();
     c.bench_function("compact_block_size_1000_tx", |b| {
+        b.iter(|| {
             let compact = create_compact_block(&block, 12345, &prefilled_indices);
-            // Estimate size (simplified)
             black_box(compact.short_ids.len() * 6 + compact.prefilled_txs.len());
+        })
+    });
+}
+
 criterion_group!(
     benches,
     benchmark_compact_block_creation,

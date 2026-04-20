@@ -19,10 +19,10 @@ use std::path::Path;
 use std::time::Instant;
 use rayon::prelude::*;
 
-use blvm_consensus::serialization::block::deserialize_block_with_witnesses;
-use blvm_consensus::serialization::encode_varint;
-use blvm_consensus::transaction::is_coinbase;
-use blvm_consensus::types::Hash;
+use blvm_protocol::serialization::block::deserialize_block_with_witnesses;
+use blvm_protocol::serialization::encode_varint;
+use blvm_protocol::transaction::is_coinbase;
+use blvm_protocol::types::Hash;
 
 use crate::chunked_cache::ChunkedBlockIterator;
 
@@ -89,9 +89,9 @@ impl OutputRef {
 /// Calculate txid from transaction
 /// CRITICAL: Must use the SAME txid calculation as blvm-consensus to ensure merge-join works
 /// Step 1 reads prevout.hash (which is the txid), and step 3 calculates txid - they MUST match
-fn calculate_txid(tx: &blvm_consensus::types::Transaction) -> Hash {
+fn calculate_txid(tx: &blvm_protocol::types::Transaction) -> Hash {
     // Use the same calculate_tx_id function from blvm-consensus to ensure consistency
-    use blvm_consensus::block::calculate_tx_id;
+    use blvm_protocol::block::calculate_tx_id;
     calculate_tx_id(tx)
 }
 

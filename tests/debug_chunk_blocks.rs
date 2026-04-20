@@ -1,4 +1,5 @@
 //! Debug: Check what blocks are actually in chunks and their prev_hashes
+#![cfg(feature = "chunk-cache")]
 
 use anyhow::Result;
 use blvm_bench::chunked_cache::{decompress_chunk_streaming, load_chunk_metadata};

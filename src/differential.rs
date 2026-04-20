@@ -5,7 +5,7 @@
 
 use crate::core_rpc_client::CoreRpcClient;
 use anyhow::{Context, Result};
-use blvm_consensus::types::{Network, Block, Transaction};
+use blvm_protocol::types::{Network, Block, Transaction};
 
 /// Comparison result
 #[derive(Debug, Clone)]
@@ -53,7 +53,7 @@ pub async fn compare_transaction_validation(
 ) -> Result<ComparisonResult> {
     // Serialize transaction to hex using Bitcoin wire format
     // Use blvm-consensus serialization for proper format
-    use blvm_consensus::serialization::serialize_transaction;
+    use blvm_protocol::serialization::serialize_transaction;
     let tx_bytes = serialize_transaction(tx);
     let tx_hex = hex::encode(tx_bytes);
 
@@ -117,9 +117,9 @@ pub async fn compare_block_validation(
 ) -> Result<ComparisonResult> {
     // Serialize block to hex using Bitcoin wire format
     // Use the proper serialization from blvm-consensus
-    use blvm_consensus::serialization::block::serialize_block_header;
-    use blvm_consensus::serialization::transaction::serialize_transaction;
-    use blvm_consensus::serialization::varint::encode_varint;
+    use blvm_protocol::serialization::block::serialize_block_header;
+    use blvm_protocol::serialization::transaction::serialize_transaction;
+    use blvm_protocol::serialization::varint::encode_varint;
 
     let mut block_bytes = Vec::new();
     // Serialize header (80 bytes)

@@ -4,12 +4,12 @@
 use anyhow::{Context, Result};
 use blvm_bench::chunked_cache::ChunkedBlockIterator;
 use blvm_bench::remote_core_rpc::RemoteCoreRpcClient;
-use blvm_consensus::block::calculate_tx_id;
-use blvm_consensus::script::{verify_script_with_context_full, SigVersion};
-use blvm_consensus::serialization::block::deserialize_block_with_witnesses;
-use blvm_consensus::witness::is_witness_empty;
-use blvm_consensus::serialization::transaction::serialize_transaction;
-use blvm_consensus::types::Network;
+use blvm_protocol::block::calculate_tx_id;
+use blvm_protocol::script::{verify_script_with_context_full, SigVersion};
+use blvm_protocol::serialization::block::deserialize_block_with_witnesses;
+use blvm_protocol::witness::is_witness_empty;
+use blvm_protocol::serialization::transaction::serialize_transaction;
+use blvm_protocol::types::Network;
 use std::path::PathBuf;
 
 #[tokio::main]
@@ -137,14 +137,14 @@ async fn main() -> Result<()> {
         let mut prevouts = Vec::new();
         for (i, input) in tx.inputs.iter().enumerate() {
             if i == input_idx {
-                prevouts.push(blvm_consensus::types::TransactionOutput {
+                prevouts.push(blvm_protocol::types::TransactionOutput {
                     value: joined.value,
                     script_pubkey: joined.script_pubkey.clone(),
                 });
             } else {
                 // Placeholder for other inputs (we don't have their prevouts here)
                 // This might cause issues with sighash calculation, but let's try
-                prevouts.push(blvm_consensus::types::TransactionOutput {
+                prevouts.push(blvm_protocol::types::TransactionOutput {
                     value: 0,
                     script_pubkey: vec![],
                 });
@@ -153,7 +153,7 @@ async fn main() -> Result<()> {
 
         let wits = tx_witnesses.map(|w| w.as_slice()).unwrap_or(&[]);
         let has_witness = wits.iter().any(|wit| !is_witness_empty(wit));
-        let flags = blvm_consensus::block::calculate_script_flags_for_block_network(
+        let flags = blvm_protocol::block::calculate_script_flags_for_block_network(
             tx,
             has_witness,
             block_height,

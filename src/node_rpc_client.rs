@@ -9,6 +9,18 @@ use serde_json::Value;
 use std::path::PathBuf;
 use std::time::Duration;
 
+fn env_first_non_empty(keys: &[&str]) -> Option<String> {
+    for k in keys {
+        if let Ok(v) = std::env::var(k) {
+            let t = v.trim();
+            if !t.is_empty() {
+                return Some(t.to_string());
+            }
+        }
+    }
+    None
+}
+
 /// RPC client configuration
 #[derive(Debug, Clone)]
 pub struct RpcConfig {
@@ -24,6 +36,7 @@ pub struct RpcConfig {
 
 impl RpcConfig {
     /// Create from regtest node
+    #[cfg(any(feature = "differential", feature = "benchmark-helpers"))]
     pub fn from_regtest_node(node: &crate::regtest_node::RegtestNode) -> Self {
         Self {
             url: node.rpc_url(),
@@ -36,18 +49,34 @@ impl RpcConfig {
     /// Create from environment variables (supports remote nodes)
     ///
     /// Environment variables:
-    /// - `BITCOIN_RPC_HOST` (default: "127.0.0.1")
-    /// - `BITCOIN_RPC_PORT` (default: 8332 for mainnet, 18443 for regtest)
-    /// - `BITCOIN_RPC_USER` (default: "test")
-    /// - `BITCOIN_RPC_PASSWORD` (default: "test")
+    /// - `BITCOIN_RPC_HOST` (default: "127.0.0.1"); if unset, tries `START9_RPC_HOST`, `LAND_NODE_RPC_HOST`
+    /// - `BITCOIN_RPC_PORT` (default from `BITCOIN_NETWORK`); if unset, tries `START9_RPC_PORT`, `LAND_NODE_RPC_PORT`
+    /// - `BITCOIN_RPC_USER` / `BITCOIN_RPC_PASSWORD` (defaults: "test"); fallbacks include
+    ///   `START9_RPC_*`, `LAND_NODE_RPC_*`, `REMOTE_CORE_RPC_*` (same as `remote_core_rpc`)
     /// - `BITCOIN_NETWORK` (default: "mainnet") - used to determine default port
     pub fn from_env() -> Self {
-        let rpc_host =
-            std::env::var("BITCOIN_RPC_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
+        let rpc_host = env_first_non_empty(&[
+            "BITCOIN_RPC_HOST",
+            "START9_RPC_HOST",
+            "LAND_NODE_RPC_HOST",
+        ])
+        .unwrap_or_else(|| "127.0.0.1".to_string());
 
-        let rpc_user = std::env::var("BITCOIN_RPC_USER").unwrap_or_else(|_| "test".to_string());
+        let rpc_user = env_first_non_empty(&[
+            "BITCOIN_RPC_USER",
+            "START9_RPC_USER",
+            "LAND_NODE_RPC_USER",
+            "REMOTE_CORE_RPC_USER",
+        ])
+        .unwrap_or_else(|| "test".to_string());
 
-        let rpc_pass = std::env::var("BITCOIN_RPC_PASSWORD").unwrap_or_else(|_| "test".to_string());
+        let rpc_pass = env_first_non_empty(&[
+            "BITCOIN_RPC_PASSWORD",
+            "START9_RPC_PASSWORD",
+            "LAND_NODE_RPC_PASSWORD",
+            "REMOTE_CORE_RPC_PASSWORD",
+        ])
+        .unwrap_or_else(|| "test".to_string());
 
         // Determine default port based on network
         let default_port = match std::env::var("BITCOIN_NETWORK")
@@ -62,8 +91,7 @@ impl RpcConfig {
             _ => 8332, // Default to mainnet
         };
 
-        let rpc_port = std::env::var("BITCOIN_RPC_PORT")
-            .ok()
+        let rpc_port = env_first_non_empty(&["BITCOIN_RPC_PORT", "START9_RPC_PORT", "LAND_NODE_RPC_PORT"])
             .and_then(|p| p.parse::<u16>().ok())
             .unwrap_or(default_port);
 
@@ -89,6 +117,7 @@ impl RpcConfig {
 }
 
 /// Bitcoin node RPC client
+#[derive(Clone)]
 pub struct NodeRpcClient {
     client: Client,
     config: RpcConfig,
@@ -99,6 +128,8 @@ impl NodeRpcClient {
     pub fn new(config: RpcConfig) -> Self {
         let client = Client::builder()
             .timeout(config.timeout)
+            .pool_max_idle_per_host(8)
+            .tcp_keepalive(Some(Duration::from_secs(60)))
             .build()
             .expect("Failed to create HTTP client");
 
@@ -225,6 +256,14 @@ impl NodeRpcClient {
             .as_str()
             .map(|s| s.to_string())
             .context("Invalid getblock response (expected hex string with verbosity=0)")
+    }
+
+    /// `getblockhash` then `getblock` verbosity 0 — one async chain so sync callers use a single `block_on`.
+    pub async fn getblock_bytes_at_height(&self, height: u64) -> Result<Vec<u8>> {
+        let hash = self.getblockhash(height).await?;
+        let hex = self.getblock_raw(&hash).await?;
+        hex::decode(hex.trim())
+            .with_context(|| format!("decode getblock hex at height {height}"))
     }
 
     /// Generate blocks (regtest only)

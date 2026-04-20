@@ -4,8 +4,8 @@
 use anyhow::Result;
 use blvm_bench::chunk_index::{load_block_index, BlockIndex};
 use blvm_bench::chunked_cache::SharedChunkCache;
-use blvm_consensus::serialization::block::deserialize_block_with_witnesses;
-use blvm_consensus::serialization::transaction::serialize_transaction;
+use blvm_protocol::serialization::block::deserialize_block_with_witnesses;
+use blvm_protocol::serialization::transaction::serialize_transaction;
 use std::collections::{BTreeMap, HashMap};
 use std::fs::File;
 use std::io::{BufRead, BufReader, BufWriter, Write};

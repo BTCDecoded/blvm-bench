@@ -10,6 +10,8 @@ homepage = "https://btcdecoded.org"
 keywords = ["bitcoin", "benchmarking", "performance", "testing"]
 categories = ["development-tools", "algorithms"]
 rust-version = "1.83"
+# Every `src/bin/*.rs` target is listed under `[[bin]]` with `required-features` where needed.
+autobins = false
 
 # This is a dev-only crate, but we can test in production mode
 # Use --features production to enable production optimizations during benchmarking
@@ -19,15 +21,19 @@ rust-version = "1.83"
 criterion = "0.5"
 
 # Bitcoin Commons dependencies for benchmarking
-blvm-consensus = { version = ">=0.1, <1", features = ["production", "local-spec-lock", "smallvec", "profile"] }
-blvm-protocol = { version = ">=0.1, <1", features = ["utxo-commitments"], optional = true }
-# blvm-node = { version = "0.1.0", features = ["dandelion"] }  # Not needed for differential testing
+# `profile` adds per-block [TIMING] logs in connect_block (I/O heavy); enable via crate feature `consensus-profile`.
+blvm-consensus = { version = ">=0.1, <1", features = ["production", "local-spec-lock", "smallvec", "benchmarking"] }
+blvm-protocol = { version = ">=0.1, <1", features = ["production", "benchmarking", "utxo-commitments"], optional = true }
+# Node-layer benches opt in via `node-benches` so default `cargo check --benches` stays lean.
+blvm-node = { path = "../blvm-node", optional = true, default-features = false, features = ["redb", "production", "protocol-verification", "dandelion", "fibre", "nix", "libc"] }
 
 # Utilities
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 anyhow = "1.0"
 thiserror = "1.0"
+# Optional env files for block_kernel_diff (LAN RPC, paths) — loaded before clap parses
+dotenvy = "0.15"
 
 # Deep analysis (low-level metrics)
 # Note: perf integration is done via shell scripts for portability
@@ -43,7 +49,7 @@ secp256k1 = "0.28"
 bitcoinconsensus = { version = "0.106", optional = true }
 
 # For CLI tool to run shell benchmarks
-clap = { version = "4.4", features = ["derive"] }
+clap = { version = "4.4", features = ["derive", "env"] }
 tokio = { version = "1.35", features = ["full"] }
 futures = "0.3"
 
@@ -63,27 +69,58 @@ num_cpus = "1.16"
 # For fast pattern searching
 memchr = "2.7"
 # For parallel processing
-rayon = "1.8"
+# Pin to match blvm-protocol `production` → optional `rayon = "=1.10"` (unify crate graph).
+rayon = "=1.10"
 # For timestamps in checkpoints
 chrono = "0.4"
 # Memory-efficient hash map for grandfathered scan outpoint index
 rustc-hash = "2.0"
+# BIP152 short txids in compact-block bench helpers (`benches/node/compact_block_support.rs`; types from `blvm-protocol` `bip152`).
+siphasher = "0.3"
+crc32fast = "=1.3"
 # For memory-mapped file access (faster random access for large files)
 memmap2 = "0.9"
+# libbitcoinkernel FFI (optional)
+libc = { version = "0.2" }
+# Low-fragmentation allocator for UTXO-heavy binaries (saves ~2GB RSS vs glibc at 50M+ entries)
+mimalloc = { version = "0.1", optional = true }
+# Direct access to mi_collect() for forced heap decommit after large batch flushes
+libmimalloc-sys = { version = "0.1", features = ["extended"], optional = true }
+# Disk-backed UTXO set for checkpoint builds on memory-constrained hosts
+rocksdb = { version = "0.24.0", optional = true }
 
 [features]
 default = []
+# Chunk block cache + `chunk_index` / `missing_blocks` (shared by scan and differential tooling).
+chunk-cache = []
+# UTXO checkpoint manager + delta pipeline (`checkpoint_persistence`, `utxo_delta`, …).
+utxo-snapshot-tools = []
 # Enable production optimizations for benchmarking
 # This allows testing benches in production mode even though this is a dev crate
 production = ["blvm-consensus/production"]
+# Per-block connect timing logs (slower; was previously enabled by default via blvm-consensus/profile)
+consensus-profile = ["blvm-consensus/profile"]
 # Enable differential testing functionality
-differential = ["bitcoinconsensus", "dep:blvm-protocol"]
+differential = ["bitcoinconsensus", "chunk-cache", "utxo-snapshot-tools"]
+# BLVM vs libbitcoinkernel block validation (see build.rs). Uses `scan` (chunk cache) only —
+# do not enable `bitcoinconsensus` here: static `libbitcoinkernel.a` duplicates those symbols.
+# `low-mem-alloc` (mimalloc) cuts HashMap-heavy UTXO RSS vs glibcmalloc on long diffs.
+bitcoinkernel = ["scan", "low-mem-alloc", "disk-utxo"]
 # Enable benchmark helpers (uses differential infrastructure)
 benchmark-helpers = ["differential"]
 # BIP-110 scan: block analysis without bitcoinconsensus (uses chunked cache only)
-scan = ["dep:blvm-protocol"]
+scan = ["chunk-cache", "utxo-snapshot-tools"]
+# Use mimalloc as global allocator (chunk_utxo_checkpoints, etc.) — dramatically lowers RSS
+# for HashMap-heavy workloads with millions of small allocations.
+low-mem-alloc = ["dep:mimalloc", "dep:libmimalloc-sys"]
+# Disk-backed UTXO set via RocksDB — enables chunk_utxo_checkpoints to run on hosts with less RAM
+# than the full UTXO set requires (e.g. 16 GiB at heights > 550k). DB lives on SSD for fast
+# random I/O; chunk reads stay on HDD (`librocksdb-sys` builds RocksDB from source when linking).
+disk-utxo = ["dep:rocksdb"]
 # UTXO commitments benchmarks (uses blvm-protocol)
-utxo-commitments = ["dep:blvm-protocol"]
+utxo-commitments = ["blvm-protocol/utxo-commitments"]
+# Benches that import `blvm_node` (storage, RPC integration, parallel validation, Dandelion/FIBRE).
+node-benches = ["dep:blvm-node"]
 
 [dev-dependencies]
 # Additional testing utilities if needed
@@ -95,6 +132,9 @@ proptest = "1.5"
 blvm-consensus = { path = "../blvm-consensus" }
 blvm-protocol = { path = "../blvm-protocol" }
 blvm-node = { path = "../blvm-node" }
+blvm-primitives = { path = "../blvm-primitives" }
+# `#[spec_locked]` must see monorepo `../blvm-spec` (PROTOCOL.md / ARCHITECTURE.md), not vendored stub.
+blvm-spec-lock = { path = "../blvm-spec-lock" }
 
 # Benchmark targets - Consensus layer
 [[bench]]
@@ -187,16 +227,19 @@ harness = false
 name = "dandelion_bench"
 path = "benches/node/dandelion_bench.rs"
 harness = false
+required-features = ["node-benches"]
 
 [[bench]]
 name = "fibre_bench"
 path = "benches/node/fibre_bench.rs"
 harness = false
+required-features = ["node-benches"]
 
 [[bench]]
 name = "storage_operations"
 path = "benches/node/storage_operations.rs"
 harness = false
+required-features = ["node-benches"]
 
 [[bench]]
 name = "transport_comparison"
@@ -207,12 +250,14 @@ harness = false
 name = "parallel_block_validation"
 path = "benches/node/parallel_block_validation.rs"
 harness = false
+required-features = ["node-benches"]
 
 # Integration benchmarks
 [[bench]]
 name = "node_sync_and_rpc"
 path = "benches/integration/node_sync_and_rpc.rs"
 harness = false
+required-features = ["node-benches"]
 
 [profile.bench]
 opt-level = 3
@@ -224,62 +269,87 @@ codegen-units = 16
 [[bin]]
 name = "rebuild_missing_metadata"
 path = "src/bin/rebuild_missing_metadata.rs"
+required-features = ["chunk-cache"]
 
 [[bin]]
 name = "verify_missing_blocks"
 path = "src/bin/verify_missing_blocks.rs"
+required-features = ["chunk-cache"]
 
 [[bin]]
 name = "check_prevout_in_outputs"
 path = "src/bin/check_prevout_in_outputs.rs"
+required-features = ["differential"]
 
 [[bin]]
 name = "sample_check_prevouts"
 path = "src/bin/sample_check_prevouts.rs"
+required-features = ["differential"]
 
 [[bin]]
 name = "verify_txid_match"
 path = "src/bin/verify_txid_match.rs"
+required-features = ["chunk-cache"]
 
 [[bin]]
 name = "debug_prevouts"
 path = "src/bin/debug_prevouts.rs"
+required-features = ["differential"]
 
 [[bin]]
 name = "check_missing_prevout_source"
 path = "src/bin/check_missing_prevout_source.rs"
+required-features = ["chunk-cache"]
 
 [[bin]]
 name = "analyze_missing_prevout"
 path = "src/bin/analyze_missing_prevout.rs"
+required-features = ["differential"]
 
 [[bin]]
 name = "verify_txid_consistency"
 path = "src/bin/verify_txid_consistency.rs"
+required-features = ["chunk-cache"]
+
+[[bin]]
+name = "quick_check_null_dummy"
+path = "src/bin/quick_check_null_dummy.rs"
+required-features = ["chunk-cache"]
+
+[[bin]]
+name = "verify_chain_integrity"
+path = "src/bin/verify_chain_integrity.rs"
+required-features = ["chunk-cache"]
 
 [[bin]]
 name = "check_last_outputs"
 path = "src/bin/check_last_outputs.rs"
+required-features = ["differential"]
 
 [[bin]]
 name = "fix_missing_blocks_index"
 path = "src/bin/fix_missing_blocks_index.rs"
+required-features = ["chunk-cache"]
 
 [[bin]]
 name = "rebuild_index_properly"
 path = "src/bin/rebuild_index_properly.rs"
+required-features = ["differential"]
 
 [[bin]]
 name = "rebuild_hashmap"
 path = "src/bin/rebuild_hashmap.rs"
+required-features = ["chunk-cache"]
 
 [[bin]]
 name = "build_hashmap_only"
 path = "src/bin/build_hashmap_only.rs"
+required-features = ["chunk-cache"]
 
 [[bin]]
 name = "fill_missing_from_files"
 path = "src/bin/fill_missing_from_files.rs"
+required-features = ["chunk-cache"]
 
 [[bin]]
 name = "recollect_blocks"
@@ -300,6 +370,7 @@ path = "src/bin/check_divergences.rs"
 [[bin]]
 name = "prepare_divergence_check"
 path = "src/bin/prepare_divergence_check.rs"
+required-features = ["chunk-cache"]
 
 [[bin]]
 name = "scan_chain"
@@ -314,14 +385,136 @@ required-features = ["scan"]
 [[bin]]
 name = "verify_block_coverage"
 path = "src/bin/verify_block_coverage.rs"
+required-features = ["chunk-cache"]
 
 [[bin]]
 name = "extract_failure_txs"
 path = "src/bin/extract_failure_txs.rs"
+required-features = ["chunk-cache"]
 
 [[bin]]
 name = "bench_snapshots"
 path = "src/bin/bench_snapshots.rs"
+
+[[bin]]
+name = "block_kernel_diff"
+path = "src/bin/block_kernel_diff.rs"
+required-features = ["bitcoinkernel"]
+
+[[bin]]
+name = "chunk_utxo_checkpoints"
+path = "src/bin/chunk_utxo_checkpoints.rs"
+# `disk-utxo` is required: without it this binary uses `run_in_memory`, which loads the full
+# UTXO (~10+ GiB RSS at 590k height) and triggers OOM on typical 16 GiB desktop hosts.
+required-features = ["scan", "disk-utxo"]
+
+[[bin]]
+name = "prep_chunk_utxo_cache"
+path = "src/bin/prep_chunk_utxo_cache.rs"
+required-features = ["scan"]
+
+[[bin]]
+name = "materialize_utxo_snapshots"
+path = "src/bin/materialize_utxo_snapshots.rs"
+required-features = ["utxo-snapshot-tools"]
+
+# Auto-discovered `src/bin/*.rs` companions (explicit so `required-features` apply under default features).
+[[bin]]
+name = "find_error_in_block"
+path = "src/bin/find_error_in_block.rs"
+required-features = ["differential"]
+
+[[bin]]
+name = "inspect_nulldummy"
+path = "src/bin/inspect_nulldummy.rs"
+required-features = ["chunk-cache"]
+
+[[bin]]
+name = "analyze_script_failure"
+path = "src/bin/analyze_script_failure.rs"
+required-features = ["differential"]
+
+[[bin]]
+name = "investigate_script_failure"
+path = "src/bin/investigate_script_failure.rs"
+required-features = ["differential"]
+
+[[bin]]
+name = "verify_with_bitcoin_core"
+path = "src/bin/verify_with_bitcoin_core.rs"
+required-features = ["chunk-cache"]
+
+[[bin]]
+name = "investigate_unmatched_tx"
+path = "src/bin/investigate_unmatched_tx.rs"
+required-features = ["chunk-cache"]
+
+[[bin]]
+name = "quick_check_failure"
+path = "src/bin/quick_check_failure.rs"
+required-features = ["differential"]
+
+[[bin]]
+name = "investigate_failure"
+path = "src/bin/investigate_failure.rs"
+required-features = ["differential"]
+
+[[bin]]
+name = "sort_merge_test"
+path = "src/bin/sort_merge_test.rs"
+required-features = ["differential"]
+
+[[bin]]
+name = "find_missing_block"
+path = "src/bin/find_missing_block.rs"
+required-features = ["chunk-cache"]
+
+[[bin]]
+name = "verify_sorted_complete"
+path = "src/bin/verify_sorted_complete.rs"
+required-features = ["differential"]
+
+[[bin]]
+name = "check_unsorted_blocks"
+path = "src/bin/check_unsorted_blocks.rs"
+required-features = ["differential"]
+
+[[bin]]
+name = "check_output_blocks"
+path = "src/bin/check_output_blocks.rs"
+required-features = ["differential"]
+
+[[bin]]
+name = "find_last_output"
+path = "src/bin/find_last_output.rs"
+required-features = ["differential"]
+
+[[bin]]
+name = "check_txid_in_outputs"
+path = "src/bin/check_txid_in_outputs.rs"
+required-features = ["differential"]
+
+[[bin]]
+name = "inspect_merge_issue"
+path = "src/bin/inspect_merge_issue.rs"
+required-features = ["differential"]
+
+[[bin]]
+name = "inspect_unmatched"
+path = "src/bin/inspect_unmatched.rs"
+required-features = ["differential"]
+
+[[bin]]
+name = "test_signature_direct"
+path = "src/bin/test_signature_direct.rs"
+
+[[bin]]
+name = "analyze_failures"
+path = "src/bin/analyze_failures.rs"
+
+[[bin]]
+name = "bllvm-bench"
+path = "src/bin/bllvm-bench.rs"
 
 [profile.release]
 opt-level = 3

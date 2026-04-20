@@ -1,8 +1,8 @@
 //! Block Assembly Benchmark
 //! Measures block creation from mempool transactions (create_new_block)
 
-use blvm_consensus::mining::create_new_block;
-use blvm_consensus::{
+use blvm_protocol::mining::create_new_block;
+use blvm_protocol::{
     tx_inputs, tx_outputs, BlockHeader, OutPoint, Transaction, TransactionInput, TransactionOutput,
     UtxoSet,
 };
@@ -20,7 +20,7 @@ fn create_test_transaction(i: usize) -> Transaction {
                 },
                 index: 0,
             },
-            script_sig: vec![blvm_consensus::opcodes::OP_1],
+            script_sig: vec![blvm_protocol::opcodes::OP_1],
             sequence: 0xffffffff,
         }],
         outputs: tx_outputs![TransactionOutput {
@@ -35,7 +35,7 @@ fn benchmark_assemble_block(c: &mut Criterion) {
     // Create a mempool with transactions (matches Core's AssembleBlock exactly)
     // Core: NUM_BLOCKS=200, COINBASE_MATURITY=100, so txs = 200 - 100 + 1 = 101
     let mut mempool_txs = Vec::new();
-    let mut utxo_set = UtxoSet::new();
+    let utxo_set = UtxoSet::default();
 
     // Create 101 transactions in mempool (matches Core exactly)
     for i in 0..101 {
@@ -54,8 +54,8 @@ fn benchmark_assemble_block(c: &mut Criterion) {
     };
 
     let prev_headers = vec![prev_header.clone()];
-    let coinbase_script = vec![blvm_consensus::opcodes::OP_1];
-    let coinbase_address = vec![blvm_consensus::opcodes::OP_1];
+    let coinbase_script = vec![blvm_protocol::opcodes::OP_1];
+    let coinbase_address = vec![blvm_protocol::opcodes::OP_1];
 
     c.bench_function("assemble_block", |b| {
         b.iter(|| {

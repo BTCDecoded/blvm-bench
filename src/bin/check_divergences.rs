@@ -6,7 +6,6 @@ use blvm_bench::remote_core_rpc::RemoteCoreRpcClient;
 use std::collections::HashSet;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
-use std::path::PathBuf;
 use std::time::Instant;
 
 const BATCH_SIZE: usize = 25; // Txs per RPC call

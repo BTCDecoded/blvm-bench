@@ -3,8 +3,8 @@
 
 use anyhow::{Context, Result};
 use blvm_bench::chunked_cache::ChunkedBlockIterator;
-use blvm_consensus::block::calculate_tx_id;
-use blvm_consensus::serialization::block::deserialize_block_with_witnesses;
+use blvm_protocol::block::calculate_tx_id;
+use blvm_protocol::serialization::block::deserialize_block_with_witnesses;
 use std::path::PathBuf;
 
 fn main() -> Result<()> {
@@ -75,7 +75,7 @@ fn main() -> Result<()> {
 
     // Check the raw transaction bytes to see the actual prevout hash
     println!("🔎 Checking raw transaction bytes...");
-    use blvm_consensus::serialization::transaction::serialize_transaction;
+    use blvm_protocol::serialization::transaction::serialize_transaction;
     let tx_bytes = serialize_transaction(tx);
 
     // Find the input in the serialized bytes
@@ -90,7 +90,7 @@ fn main() -> Result<()> {
     let mut offset = 4;
 
     // Read input count (varint)
-    use blvm_consensus::serialization::decode_varint;
+    use blvm_protocol::serialization::decode_varint;
     let (input_count, varint_len) = decode_varint(&tx_bytes[offset..])?;
     offset += varint_len;
 

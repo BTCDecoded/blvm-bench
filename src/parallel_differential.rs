@@ -5,7 +5,7 @@
 //! from a UTXO checkpoint to enable independent parallel validation.
 
 use anyhow::{Context, Result};
-use blvm_consensus::UtxoSet;
+use blvm_protocol::UtxoSet;
 use std::sync::{Arc, Mutex};
 use tokio::sync::Semaphore;
 
@@ -165,10 +165,10 @@ pub async fn generate_checkpoints(
     chunk_size: u64,
     block_source: &BlockDataSource,
 ) -> Result<Vec<(u64, UtxoSet)>> {
-    use blvm_consensus::block::connect_block;
-    use blvm_consensus::segwit::Witness;
-    use blvm_consensus::serialization::block::deserialize_block_with_witnesses;
-    use blvm_consensus::types::Network;
+    use blvm_protocol::block::connect_block;
+    use blvm_protocol::segwit::Witness;
+    use blvm_protocol::serialization::block::deserialize_block_with_witnesses;
+    use blvm_protocol::types::Network;
 
     // OPTIMIZATION: Pre-allocate checkpoints vector (estimate: ~10 checkpoints for 1M blocks)
     let estimated_checkpoints = ((end_height - start_height) / chunk_size + 1) as usize;
@@ -283,13 +283,13 @@ pub async fn generate_checkpoints(
                 
                 // Debug: Check if previous blocks had non-coinbase transactions
                 if height <= 16 {
-                    let non_coinbase_count = block.transactions.iter().filter(|tx| !blvm_consensus::transaction::is_coinbase(tx)).count();
+                    let non_coinbase_count = block.transactions.iter().filter(|tx| !blvm_protocol::transaction::is_coinbase(tx)).count();
                     if non_coinbase_count > 0 {
                         eprintln!("🔍 Block {}: {} non-coinbase transactions", height, non_coinbase_count);
                         // For each non-coinbase transaction, show what it's spending
                         for (tx_idx, tx) in block.transactions.iter().enumerate() {
-                            if !blvm_consensus::transaction::is_coinbase(tx) {
-                                use blvm_consensus::block::calculate_tx_id;
+                            if !blvm_protocol::transaction::is_coinbase(tx) {
+                                use blvm_protocol::block::calculate_tx_id;
                                 let txid = calculate_tx_id(tx);
                                 let txid_str: String = txid.iter().take(8).map(|b| format!("{:02x}", b)).collect();
                                 eprintln!("   TX {} (non-coinbase): {} inputs, {} outputs, TXID: {}...", 
@@ -382,7 +382,7 @@ pub async fn generate_checkpoints(
                             }
                         }
                         // Calculate TX ID
-                        use blvm_consensus::block::calculate_tx_id;
+                        use blvm_protocol::block::calculate_tx_id;
                         let txid = calculate_tx_id(tx);
                         let txid_str: String = txid.iter().take(8).map(|b| format!("{:02x}", b)).collect();
                         eprintln!("      TX ID: {}...", txid_str);
@@ -435,7 +435,7 @@ pub async fn generate_checkpoints(
                 // Debug: Verify we're calculating the correct coinbase txid
                 #[cfg(debug_assertions)]
                 if height <= 2 {
-                    use blvm_consensus::block::calculate_tx_id;
+                    use blvm_protocol::block::calculate_tx_id;
                     if let Some(coinbase) = block.transactions.first() {
                         let txid = calculate_tx_id(coinbase);
                         eprintln!("DEBUG Block {}: coinbase txid = {}", height, hex::encode(txid));
@@ -458,12 +458,10 @@ pub async fn generate_checkpoints(
                     println!("   🔄 [{}] Calling connect_block for block {}...", idx, height);
                 }
 
-                let ctx = blvm_consensus::block::BlockValidationContext::from_connect_block_ibd_args(
-                    None::<&[blvm_consensus::types::BlockHeader]>,
+                let ctx = blvm_protocol::block::block_validation_context_for_connect_ibd(
+                    None::<&[blvm_protocol::types::BlockHeader]>,
                     block.header.timestamp,
                     Network::Mainnet,
-                    None,
-                    None,
                 );
                 let connect_start = std::time::Instant::now();
                 let (result, new_utxo_set, _undo_log) = connect_block(
@@ -481,7 +479,7 @@ pub async fn generate_checkpoints(
                     eprintln!("   ⚠️  [{}] connect_block took {:.2}s for block {} (slow!)", idx, connect_duration.as_secs_f64(), height);
                 }
                 
-                if matches!(result, blvm_consensus::types::ValidationResult::Valid) {
+                if matches!(result, blvm_protocol::types::ValidationResult::Valid) {
                     utxo_set = new_utxo_set;
                     if height < 100 {
                         println!("   ✅ [{}] Block {} validated successfully, UTXO set size: {}", idx, height, utxo_set.len());
@@ -489,7 +487,7 @@ pub async fn generate_checkpoints(
                 } else {
                     // OPTIMIZATION: Use string reference instead of clone
                     let error_msg = match &result {
-                        blvm_consensus::types::ValidationResult::Invalid(msg) => msg.as_str(),
+                        blvm_protocol::types::ValidationResult::Invalid(msg) => msg.as_str(),
                         _ => "Unknown error",
                     };
                     eprintln!("❌ Block {} validation failed: {}", height, error_msg);
@@ -537,7 +535,7 @@ pub async fn generate_checkpoints(
                 
                 // DEBUG: Always log BIP30-relevant info for early blocks to diagnose issue
                 if height <= 10 {
-                    use blvm_consensus::block::calculate_tx_id;
+                    use blvm_protocol::block::calculate_tx_id;
                     use sha2::{Digest, Sha256};
                     
                     if let Some(coinbase) = block.transactions.first() {
@@ -563,12 +561,10 @@ pub async fn generate_checkpoints(
                     }
                 }
                 
-                let ctx = blvm_consensus::block::BlockValidationContext::from_connect_block_ibd_args(
-                    None::<&[blvm_consensus::types::BlockHeader]>,
+                let ctx = blvm_protocol::block::block_validation_context_for_connect_ibd(
+                    None::<&[blvm_protocol::types::BlockHeader]>,
                     block.header.timestamp,
                     Network::Mainnet,
-                    None,
-                    None,
                 );
                 let (result, new_utxo_set, _undo_log) = connect_block(
                     &block,
@@ -578,12 +574,12 @@ pub async fn generate_checkpoints(
                     &ctx,
                 )?;
                 
-                if matches!(result, blvm_consensus::types::ValidationResult::Valid) {
+                if matches!(result, blvm_protocol::types::ValidationResult::Valid) {
                     utxo_set = new_utxo_set;
                 } else {
                     // OPTIMIZATION: Use string reference instead of clone
                     let error_msg = match &result {
-                        blvm_consensus::types::ValidationResult::Invalid(msg) => msg.as_str(),
+                        blvm_protocol::types::ValidationResult::Invalid(msg) => msg.as_str(),
                         _ => "Unknown error",
                     };
                     eprintln!("❌ Block {} validation failed: {}", height, error_msg);
@@ -641,10 +637,10 @@ async fn process_block(
     static REMOTE_CORE_RPC_CLIENT: Mutex<Option<Arc<crate::remote_core_rpc::RemoteCoreRpcClient>>> = Mutex::new(None);
     
     let has_remote_core_rpc = crate::block_cache_env::remote_core_rpc_env_ready();
-    use blvm_consensus::block::connect_block;
-    use blvm_consensus::segwit::Witness;
-    use blvm_consensus::serialization::block::deserialize_block_with_witnesses;
-    use blvm_consensus::types::Network;
+    use blvm_protocol::block::connect_block;
+    use blvm_protocol::segwit::Witness;
+    use blvm_protocol::serialization::block::deserialize_block_with_witnesses;
+    use blvm_protocol::types::Network;
     
     let (block, witnesses) = match deserialize_block_with_witnesses(block_bytes) {
         Ok((b, w)) => (b, w),
@@ -655,7 +651,7 @@ async fn process_block(
     
     // DEBUG: Log transaction counts for all blocks 0-20 to see if non-coinbase transactions exist
     if height <= 20 {
-        let coinbase_count = block.transactions.iter().filter(|tx| blvm_consensus::transaction::is_coinbase(tx)).count();
+        let coinbase_count = block.transactions.iter().filter(|tx| blvm_protocol::transaction::is_coinbase(tx)).count();
         let non_coinbase_count = block.transactions.len() - coinbase_count;
         if non_coinbase_count > 0 {
             eprintln!("   🔍 DEBUG Block {}: {} total transactions ({} coinbase, {} non-coinbase)", 
@@ -668,12 +664,12 @@ async fn process_block(
         eprintln!("   🔍 DEBUG process_block Block {}: UTXO set size before connect_block: {}", height, utxo_set.len());
         eprintln!("      Block has {} transactions", block.transactions.len());
         // Calculate txids for all transactions in this block
-        use blvm_consensus::block::calculate_tx_id;
+        use blvm_protocol::block::calculate_tx_id;
         let block_txids: Vec<_> = block.transactions.iter().map(|tx| calculate_tx_id(tx)).collect();
         for (tx_idx, tx) in block.transactions.iter().enumerate() {
             let txid_str: String = block_txids[tx_idx].iter().take(8).map(|b| format!("{:02x}", b)).collect();
             eprintln!("      TX {}: txid (first 8) = {}", tx_idx, txid_str);
-            if !blvm_consensus::transaction::is_coinbase(tx) && !tx.inputs.is_empty() {
+            if !blvm_protocol::transaction::is_coinbase(tx) && !tx.inputs.is_empty() {
                 for (input_idx, input) in tx.inputs.iter().enumerate() {
                     let hash_str: String = input.prevout.hash.iter().take(8).map(|b| format!("{:02x}", b)).collect();
                     eprintln!("         Input {}: prevout {}:{}", input_idx, hash_str, input.prevout.index);
@@ -731,12 +727,10 @@ async fn process_block(
         }
     }
     
-    let ctx = blvm_consensus::block::BlockValidationContext::from_connect_block_ibd_args(
-        None::<&[blvm_consensus::types::BlockHeader]>,
+    let ctx = blvm_protocol::block::block_validation_context_for_connect_ibd(
+        None::<&[blvm_protocol::types::BlockHeader]>,
         block.header.timestamp,
         Network::Mainnet,
-        None,
-        None,
     );
     let blvm_result = match connect_block(
         &block,
@@ -748,8 +742,8 @@ async fn process_block(
         Ok((result, new_utxo_set, _undo_log)) => {
             *utxo_set = new_utxo_set;
             match result {
-                blvm_consensus::types::ValidationResult::Valid => ValidationResult::Valid,
-                blvm_consensus::types::ValidationResult::Invalid(msg) => {
+                blvm_protocol::types::ValidationResult::Valid => ValidationResult::Valid,
+                blvm_protocol::types::ValidationResult::Invalid(msg) => {
                     ValidationResult::Invalid(msg)
                 }
             }

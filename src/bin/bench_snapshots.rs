@@ -1,6 +1,6 @@
-use blvm_consensus::block::connect_block_ibd;
-use blvm_consensus::segwit::Witness;
-use blvm_consensus::types::{Block, Network, UtxoSet, UTXO};
+use blvm_protocol::block::connect_block_ibd;
+use blvm_protocol::segwit::Witness;
+use blvm_protocol::types::{Block, Network, UtxoSet, UTXO};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
@@ -43,12 +43,10 @@ fn validate_snapshot(dir: &Path, height: u64, iterations: u32) -> Vec<f64> {
         let block_arc_clone = Arc::clone(&block_arc);
 
         let t = Instant::now();
-        let ctx = blvm_consensus::block::BlockValidationContext::from_connect_block_ibd_args(
-            None::<&[blvm_consensus::types::BlockHeader]>,
+        let ctx = blvm_protocol::block::block_validation_context_for_connect_ibd(
+            None::<&[blvm_protocol::types::BlockHeader]>,
             0u64,
             Network::Mainnet,
-            None,
-            None,
         );
         let (result, _new_utxo, _tx_ids, _delta) = connect_block_ibd(
             &block,
@@ -67,8 +65,8 @@ fn validate_snapshot(dir: &Path, height: u64, iterations: u32) -> Vec<f64> {
         times_ms.push(elapsed);
 
         match result {
-            blvm_consensus::ValidationResult::Valid => {}
-            blvm_consensus::ValidationResult::Invalid(reason) => {
+            blvm_protocol::ValidationResult::Valid => {}
+            blvm_protocol::ValidationResult::Invalid(reason) => {
                 panic!("Block {} invalid on iter {}: {}", height, i, reason);
             }
         }

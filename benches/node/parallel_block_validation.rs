@@ -10,8 +10,8 @@
 
 use blvm_node::validation::{BlockValidationContext, ParallelBlockValidator};
 use blvm_protocol::{
-    tx_inputs, tx_outputs, Block, BlockHeader, OutPoint, Transaction, TransactionInput,
-    TransactionOutput, UtxoSet,
+    tx_inputs, tx_outputs, types::Network, Block, BlockHeader, OutPoint, Transaction,
+    TransactionInput, TransactionOutput, UtxoSet,
 };
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use std::time::Instant;
@@ -34,12 +34,12 @@ fn create_test_block_matching_core(
                 hash: [0; 32],
                 index: 0xffffffff, // Coinbase
             },
-            script_sig: vec![blvm_consensus::opcodes::OP_1; 4],
+            script_sig: vec![blvm_protocol::opcodes::OP_1; 4],
             sequence: 0xffffffff,
         }],
         outputs: tx_outputs![TransactionOutput {
             value: 50_000_000_000,     // 50 BTC
-            script_pubkey: vec![blvm_consensus::opcodes::OP_1],
+            script_pubkey: vec![blvm_protocol::opcodes::OP_1],
         }],
         lock_time: 0,
     };
@@ -58,17 +58,17 @@ fn create_test_block_matching_core(
                     hash: prev_tx_hash,
                     index: 0,
                 },
-                script_sig: vec![blvm_consensus::opcodes::OP_1; 20],
+                script_sig: vec![blvm_protocol::opcodes::OP_1; 20],
                 sequence: 0xffffffff,
             }],
             outputs: tx_outputs![
                 TransactionOutput {
                     value: 10_000_000,
-                    script_pubkey: vec![blvm_consensus::opcodes::OP_1; 25],
+                    script_pubkey: vec![blvm_protocol::opcodes::OP_1; 25],
                 },
                 TransactionOutput {
                     value: 5_000_000,
-                    script_pubkey: vec![blvm_consensus::opcodes::OP_1; 25],
+                    script_pubkey: vec![blvm_protocol::opcodes::OP_1; 25],
                 }
             ],
             lock_time: 0,
@@ -102,7 +102,7 @@ fn benchmark_parallel_validation(c: &mut Criterion) {
     // Create N blocks with chained prev_block_hash
     let mut contexts = Vec::new();
     let mut prev_hash = [0u8; 32];
-    let mut prev_utxo_set = UtxoSet::new();
+    let mut prev_utxo_set = UtxoSet::default();
     for height in 0..NUM_BLOCKS {
         let (block, utxo_set) =
             create_test_block_matching_core(height as u64, prev_hash, &prev_utxo_set);
@@ -131,8 +131,11 @@ fn benchmark_parallel_validation(c: &mut Criterion) {
     c.bench_function("validate_blocks_parallel_1000", |b| {
         b.iter(|| {
             let start = Instant::now();
-            let _result =
-                validator.validate_blocks_parallel(black_box(&contexts), black_box(DEPTH_FROM_TIP));
+            let _result = validator.validate_blocks_parallel(
+                black_box(&contexts),
+                black_box(DEPTH_FROM_TIP),
+                Network::Regtest,
+            );
             let elapsed = start.elapsed();
             black_box(elapsed)
         })
@@ -144,7 +147,7 @@ fn benchmark_sequential_validation(c: &mut Criterion) {
     // Create N blocks (same as parallel)
     let mut contexts = Vec::new();
     let mut prev_hash = [0u8; 32];
-    let mut prev_utxo_set = UtxoSet::new();
+    let mut prev_utxo_set = UtxoSet::default();
     for height in 0..NUM_BLOCKS {
         let (block, utxo_set) =
             create_test_block_matching_core(height as u64, prev_hash, &prev_utxo_set);
@@ -171,7 +174,8 @@ fn benchmark_sequential_validation(c: &mut Criterion) {
     }
     c.bench_function("validate_blocks_sequential_1000", |b| {
         b.iter(|| {
-            let _result = validator.validate_blocks_sequential(black_box(&contexts));
+            let _result =
+                validator.validate_blocks_sequential(black_box(&contexts), Network::Regtest);
             black_box(_result)
         })
     });

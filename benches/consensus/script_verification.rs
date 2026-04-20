@@ -1,12 +1,12 @@
 //! Script Verification Benchmarks
 //! Measures script execution and verification performance
 
-use blvm_consensus::script::{eval_script, verify_script};
+use blvm_protocol::script::{eval_script, verify_script, to_stack_element, SigVersion};
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
 /// Create a simple script for verification
 fn create_simple_script() -> Vec<u8> {
-    vec![blvm_consensus::opcodes::OP_1, blvm_consensus::opcodes::OP_1, blvm_consensus::opcodes::OP_EQUAL]
+    vec![blvm_protocol::opcodes::OP_1, blvm_protocol::opcodes::OP_1, blvm_protocol::opcodes::OP_EQUAL]
 }
 
 /// Create a complex script with many operations
@@ -20,22 +20,22 @@ fn create_complex_script() -> Vec<u8> {
     // We use: 100 * (OP_DUP + OP_HASH160 + push + OP_EQUALVERIFY) = 400 ops
     // Plus 1000 OP_1 operations = 1400 total (slightly more to account for no IF overhead)
     for _ in 0..100 {
-        script.push(blvm_consensus::opcodes::OP_DUP);
-        script.push(blvm_consensus::opcodes::OP_HASH160);
-        script.push(blvm_consensus::opcodes::PUSH_20_BYTES);
+        script.push(blvm_protocol::opcodes::OP_DUP);
+        script.push(blvm_protocol::opcodes::OP_HASH160);
+        script.push(blvm_protocol::opcodes::PUSH_20_BYTES);
         script.extend_from_slice(&[0x42; 20]);
-        script.push(blvm_consensus::opcodes::OP_EQUALVERIFY);
+        script.push(blvm_protocol::opcodes::OP_EQUALVERIFY);
     }
     // Add 1000 OP_1 operations (matches Core's inner loop)
     for _ in 0..1000 {
-        script.push(blvm_consensus::opcodes::OP_1);
+        script.push(blvm_protocol::opcodes::OP_1);
     }
-    script.push(blvm_consensus::opcodes::OP_CHECKSIG);
+    script.push(blvm_protocol::opcodes::OP_CHECKSIG);
     script
 }
 
 fn benchmark_verify_script(c: &mut Criterion) {
-    let script_sig = vec![blvm_consensus::opcodes::OP_1];
+    let script_sig = vec![blvm_protocol::opcodes::OP_1];
     let script_pubkey = create_simple_script();
 
     c.bench_function("verify_script", |b| {
@@ -57,12 +57,12 @@ fn benchmark_eval_script_complex(c: &mut Criterion) {
     c.bench_function("eval_script_complex", |b| {
         b.iter(|| {
             let mut stack = Vec::new();
-            // Push some data for the script to operate on
-            stack.push(vec![0x42; 20]);
+            stack.push(to_stack_element(&[0x42; 20]));
             let result = eval_script(
                 black_box(&script),
                 black_box(&mut stack),
-                black_box(0), // No flags
+                black_box(0),
+                SigVersion::Base,
             );
             black_box(result)
         })

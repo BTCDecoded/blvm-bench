@@ -15,10 +15,10 @@ use blvm_bench::chain_scan::{
     analyze_block, analyze_block_with_outpoint_index, merge_block_into_results, ChainScanResults,
     INSCRIPTIONS_START_HEIGHT, SEGWIT_START_HEIGHT, TAPROOT_START_HEIGHT,
 };
-use blvm_consensus::types::OutPoint;
+use blvm_protocol::types::OutPoint;
 use rustc_hash::FxHashMap;
 use blvm_bench::chunked_cache::{get_chunks_dir, load_chunk_metadata, ChunkedBlockIterator};
-use blvm_consensus::serialization::block::deserialize_block_with_witnesses;
+use blvm_protocol::serialization::block::deserialize_block_with_witnesses;
 use blvm_protocol::spam_filter::{SpamFilter, SpamFilterPreset};
 use clap::Parser;
 use rayon::prelude::*;

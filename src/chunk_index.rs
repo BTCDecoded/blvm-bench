@@ -74,6 +74,98 @@ pub fn load_block_index(chunks_dir: &Path) -> Result<Option<BlockIndex>> {
     Ok(Some(index))
 }
 
+/// Longest run of consecutive heights starting at `start` that exist in `index`.
+///
+/// Returns `(count, first_missing_height)`: `count` is how many of
+/// `start, start+1, …` are present; `first_missing_height` is the first gap
+/// (or `start` if `start` itself is missing).
+pub fn contiguous_chain_from(index: &BlockIndex, start: u64) -> (u64, u64) {
+    let mut h = start;
+    while index.contains_key(&h) {
+        h += 1;
+    }
+    let count = h - start;
+    (count, h)
+}
+
+/// Heights that [`crate::chunked_cache::ChunkedBlockIterator`] validates eagerly on construction
+/// (`start_height..end_height.min(100)` in `chunked_cache.rs`).
+pub fn iterator_eager_height_range(start: u64, end_height: u64) -> Option<std::ops::Range<u64>> {
+    let cap = end_height.min(100);
+    if start < cap {
+        Some(start..cap)
+    } else {
+        None
+    }
+}
+
+/// Which `chunk_i.bin.zst` files are absent for `i in 0..num_chunks`.
+pub fn missing_chunk_bin_files(chunks_dir: &Path, num_chunks: usize) -> Vec<usize> {
+    (0..num_chunks)
+        .filter(|i| !chunks_dir.join(format!("chunk_{}.bin.zst", i)).exists())
+        .collect()
+}
+
+/// Load `chunks.index`, or build it from `chunk_*.bin.zst` when missing. If `rebuild` is true,
+/// delete an existing index and build from scratch.
+pub fn ensure_chunk_block_index(chunks_dir: &Path, rebuild: bool) -> Result<BlockIndex> {
+    let index_path = chunks_dir.join("chunks.index");
+    if rebuild && index_path.exists() {
+        std::fs::remove_file(&index_path)
+            .with_context(|| format!("remove {}", index_path.display()))?;
+    }
+
+    if !rebuild {
+        if let Some(idx) = load_block_index(chunks_dir)? {
+            return Ok(idx);
+        }
+    }
+
+    eprintln!("   Building block index from chunk files…");
+    let (idx, _) = build_block_index(chunks_dir)?;
+    if !idx.is_empty() {
+        save_block_index_with_options(chunks_dir, &idx, true)
+            .with_context(|| format!("save {}", chunks_dir.join("chunks.index").display()))?;
+    }
+    Ok(idx)
+}
+
+/// Checks that `chunks.index` is sufficient for [`crate::chunked_cache::ChunkedBlockIterator`]
+/// and `chunk_utxo_checkpoints` (eager height range + contiguous run from `--start`).
+pub fn validate_utxo_chunk_cache_index(
+    index: &BlockIndex,
+    start: u64,
+    end_cap: u64,
+    min_contiguous: u64,
+) -> Result<()> {
+    if let Some(range) = iterator_eager_height_range(start, end_cap) {
+        for h in range.clone() {
+            if !index.contains_key(&h) {
+                anyhow::bail!(
+                    "ChunkedBlockIterator preflight: missing index entry for height {} (need heights {:?} for --start {} and end cap {})",
+                    h,
+                    range,
+                    start,
+                    end_cap
+                );
+            }
+        }
+    }
+
+    let (contig, first_gap) = contiguous_chain_from(index, start);
+    if contig < min_contiguous {
+        anyhow::bail!(
+            "need at least {} contiguous indexed heights from --start {} (have {}). \
+             First gap at height {}. Add missing chunk files or sync a contiguous mainnet prefix.",
+            min_contiguous,
+            start,
+            contig,
+            first_gap
+        );
+    }
+    Ok(())
+}
+
 /// Save block index to file
 /// CRITICAL: Uses atomic write (write to temp file, then rename) to prevent corruption
 /// SAFEGUARD: Never overwrites with a smaller index unless forced
@@ -515,4 +607,46 @@ pub fn verify_block_index(chunks_dir: &Path, index: &BlockIndex) -> Result<bool>
     
     println!("   ✅ Index verification passed for first {} blocks", index.len().min(100));
     Ok(true)
+}
+
+#[cfg(test)]
+mod contiguous_tests {
+    use super::{contiguous_chain_from, iterator_eager_height_range, BlockIndex, BlockIndexEntry};
+
+    fn dummy_entry() -> BlockIndexEntry {
+        BlockIndexEntry {
+            chunk_number: 0,
+            offset_in_chunk: 0,
+            block_hash: [0u8; 32],
+        }
+    }
+
+    #[test]
+    fn contiguous_from_empty() {
+        let idx = BlockIndex::new();
+        assert_eq!(contiguous_chain_from(&idx, 0), (0, 0));
+    }
+
+    #[test]
+    fn contiguous_genesis_only() {
+        let mut idx = BlockIndex::new();
+        idx.insert(0, dummy_entry());
+        assert_eq!(contiguous_chain_from(&idx, 0), (1, 1));
+    }
+
+    #[test]
+    fn contiguous_three() {
+        let mut idx = BlockIndex::new();
+        idx.insert(0, dummy_entry());
+        idx.insert(1, dummy_entry());
+        idx.insert(2, dummy_entry());
+        assert_eq!(contiguous_chain_from(&idx, 0), (3, 3));
+    }
+
+    #[test]
+    fn iterator_eager_range() {
+        assert_eq!(iterator_eager_height_range(0, 1000), Some(0..100));
+        assert_eq!(iterator_eager_height_range(50, 1000), Some(50..100));
+        assert_eq!(iterator_eager_height_range(100, 1000), None);
+    }
 }

@@ -4,9 +4,9 @@
 use anyhow::{Context, Result};
 use blvm_bench::chunked_cache::ChunkedBlockIterator;
 use blvm_bench::remote_core_rpc::RemoteCoreRpcClient;
-use blvm_consensus::block::calculate_tx_id;
-use blvm_consensus::serialization::block::deserialize_block_with_witnesses;
-use blvm_consensus::serialization::transaction::serialize_transaction;
+use blvm_protocol::block::calculate_tx_id;
+use blvm_protocol::serialization::block::deserialize_block_with_witnesses;
+use blvm_protocol::serialization::transaction::serialize_transaction;
 use std::path::PathBuf;
 
 #[tokio::main]

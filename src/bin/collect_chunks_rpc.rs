@@ -6,8 +6,7 @@
 use anyhow::{Context, Result};
 use blvm_bench::remote_core_rpc::RemoteCoreRpcClient;
 use std::io::{BufWriter, Write};
-use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::Command;
 use tokio::time::{timeout, Duration};
 
 const BLOCKS_PER_CHUNK: u64 = 125_000;

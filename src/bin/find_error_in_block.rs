@@ -3,16 +3,16 @@
 use anyhow::{Context, Result};
 use blvm_bench::chunked_cache::ChunkedBlockIterator;
 use blvm_bench::sort_merge::merge_join::JoinedPrevout;
-use blvm_consensus::block::calculate_script_flags_for_block_network;
-use blvm_consensus::witness::is_witness_empty;
-use blvm_consensus::bip113::get_median_time_past;
-use blvm_consensus::script::{verify_script_with_context_full, SigVersion};
-use blvm_consensus::segwit::Witness;
-use blvm_consensus::serialization::block::deserialize_block_header;
-use blvm_consensus::serialization::block::deserialize_block_with_witnesses;
-use blvm_consensus::transaction::is_coinbase;
-use blvm_consensus::types::BlockHeader;
-use blvm_consensus::types::{Network, TransactionOutput};
+use blvm_protocol::block::calculate_script_flags_for_block_network;
+use blvm_protocol::witness::is_witness_empty;
+use blvm_protocol::bip113::get_median_time_past;
+use blvm_protocol::script::{verify_script_with_context_full, SigVersion};
+use blvm_protocol::segwit::Witness;
+use blvm_protocol::serialization::block::deserialize_block_header;
+use blvm_protocol::serialization::block::deserialize_block_with_witnesses;
+use blvm_protocol::transaction::is_coinbase;
+use blvm_protocol::types::BlockHeader;
+use blvm_protocol::types::{Network, TransactionOutput};
 use std::path::Path;
 
 fn main() -> Result<()> {

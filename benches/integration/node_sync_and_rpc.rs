@@ -6,7 +6,7 @@
 //! 3. Runs basic bitcoin-cli compatible RPC commands
 //! 4. Measures performance
 
-use blvm_consensus::{tx_inputs, tx_outputs};
+use blvm_protocol::{tx_inputs, tx_outputs};
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
@@ -146,13 +146,13 @@ async fn generate_blocks_via_storage(
             outputs: blvm_protocol::tx_outputs![blvm_protocol::TransactionOutput {
                 value: 5000000000, // 50 BTC
                 script_pubkey: vec![
-                    blvm_consensus::opcodes::OP_DUP,
-                    blvm_consensus::opcodes::OP_HASH160,
-                    blvm_consensus::opcodes::PUSH_20_BYTES,
+                    blvm_protocol::opcodes::OP_DUP,
+                    blvm_protocol::opcodes::OP_HASH160,
+                    blvm_protocol::opcodes::PUSH_20_BYTES,
                     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                    blvm_consensus::opcodes::OP_EQUALVERIFY,
-                    blvm_consensus::opcodes::OP_CHECKSIG,
+                    blvm_protocol::opcodes::OP_EQUALVERIFY,
+                    blvm_protocol::opcodes::OP_CHECKSIG,
                 ],
             }],
             lock_time: 0,

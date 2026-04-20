@@ -24,7 +24,7 @@ pub mod shell;
 /// Also available for benchmarks via benchmark-helpers feature
 #[cfg(any(feature = "differential", feature = "benchmark-helpers"))]
 pub mod node_builder;
-#[cfg(any(feature = "differential", feature = "benchmark-helpers"))]
+#[cfg(feature = "chunk-cache")]
 pub mod node_rpc_client;
 /// Legacy module name; re-exports [`node_builder`](crate::node_builder).
 #[cfg(any(feature = "differential", feature = "benchmark-helpers"))]
@@ -38,19 +38,25 @@ pub mod differential;
 pub mod regtest_node;
 #[cfg(feature = "differential")]
 pub mod parallel_differential;
-#[cfg(feature = "differential")]
+#[cfg(feature = "utxo-snapshot-tools")]
 pub mod checkpoint_persistence;
+#[cfg(any(feature = "utxo-snapshot-tools", feature = "disk-utxo"))]
+pub mod utxo_snapshot_fixed_v1;
+#[cfg(feature = "utxo-snapshot-tools")]
+pub mod utxo_delta;
+#[cfg(feature = "utxo-snapshot-tools")]
+pub use checkpoint_persistence::CheckpointFormat;
 #[cfg(feature = "differential")]
 pub mod block_file_reader;
 pub mod chunk_protection;
 pub mod remote_core_rpc;
-#[cfg(any(feature = "differential", feature = "scan"))]
+#[cfg(feature = "chunk-cache")]
 pub mod chunked_cache;
-#[cfg(any(feature = "differential", feature = "scan"))]
+#[cfg(feature = "chunk-cache")]
 pub mod chunk_index;
 #[cfg(feature = "differential")]
 pub mod chunk_index_rpc;
-#[cfg(any(feature = "differential", feature = "scan"))]
+#[cfg(feature = "chunk-cache")]
 pub mod missing_blocks;
 #[cfg(feature = "differential")]
 pub mod collect_only;
@@ -64,8 +70,18 @@ pub mod collect_only;
 pub mod sort_merge;
 #[cfg(feature = "differential")]
 pub mod script_validation;
-#[cfg(any(feature = "differential", feature = "scan"))]
+#[cfg(feature = "chunk-cache")]
 pub mod chain_scan;
+
+#[cfg(feature = "bitcoinkernel")]
+pub mod bitcoinkernel_ffi;
+#[cfg(any(feature = "bitcoinkernel", feature = "scan"))]
+pub mod utxo_checkpoint_resolve;
+/// Default paths for `block_kernel_diff` (`~/.local/share/blvm-kernel-diff/`).
+pub mod kernel_diff_paths;
+
+#[cfg(feature = "disk-utxo")]
+pub mod disk_utxo;
 
 use anyhow::Result;
 

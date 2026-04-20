@@ -8,12 +8,12 @@
 //! Uses the same block iteration as differential testing (chunked cache).
 //! Rule limits are configurable; defaults match BIP-110.
 
-use blvm_consensus::opcodes::{
+use blvm_protocol::opcodes::{
     OP_0, OP_ENDIF, OP_IF, OP_NOTIF, OP_PUSHDATA1, OP_PUSHDATA2, OP_PUSHDATA4, OP_RESERVED, OP_RETURN,
 };
-use blvm_consensus::segwit::Witness;
+use blvm_protocol::segwit::Witness;
 use blvm_protocol::spam_filter::{SpamFilter, SpamFilterResult, SpamType};
-use blvm_consensus::witness;
+use blvm_protocol::witness;
 
 /// Spam classification confidence (for debatable categories)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -50,10 +50,10 @@ fn spam_confidence(detected_types: &[SpamType]) -> SpamConfidence {
         SpamConfidence::Likely
     }
 }
-use blvm_consensus::block::calculate_tx_id;
-use blvm_consensus::constants::{SEGWIT_ACTIVATION_MAINNET, TAPROOT_ACTIVATION_MAINNET};
-use blvm_consensus::transaction::is_coinbase;
-use blvm_consensus::types::{Block, OutPoint, Transaction};
+use blvm_protocol::block::calculate_tx_id;
+use blvm_protocol::constants::{SEGWIT_ACTIVATION_MAINNET, TAPROOT_ACTIVATION_MAINNET};
+use blvm_protocol::transaction::is_coinbase;
+use blvm_protocol::types::{Block, OutPoint, Transaction};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use rustc_hash::FxHashMap;

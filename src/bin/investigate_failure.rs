@@ -3,16 +3,16 @@
 //! Usage: investigate_failure <block_height> <tx_idx> <input_idx>
 
 use anyhow::{Context, Result};
-use blvm_consensus::block::calculate_script_flags_for_block_network;
-use blvm_consensus::script::{verify_script_with_context_full, SigVersion};
-use blvm_consensus::serialization::block::deserialize_block_with_witnesses;
-use blvm_consensus::transaction::is_coinbase;
-use blvm_consensus::types::{Network, TransactionOutput};
-use blvm_consensus::Witness;
+use blvm_protocol::block::calculate_script_flags_for_block_network;
+use blvm_protocol::script::{verify_script_with_context_full, SigVersion};
+use blvm_protocol::serialization::block::deserialize_block_with_witnesses;
+use blvm_protocol::transaction::is_coinbase;
+use blvm_protocol::types::{Network, TransactionOutput};
+use blvm_protocol::Witness;
 
 use blvm_bench::chunked_cache::ChunkedBlockIterator;
 use blvm_bench::sort_merge::verify::PrevoutReader;
-use blvm_consensus::witness::is_witness_empty;
+use blvm_protocol::witness::is_witness_empty;
 
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();

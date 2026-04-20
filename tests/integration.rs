@@ -4,8 +4,8 @@
 mod helpers {
     //! Test helpers for differential testing
 
-    use blvm_consensus::types::Network;
-    use blvm_consensus::{
+    use blvm_protocol::types::Network;
+    use blvm_protocol::{
         tx_inputs, tx_outputs, Block, BlockHeader, OutPoint, Transaction, TransactionInput,
         TransactionOutput,
     };
@@ -15,7 +15,7 @@ mod helpers {
         // Create coinbase transaction with BIP34 height
         let mut coinbase_script = vec![0x03]; // OP_PUSH_3 (for height encoding)
         coinbase_script.extend_from_slice(&height.to_le_bytes()[..3]);
-        coinbase_script.push(blvm_consensus::opcodes::OP_1);
+        coinbase_script.push(blvm_protocol::opcodes::OP_1);
 
         let coinbase = Transaction {
             version: 1,
@@ -29,7 +29,7 @@ mod helpers {
             }],
             outputs: tx_outputs![TransactionOutput {
                 value: 50_000_000_000,     // 50 BTC
-                script_pubkey: vec![blvm_consensus::opcodes::OP_1],
+                script_pubkey: vec![blvm_protocol::opcodes::OP_1],
             }],
             lock_time: 0,
         };
@@ -69,12 +69,12 @@ mod helpers {
                     hash: [0; 32],
                     index: 0xffffffff,
                 },
-                script_sig: vec![blvm_consensus::opcodes::OP_1],
+                script_sig: vec![blvm_protocol::opcodes::OP_1],
                 sequence: 0xffffffff,
             }],
             outputs: tx_outputs![TransactionOutput {
                 value: 50_000_000_000,
-                script_pubkey: vec![blvm_consensus::opcodes::OP_1],
+                script_pubkey: vec![blvm_protocol::opcodes::OP_1],
             }],
             lock_time: 0,
         };
@@ -104,24 +104,22 @@ mod helpers {
         block: &Block,
         height: u64,
         network: Network,
-    ) -> blvm_consensus::types::ValidationResult {
-        use blvm_consensus::block::connect_block;
-        use blvm_consensus::segwit::Witness;
-        use blvm_consensus::UtxoSet;
+    ) -> blvm_protocol::types::ValidationResult {
+        use blvm_protocol::block::connect_block;
+        use blvm_protocol::segwit::Witness;
+        use blvm_protocol::UtxoSet;
 
         let witnesses: Vec<Vec<Witness>> =
             block.transactions.iter().map(|_| Vec::new()).collect();
         let utxo_set = UtxoSet::default();
-        let ctx = blvm_consensus::block::BlockValidationContext::from_connect_block_ibd_args(
-            None::<&[blvm_consensus::types::BlockHeader]>,
+        let ctx = blvm_protocol::block::block_validation_context_for_connect_ibd(
+            None::<&[blvm_protocol::types::BlockHeader]>,
             block.header.timestamp,
             network,
-            None,
-            None,
         );
         match connect_block(block, &witnesses, utxo_set, height, &ctx) {
             Ok((result, _, _)) => result,
-            Err(e) => blvm_consensus::types::ValidationResult::Invalid(format!("{:?}", e)),
+            Err(e) => blvm_protocol::types::ValidationResult::Invalid(format!("{:?}", e)),
         }
     }
 }
@@ -220,7 +218,7 @@ use blvm_bench::differential::{compare_block_validation, format_comparison_resul
 #[cfg(feature = "differential")]
 use blvm_bench::regtest_node::RegtestNode;
 #[cfg(feature = "differential")]
-use blvm_consensus::types::Network;
+use blvm_protocol::types::Network;
 #[cfg(feature = "differential")]
 use std::sync::{Arc, Mutex};
 #[cfg(feature = "differential")]
@@ -361,8 +359,8 @@ async fn test_bip30_differential() -> Result<()> {
     // Validate with BLVM
     let blvm_result = validate_blvm_block(&block, height, network);
     let blvm_validation = match blvm_result {
-        blvm_consensus::types::ValidationResult::Valid => ValidationResult::Valid,
-        blvm_consensus::types::ValidationResult::Invalid(msg) => ValidationResult::Invalid(msg),
+        blvm_protocol::types::ValidationResult::Valid => ValidationResult::Valid,
+        blvm_protocol::types::ValidationResult::Invalid(msg) => ValidationResult::Invalid(msg),
     };
 
     // Compare with Core
@@ -442,8 +440,8 @@ async fn test_bip34_differential() -> Result<()> {
     // Validate with BLVM
     let blvm_result = validate_blvm_block(&block, height, network);
     let blvm_validation = match blvm_result {
-        blvm_consensus::types::ValidationResult::Valid => ValidationResult::Valid,
-        blvm_consensus::types::ValidationResult::Invalid(msg) => ValidationResult::Invalid(msg),
+        blvm_protocol::types::ValidationResult::Valid => ValidationResult::Valid,
+        blvm_protocol::types::ValidationResult::Invalid(msg) => ValidationResult::Invalid(msg),
     };
 
     // Compare with Core
@@ -523,8 +521,8 @@ async fn test_bip90_differential() -> Result<()> {
     // Validate with BLVM
     let blvm_result = validate_blvm_block(&block, height, network);
     let blvm_validation = match blvm_result {
-        blvm_consensus::types::ValidationResult::Valid => ValidationResult::Valid,
-        blvm_consensus::types::ValidationResult::Invalid(msg) => ValidationResult::Invalid(msg),
+        blvm_protocol::types::ValidationResult::Valid => ValidationResult::Valid,
+        blvm_protocol::types::ValidationResult::Invalid(msg) => ValidationResult::Invalid(msg),
     };
 
     // Compare with Core
@@ -604,8 +602,8 @@ async fn test_valid_block_accepted() -> Result<()> {
     // Validate with BLVM
     let blvm_result = validate_blvm_block(&block, height, network);
     let blvm_validation = match blvm_result {
-        blvm_consensus::types::ValidationResult::Valid => ValidationResult::Valid,
-        blvm_consensus::types::ValidationResult::Invalid(msg) => ValidationResult::Invalid(msg),
+        blvm_protocol::types::ValidationResult::Valid => ValidationResult::Valid,
+        blvm_protocol::types::ValidationResult::Invalid(msg) => ValidationResult::Invalid(msg),
     };
 
     // Compare with Core
@@ -655,10 +653,10 @@ async fn test_valid_block_accepted() -> Result<()> {
 #[cfg(feature = "differential")]
 async fn test_historical_blocks_differential() -> Result<()> {
     use blvm_bench::differential::{CoreValidationResult, ValidationResult};
-    use blvm_consensus::block::connect_block;
-    use blvm_consensus::segwit::Witness;
-    use blvm_consensus::serialization::block::deserialize_block_with_witnesses;
-    use blvm_consensus::UtxoSet;
+    use blvm_protocol::block::connect_block;
+    use blvm_protocol::segwit::Witness;
+    use blvm_protocol::serialization::block::deserialize_block_with_witnesses;
+    use blvm_protocol::UtxoSet;
     use std::sync::Arc;
 
     // Check if we should use parallel differential with chunks (when RPC unavailable or BLOCK_CACHE_DIR is set)
@@ -817,19 +815,17 @@ async fn test_historical_blocks_differential() -> Result<()> {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        let ctx = blvm_consensus::block::BlockValidationContext::from_connect_block_ibd_args(
-            None::<&[blvm_consensus::types::BlockHeader]>,
+        let ctx = blvm_protocol::block::block_validation_context_for_connect_ibd(
+            None::<&[blvm_protocol::types::BlockHeader]>,
             network_time,
             Network::Mainnet,
-            None,
-            None,
         );
         let blvm_result = match connect_block(&block, &witnesses, utxo_set.clone(), height, &ctx) {
             Ok((result, new_utxo_set, _undo_log)) => {
                 utxo_set = new_utxo_set; // Update UTXO set for next block
                 match result {
-                    blvm_consensus::types::ValidationResult::Valid => ValidationResult::Valid,
-                    blvm_consensus::types::ValidationResult::Invalid(msg) => {
+                    blvm_protocol::types::ValidationResult::Valid => ValidationResult::Valid,
+                    blvm_protocol::types::ValidationResult::Invalid(msg) => {
                         ValidationResult::Invalid(msg)
                     }
                 }

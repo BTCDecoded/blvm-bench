@@ -4,6 +4,8 @@
 
 Differential testing compares BLLVM's validation results against Bitcoin Core's validation results to catch consensus divergences.
 
+For **BLVM vs `libbitcoinkernel`** block-by-block comparison (`block_kernel_diff`), chunk cache, checkpoints, and performance planning, see **`docs/DIFFERENTIAL_KERNEL_OPTIMIZATION_PLAN.md`**. Operational steps: **`docs/DIFFERENTIAL_KERNEL_RUNBOOK.md`**. Optional conservative thread caps: **`scripts/block_kernel_diff_wrapper.sh`**; Phase 0 metrics: **`docs/DIFFERENTIAL_KERNEL_PHASE0_METRICS.md`**. Checkpoint ladder: **`scripts/kernel-diff-orchestrator.sh checkpoints …`**.
+
 ## Features
 
 - **Core Detection**: Automatically finds Bitcoin Core binaries

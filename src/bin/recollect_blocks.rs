@@ -3,7 +3,7 @@
 //! This reads blocks directly from the local copy of XOR-packaged encrypted block files,
 //! applies XOR decryption, chains by prev_hash to determine height, and stores in chunks.
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write};

@@ -6,11 +6,11 @@
 //! 2. Calls check_block (structure validation only, no scripts)
 //! 3. Matches Core's CheckBlock operation (not connect_block)
 
-use blvm_consensus::block::check_block;
-use blvm_consensus::mining::calculate_merkle_root;
-use blvm_consensus::{
-    tx_inputs, tx_outputs, Block, BlockHeader, OutPoint, Transaction, TransactionInput,
-    TransactionOutput,
+use blvm_protocol::mining::calculate_merkle_root;
+use blvm_protocol::validation::ProtocolValidationContext;
+use blvm_protocol::{
+    tx_inputs, tx_outputs, BitcoinProtocolEngine, Block, BlockHeader, OutPoint, ProtocolVersion,
+    Transaction, TransactionInput, TransactionOutput, UtxoSet,
 };
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
@@ -25,12 +25,12 @@ fn create_test_block_for_check_block() -> Block {
                 hash: [0u8; 32],
                 index: 0xffffffff, // Coinbase
             },
-            script_sig: vec![blvm_consensus::opcodes::OP_1; 4],
+            script_sig: vec![blvm_protocol::opcodes::OP_1; 4],
             sequence: 0xffffffff,
         }],
         outputs: tx_outputs![TransactionOutput {
             value: 50_000_000_000, // 50 BTC
-            script_pubkey: vec![blvm_consensus::opcodes::OP_1],
+            script_pubkey: vec![blvm_protocol::opcodes::OP_1],
         }],
         lock_time: 0,
     };
@@ -45,12 +45,12 @@ fn create_test_block_for_check_block() -> Block {
                     hash: [i as u8; 32],
                     index: 0,
                 },
-                script_sig: vec![blvm_consensus::opcodes::OP_1],
+                script_sig: vec![blvm_protocol::opcodes::OP_1],
                 sequence: 0xffffffff,
             }],
             outputs: tx_outputs![TransactionOutput {
                 value: 10_000_000,
-                script_pubkey: vec![blvm_consensus::opcodes::OP_1],
+                script_pubkey: vec![blvm_protocol::opcodes::OP_1],
             }],
             lock_time: 0,
         };
@@ -75,10 +75,15 @@ fn create_test_block_for_check_block() -> Block {
 
 fn benchmark_check_block(c: &mut Criterion) {
     let block = create_test_block_for_check_block();
+    let engine = BitcoinProtocolEngine::new(ProtocolVersion::Regtest).expect("protocol engine");
+    let context = ProtocolValidationContext::new(ProtocolVersion::Regtest, 0).expect("context");
+    let utxos = UtxoSet::default();
 
     c.bench_function("check_block", |b| {
         b.iter(|| {
-            let result = check_block(black_box(&block));
+            let result = engine
+                .validate_block_with_protocol(black_box(&block), &utxos, 0, &context)
+                .expect("validate");
             let _ = black_box(result);
         })
     });

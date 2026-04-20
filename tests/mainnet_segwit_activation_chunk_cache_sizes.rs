@@ -3,7 +3,7 @@
 #![cfg(any(feature = "differential", feature = "scan"))]
 
 use blvm_bench::chunked_cache::ChunkedBlockIterator;
-use blvm_consensus::constants::SEGWIT_ACTIVATION_MAINNET;
+use blvm_protocol::constants::SEGWIT_ACTIVATION_MAINNET;
 use std::path::Path;
 
 #[test]

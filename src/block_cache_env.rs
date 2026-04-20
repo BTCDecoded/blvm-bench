@@ -4,15 +4,6 @@
 
 use std::path::{Path, PathBuf};
 
-fn non_empty_env_pair(primary: &str, legacy: &str) -> bool {
-    std::env::var(primary)
-        .map(|v| !v.trim().is_empty())
-        .unwrap_or(false)
-        || std::env::var(legacy)
-            .map(|v| !v.trim().is_empty())
-            .unwrap_or(false)
-}
-
 fn non_empty_env_triple(primary: &str, alt: &str, legacy: &str) -> bool {
     [primary, alt, legacy].iter().any(|k| {
         std::env::var(k)

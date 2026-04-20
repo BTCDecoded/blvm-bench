@@ -4,21 +4,26 @@ use rand::SeedableRng;
 use std::time::{Duration, Instant};
 
 use blvm_node::network::dandelion::{Clock, DandelionRelay};
+
 #[derive(Clone)]
 struct BenchClock {
     now: Instant,
 }
+
 impl BenchClock {
     fn new() -> Self {
         Self {
             now: Instant::now(),
         }
     }
-    fn advance(&mut self, d: Duration) {
-        self.now += d;
+}
+
 impl Clock for BenchClock {
     fn now(&self) -> Instant {
         self.now
+    }
+}
+
 fn bench_dandelion(c: &mut Criterion) {
     let mut group = c.benchmark_group("dandelion");
     group.bench_function("start_and_advance_10k", |b| {
@@ -41,9 +46,12 @@ fn bench_dandelion(c: &mut Criterion) {
                     let _ = d.advance_stem(tx, &peers);
                     black_box(&d);
                 }
+            },
             BatchSize::LargeInput,
         )
     });
     group.finish();
+}
+
 criterion_group!(benches, bench_dandelion);
 criterion_main!(benches);

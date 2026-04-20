@@ -8,7 +8,7 @@
 
 use anyhow::{Context, Result};
 use blvm_bench::chunked_cache::{load_chunk_metadata, ChunkedBlockIterator};
-use blvm_consensus::constants::GENESIS_BLOCK_HASH;
+use blvm_protocol::constants::GENESIS_BLOCK_HASH;
 use clap::Parser;
 use sha2::{Digest, Sha256};
 use std::path::PathBuf;

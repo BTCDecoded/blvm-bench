@@ -1,7 +1,8 @@
+#[cfg(feature = "production")]
+use blvm_protocol::{tx_inputs, tx_outputs};
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use sha2::{Digest, Sha256};
 
-use blvm_consensus::{tx_inputs, tx_outputs, OutPoint, TransactionInput, TransactionOutput};
 fn benchmark_sha256(c: &mut Criterion) {
     let data = vec![0u8; 1024];
 
@@ -25,10 +26,10 @@ fn benchmark_double_sha256(c: &mut Criterion) {
     });
 }
 
-// SHA-NI benchmarks for single-hash performance
-#[cfg(target_arch = "x86_64")]
+// SHA-NI benchmarks for single-hash performance (skipped when `production` — full bench suite replaces this group)
+#[cfg(all(target_arch = "x86_64", not(feature = "production")))]
 fn benchmark_sha_ni_single(c: &mut Criterion) {
-    use blvm_consensus::crypto::sha_ni;
+    use blvm_protocol::crypto::sha_ni;
 
     if !sha_ni::is_sha_ni_available() {
         return; // Skip on CPUs without SHA-NI
@@ -81,14 +82,14 @@ fn benchmark_sha_ni_single(c: &mut Criterion) {
     });
 }
 
-#[cfg(not(target_arch = "x86_64"))]
+#[cfg(all(not(target_arch = "x86_64"), not(feature = "production")))]
 fn benchmark_sha_ni_single(_c: &mut Criterion) {
     // SHA-NI not available on non-x86_64
 }
 
 #[cfg(feature = "production")]
 fn benchmark_batch_sha256(c: &mut Criterion) {
-    use blvm_consensus::optimizations::simd_vectorization;
+    use blvm_protocol::optimizations::simd_vectorization;
 
     let batch_sizes = vec![4, 8, 16, 32, 64, 128];
     let data_1kb = vec![0u8; 1024];
@@ -121,7 +122,7 @@ fn benchmark_batch_sha256(c: &mut Criterion) {
 
 #[cfg(feature = "production")]
 fn benchmark_batch_double_sha256(c: &mut Criterion) {
-    use blvm_consensus::optimizations::simd_vectorization;
+    use blvm_protocol::optimizations::simd_vectorization;
 
     let batch_sizes = vec![4, 8, 16, 32, 64, 128];
     let data_1kb = vec![0u8; 1024];
@@ -159,7 +160,7 @@ fn benchmark_batch_double_sha256(c: &mut Criterion) {
 
 #[cfg(feature = "production")]
 fn benchmark_batch_hash160(c: &mut Criterion) {
-    use blvm_consensus::optimizations::simd_vectorization;
+    use blvm_protocol::optimizations::simd_vectorization;
     use ripemd::Ripemd160;
 
     let batch_sizes = vec![4, 8, 16, 32, 64];
@@ -194,8 +195,8 @@ fn benchmark_batch_hash160(c: &mut Criterion) {
 
 #[cfg(feature = "production")]
 fn benchmark_merkle_root_batching(c: &mut Criterion) {
-    use blvm_consensus::mining::calculate_merkle_root;
-    use blvm_consensus::{OutPoint, Transaction, TransactionInput, TransactionOutput};
+    use blvm_protocol::mining::calculate_merkle_root;
+    use blvm_protocol::{OutPoint, Transaction, TransactionInput, TransactionOutput};
 
     let tx_counts = vec![10, 100, 1000];
 
@@ -207,21 +208,21 @@ fn benchmark_merkle_root_batching(c: &mut Criterion) {
                 inputs: tx_inputs![TransactionInput {
                     prevout: OutPoint {
                         hash: [i as u8; 32],
-                        index: 0u64,
+                        index: 0u32,
                     },
-                    script_sig: vec![blvm_consensus::opcodes::OP_1],
+                    script_sig: vec![blvm_protocol::opcodes::OP_1],
                     sequence: 0xffffffffu64,
                 }],
                 outputs: tx_outputs![TransactionOutput {
                     value: 5000000000i64,
                     script_pubkey: vec![
-                        blvm_consensus::opcodes::OP_DUP,
-                        blvm_consensus::opcodes::OP_HASH160,
-                        blvm_consensus::opcodes::PUSH_20_BYTES,
+                        blvm_protocol::opcodes::OP_DUP,
+                        blvm_protocol::opcodes::OP_HASH160,
+                        blvm_protocol::opcodes::PUSH_20_BYTES,
                         0x89, 0xab, 0xcd, 0xef, 0x12, 0x34, 0x56, 0x78, 0x9a,
                         0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a,
-                        blvm_consensus::opcodes::OP_EQUALVERIFY,
-                        blvm_consensus::opcodes::OP_CHECKSIG,
+                        blvm_protocol::opcodes::OP_EQUALVERIFY,
+                        blvm_protocol::opcodes::OP_CHECKSIG,
                     ],
                 }],
                 lock_time: 0u64,
@@ -236,9 +237,9 @@ fn benchmark_merkle_root_batching(c: &mut Criterion) {
 
 #[cfg(feature = "production")]
 fn benchmark_block_validation_tx_ids(c: &mut Criterion) {
-    use blvm_consensus::optimizations::simd_vectorization;
-    use blvm_consensus::serialization::transaction::serialize_transaction;
-    use blvm_consensus::{OutPoint, Transaction, TransactionInput, TransactionOutput};
+    use blvm_protocol::optimizations::simd_vectorization;
+    use blvm_protocol::serialization::transaction::serialize_transaction;
+    use blvm_protocol::{OutPoint, Transaction, TransactionInput, TransactionOutput};
 
     let tx_counts = vec![10, 100];
 
@@ -249,21 +250,21 @@ fn benchmark_block_validation_tx_ids(c: &mut Criterion) {
                 inputs: tx_inputs![TransactionInput {
                     prevout: OutPoint {
                         hash: [i as u8; 32],
-                        index: 0u64,
+                        index: 0u32,
                     },
-                    script_sig: vec![blvm_consensus::opcodes::OP_1],
+                    script_sig: vec![blvm_protocol::opcodes::OP_1],
                     sequence: 0xffffffffu64,
                 }],
                 outputs: tx_outputs![TransactionOutput {
                     value: 5000000000i64,
                     script_pubkey: vec![
-                        blvm_consensus::opcodes::OP_DUP,
-                        blvm_consensus::opcodes::OP_HASH160,
-                        blvm_consensus::opcodes::PUSH_20_BYTES,
+                        blvm_protocol::opcodes::OP_DUP,
+                        blvm_protocol::opcodes::OP_HASH160,
+                        blvm_protocol::opcodes::PUSH_20_BYTES,
                         0x89, 0xab, 0xcd, 0xef, 0x12, 0x34, 0x56, 0x78, 0x9a,
                         0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a,
-                        blvm_consensus::opcodes::OP_EQUALVERIFY,
-                        blvm_consensus::opcodes::OP_CHECKSIG,
+                        blvm_protocol::opcodes::OP_EQUALVERIFY,
+                        blvm_protocol::opcodes::OP_CHECKSIG,
                     ],
                 }],
                 lock_time: 0u64,
@@ -285,8 +286,8 @@ fn benchmark_block_validation_tx_ids(c: &mut Criterion) {
 
 #[cfg(feature = "production")]
 fn benchmark_sighash_batching(c: &mut Criterion) {
-    use blvm_consensus::transaction_hash::{batch_compute_sighashes, SighashType};
-    use blvm_consensus::{OutPoint, Transaction, TransactionInput, TransactionOutput};
+    use blvm_protocol::transaction_hash::{batch_compute_sighashes, SighashType};
+    use blvm_protocol::{OutPoint, Transaction, TransactionInput, TransactionOutput};
 
     let input_counts = vec![2, 5, 10, 20];
 
@@ -297,22 +298,22 @@ fn benchmark_sighash_batching(c: &mut Criterion) {
                 .map(|i| TransactionInput {
                     prevout: OutPoint {
                         hash: [i as u8; 32],
-                        index: 0u64,
+                        index: 0u32,
                     },
-                    script_sig: vec![blvm_consensus::opcodes::OP_1],
+                    script_sig: vec![blvm_protocol::opcodes::OP_1],
                     sequence: 0xffffffffu64,
                 })
                 .collect(),
             outputs: tx_outputs![TransactionOutput {
                 value: 5000000000i64,
                 script_pubkey: vec![
-                    blvm_consensus::opcodes::OP_DUP,
-                    blvm_consensus::opcodes::OP_HASH160,
-                    blvm_consensus::opcodes::PUSH_20_BYTES,
+                    blvm_protocol::opcodes::OP_DUP,
+                    blvm_protocol::opcodes::OP_HASH160,
+                    blvm_protocol::opcodes::PUSH_20_BYTES,
                     0x89, 0xab, 0xcd, 0xef, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc,
                     0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a,
-                    blvm_consensus::opcodes::OP_EQUALVERIFY,
-                    blvm_consensus::opcodes::OP_CHECKSIG,
+                    blvm_protocol::opcodes::OP_EQUALVERIFY,
+                    blvm_protocol::opcodes::OP_CHECKSIG,
                 ],
             }],
             lock_time: 0u64,
@@ -322,13 +323,13 @@ fn benchmark_sighash_batching(c: &mut Criterion) {
             .map(|_| TransactionOutput {
                 value: 10000000000i64,
                 script_pubkey: vec![
-                    blvm_consensus::opcodes::OP_DUP,
-                    blvm_consensus::opcodes::OP_HASH160,
-                    blvm_consensus::opcodes::PUSH_20_BYTES,
+                    blvm_protocol::opcodes::OP_DUP,
+                    blvm_protocol::opcodes::OP_HASH160,
+                    blvm_protocol::opcodes::PUSH_20_BYTES,
                     0x89, 0xab, 0xcd, 0xef, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc,
                     0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a,
-                    blvm_consensus::opcodes::OP_EQUALVERIFY,
-                    blvm_consensus::opcodes::OP_CHECKSIG,
+                    blvm_protocol::opcodes::OP_EQUALVERIFY,
+                    blvm_protocol::opcodes::OP_CHECKSIG,
                 ],
             })
             .collect();
@@ -336,7 +337,7 @@ fn benchmark_sighash_batching(c: &mut Criterion) {
         c.bench_function(&format!("batch_sighash_{}inputs", input_count), |b| {
             b.iter(|| {
                 black_box(
-                    batch_compute_sighashes(black_box(&tx), black_box(&prevouts), SighashType::All)
+                    batch_compute_sighashes(black_box(&tx), black_box(&prevouts), SighashType::ALL)
                         .unwrap(),
                 )
             })
@@ -346,8 +347,8 @@ fn benchmark_sighash_batching(c: &mut Criterion) {
 
 #[cfg(feature = "production")]
 fn benchmark_pow_batching(c: &mut Criterion) {
-    use blvm_consensus::pow::batch_check_proof_of_work;
-    use blvm_consensus::BlockHeader;
+    use blvm_protocol::pow::batch_check_proof_of_work;
+    use blvm_protocol::BlockHeader;
 
     let header_counts = vec![8, 16, 32, 64, 128];
 
@@ -375,8 +376,8 @@ fn benchmark_pow_batching(c: &mut Criterion) {
 /// Benchmarks batch_verify_signatures (multisig CHECKMULTISIG). Uses per-sig verification.
 #[cfg(feature = "production")]
 fn benchmark_batch_ecdsa_verification(c: &mut Criterion) {
-    use blvm_consensus::script::batch_verify_signatures;
-    use blvm_consensus::types::Network;
+    use blvm_protocol::script::batch_verify_signatures;
+    use blvm_protocol::types::Network;
     use secp256k1::{ecdsa::Signature, Message, Secp256k1};
 
     // Create test verification tasks with fixed test data
@@ -460,8 +461,8 @@ fn benchmark_batch_ecdsa_verification(c: &mut Criterion) {
 
 #[cfg(feature = "production")]
 fn benchmark_sighash_templates(c: &mut Criterion) {
-    use blvm_consensus::transaction_hash::{calculate_transaction_sighash, SighashType};
-    use blvm_consensus::{OutPoint, Transaction, TransactionInput, TransactionOutput};
+    use blvm_protocol::transaction_hash::{calculate_transaction_sighash, SighashType};
+    use blvm_protocol::{OutPoint, Transaction, TransactionInput, TransactionOutput};
 
     // Create standard transaction (1 input, 1 output) - most common pattern
     let tx = Transaction {
@@ -469,7 +470,7 @@ fn benchmark_sighash_templates(c: &mut Criterion) {
         inputs: tx_inputs![TransactionInput {
             prevout: OutPoint {
                 hash: [0u8; 32],
-                index: 0u64,
+                        index: 0u32,
             },
             script_sig: vec![0x51],
             sequence: 0xffffffffu64,
@@ -477,13 +478,13 @@ fn benchmark_sighash_templates(c: &mut Criterion) {
         outputs: tx_outputs![TransactionOutput {
             value: 5000000000i64,
             script_pubkey: vec![
-                blvm_consensus::opcodes::OP_DUP,
-                blvm_consensus::opcodes::OP_HASH160,
-                blvm_consensus::opcodes::PUSH_20_BYTES,
+                blvm_protocol::opcodes::OP_DUP,
+                blvm_protocol::opcodes::OP_HASH160,
+                blvm_protocol::opcodes::PUSH_20_BYTES,
                 0x89, 0xab, 0xcd, 0xef, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde,
                 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a,
-                blvm_consensus::opcodes::OP_EQUALVERIFY,
-                blvm_consensus::opcodes::OP_CHECKSIG,
+                blvm_protocol::opcodes::OP_EQUALVERIFY,
+                blvm_protocol::opcodes::OP_CHECKSIG,
             ],
         }],
         lock_time: 0u64,
@@ -492,13 +493,13 @@ fn benchmark_sighash_templates(c: &mut Criterion) {
     let prevouts = vec![TransactionOutput {
         value: 10000000000i64,
         script_pubkey: vec![
-            blvm_consensus::opcodes::OP_DUP,
-            blvm_consensus::opcodes::OP_HASH160,
-            blvm_consensus::opcodes::PUSH_20_BYTES,
+            blvm_protocol::opcodes::OP_DUP,
+            blvm_protocol::opcodes::OP_HASH160,
+            blvm_protocol::opcodes::PUSH_20_BYTES,
             0x89, 0xab, 0xcd, 0xef, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde,
             0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a,
-            blvm_consensus::opcodes::OP_EQUALVERIFY,
-            blvm_consensus::opcodes::OP_CHECKSIG,
+            blvm_protocol::opcodes::OP_EQUALVERIFY,
+            blvm_protocol::opcodes::OP_CHECKSIG,
         ],
     }];
 
@@ -509,7 +510,7 @@ fn benchmark_sighash_templates(c: &mut Criterion) {
                     black_box(&tx),
                     0,
                     black_box(&prevouts),
-                    SighashType::All,
+                    SighashType::ALL,
                 )
                 .unwrap(),
             )
@@ -519,8 +520,8 @@ fn benchmark_sighash_templates(c: &mut Criterion) {
 
 #[cfg(feature = "production")]
 fn benchmark_early_exit_transaction(c: &mut Criterion) {
-    use blvm_consensus::transaction::check_transaction;
-    use blvm_consensus::{OutPoint, Transaction, TransactionInput, TransactionOutput};
+    use blvm_protocol::transaction::check_transaction;
+    use blvm_protocol::{OutPoint, Transaction, TransactionInput, TransactionOutput};
 
     // Test with obviously invalid transaction (empty inputs)
     let invalid_tx = Transaction {
@@ -529,9 +530,9 @@ fn benchmark_early_exit_transaction(c: &mut Criterion) {
         outputs: tx_outputs![TransactionOutput {
             value: 5000000000i64,
             script_pubkey: vec![
-                blvm_consensus::opcodes::OP_DUP,
-                blvm_consensus::opcodes::OP_HASH160,
-                blvm_consensus::opcodes::PUSH_20_BYTES,
+                blvm_protocol::opcodes::OP_DUP,
+                blvm_protocol::opcodes::OP_HASH160,
+                blvm_protocol::opcodes::PUSH_20_BYTES,
             ],
         }],
         lock_time: 0u64,
@@ -543,7 +544,7 @@ fn benchmark_early_exit_transaction(c: &mut Criterion) {
         inputs: tx_inputs![TransactionInput {
             prevout: OutPoint {
                 hash: [0u8; 32],
-                index: 0u64,
+                        index: 0u32,
             },
             script_sig: vec![0x51],
             sequence: 0xffffffffu64,
@@ -551,9 +552,9 @@ fn benchmark_early_exit_transaction(c: &mut Criterion) {
         outputs: tx_outputs![TransactionOutput {
             value: 5000000000i64,
             script_pubkey: vec![
-                blvm_consensus::opcodes::OP_DUP,
-                blvm_consensus::opcodes::OP_HASH160,
-                blvm_consensus::opcodes::PUSH_20_BYTES,
+                blvm_protocol::opcodes::OP_DUP,
+                blvm_protocol::opcodes::OP_HASH160,
+                blvm_protocol::opcodes::PUSH_20_BYTES,
             ],
         }],
         lock_time: 0u64,

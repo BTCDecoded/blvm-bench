@@ -1,8 +1,8 @@
 //! Transaction Serialization Benchmark
 //! Matches Core's TransactionSerialization benchmark
 
-use blvm_consensus::serialization::transaction::serialize_transaction;
-use blvm_consensus::{
+use blvm_protocol::serialization::transaction::serialize_transaction;
+use blvm_protocol::{
     tx_inputs, tx_outputs, OutPoint, Transaction, TransactionInput, TransactionOutput,
 };
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
@@ -16,12 +16,12 @@ fn create_test_transaction() -> Transaction {
                 hash: [1; 32],
                 index: 0,
             },
-            script_sig: vec![blvm_consensus::opcodes::OP_1; 20],
+            script_sig: vec![blvm_protocol::opcodes::OP_1; 20],
             sequence: 0xffffffff,
         }],
         outputs: tx_outputs![TransactionOutput {
             value: 10_000_000_000,
-            script_pubkey: vec![blvm_consensus::opcodes::OP_1; 25],
+            script_pubkey: vec![blvm_protocol::opcodes::OP_1; 25],
         }],
         lock_time: 0,
     }

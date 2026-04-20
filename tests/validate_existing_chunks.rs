@@ -1,4 +1,5 @@
 //! Validate existing chunks for corruption
+#![cfg(feature = "chunk-cache")]
 
 use anyhow::Result;
 use blvm_bench::chunked_cache::{decompress_chunk_streaming, load_chunk_metadata};
