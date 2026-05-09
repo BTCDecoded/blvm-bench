@@ -182,7 +182,7 @@ get_module_breakdown() {
         done
         breakdown="$modules_json"
     elif [ "$codebase_type" = "commons" ]; then
-        # For Commons, we're analyzing individual crates (bllvm-consensus, bllvm-node)
+        # For Commons, we're analyzing individual crates (blvm-consensus, blvm-node)
         # Each crate is passed separately, so just return its stats
         local crate_loc=$(get_code_size "$target_dir" json | jq -r '.total // 0' 2>/dev/null || echo "0")
         local crate_files=$(find "$target_dir/src" -name "*.rs" 2>/dev/null | wc -l)

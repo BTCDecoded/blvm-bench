@@ -17,12 +17,12 @@ echo ""
 BENCH_DIR="$BLVM_BENCH_ROOT"
 
 if [ ! -d "$BENCH_DIR" ]; then
-    echo "❌ bllvm-bench directory not found at $BENCH_DIR"
+    echo "❌ blvm-bench directory not found at $BENCH_DIR"
     cat > "$OUTPUT_FILE" << EOF
 {
   "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-  "error": "bllvm-bench directory not found",
-  "note": "This script should be run from within bllvm-bench"
+  "error": "blvm-bench directory not found",
+  "note": "This script should be run from within blvm-bench"
 }
 EOF
     exit 1

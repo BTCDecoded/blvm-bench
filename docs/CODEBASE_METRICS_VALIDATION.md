@@ -141,7 +141,7 @@
 
 **Status**: PASS
 
-- ✅ Focus on `bllvm-consensus` and `bllvm-node` for Commons (as recommended)
+- ✅ Focus on `blvm-consensus` and `blvm-node` for Commons (as recommended)
 - ✅ Core: entire `src/` directory
 - ✅ Excludes test coverage and formal verification (separate workflows)
 - ✅ Excludes code duplication (not prioritized)

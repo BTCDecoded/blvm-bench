@@ -83,10 +83,10 @@ COMMONS_CRATES_FEATURES="{}"
 if [ -n "$COMMONS_CONSENSUS_PATH" ] && [ -d "$COMMONS_CONSENSUS_PATH" ]; then
     echo "Analyzing Bitcoin Commons features..."
     
-    # bllvm-consensus
+    # blvm-consensus
     CONSENSUS_CARGO="$COMMONS_CONSENSUS_PATH/Cargo.toml"
     if [ -f "$CONSENSUS_CARGO" ]; then
-        echo "  Analyzing bllvm-consensus features..."
+        echo "  Analyzing blvm-consensus features..."
         CONSENSUS_FEATURES=$(parse_cargo_features "$CONSENSUS_CARGO")
         CONSENSUS_FEATURES_COUNT=$(echo "$CONSENSUS_FEATURES" | jq -r '.total_features // 0' 2>/dev/null || echo "0")
         CONSENSUS_GATES=$(count_rust_feature_gates "$COMMONS_CONSENSUS_PATH/src")
@@ -95,17 +95,17 @@ if [ -n "$COMMONS_CONSENSUS_PATH" ] && [ -d "$COMMONS_CONSENSUS_PATH" ]; then
         COMMONS_TOTAL_GATES=$((COMMONS_TOTAL_GATES + CONSENSUS_GATES))
         
         COMMONS_CRATES_FEATURES=$(echo "$COMMONS_CRATES_FEATURES" | jq --argjson features "$CONSENSUS_FEATURES" --argjson gates "$CONSENSUS_GATES" \
-            '. + {"bllvm-consensus": ($features + {"feature_gates": $gates})}' 2>/dev/null || echo "$COMMONS_CRATES_FEATURES")
+            '. + {"blvm-consensus": ($features + {"feature_gates": $gates})}' 2>/dev/null || echo "$COMMONS_CRATES_FEATURES")
         
-        echo "    bllvm-consensus: $CONSENSUS_FEATURES_COUNT features, $CONSENSUS_GATES feature gates"
+        echo "    blvm-consensus: $CONSENSUS_FEATURES_COUNT features, $CONSENSUS_GATES feature gates"
     fi
 fi
 
 if [ -n "$COMMONS_NODE_PATH" ] && [ -d "$COMMONS_NODE_PATH" ]; then
-    # bllvm-node
+    # blvm-node
     NODE_CARGO="$COMMONS_NODE_PATH/Cargo.toml"
     if [ -f "$NODE_CARGO" ]; then
-        echo "  Analyzing bllvm-node features..."
+        echo "  Analyzing blvm-node features..."
         NODE_FEATURES=$(parse_cargo_features "$NODE_CARGO")
         NODE_FEATURES_COUNT=$(echo "$NODE_FEATURES" | jq -r '.total_features // 0' 2>/dev/null || echo "0")
         NODE_GATES=$(count_rust_feature_gates "$COMMONS_NODE_PATH/src")
@@ -114,9 +114,9 @@ if [ -n "$COMMONS_NODE_PATH" ] && [ -d "$COMMONS_NODE_PATH" ]; then
         COMMONS_TOTAL_GATES=$((COMMONS_TOTAL_GATES + NODE_GATES))
         
         COMMONS_CRATES_FEATURES=$(echo "$COMMONS_CRATES_FEATURES" | jq --argjson features "$NODE_FEATURES" --argjson gates "$NODE_GATES" \
-            '. + {"bllvm-node": ($features + {"feature_gates": $gates})}' 2>/dev/null || echo "$COMMONS_CRATES_FEATURES")
+            '. + {"blvm-node": ($features + {"feature_gates": $gates})}' 2>/dev/null || echo "$COMMONS_CRATES_FEATURES")
         
-        echo "    bllvm-node: $NODE_FEATURES_COUNT features, $NODE_GATES feature gates"
+        echo "    blvm-node: $NODE_FEATURES_COUNT features, $NODE_GATES feature gates"
     fi
 fi
 

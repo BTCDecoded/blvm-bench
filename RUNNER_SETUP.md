@@ -66,8 +66,8 @@ rustup default stable
 The runner should have these environment variables set (or they will be set by the workflow):
 
 - `CORE_PATH`: Path to Bitcoin Core repository (default: `$HOME/bitcoin-core`)
-- `COMMONS_CONSENSUS_PATH`: Path to bllvm-consensus (default: `$HOME/bllvm-consensus`)
-- `COMMONS_NODE_PATH`: Path to bllvm-node (default: `$HOME/bllvm-node`)
+- `COMMONS_CONSENSUS_PATH`: Path to blvm-consensus (default: `$HOME/blvm-consensus`)
+- `COMMONS_NODE_PATH`: Path to blvm-node (default: `$HOME/blvm-node`)
 - `PKG_CONFIG_PATH`: For finding OpenSSL (default: `/usr/lib/pkgconfig:/usr/lib/x86_64-linux-gnu/pkgconfig`)
 - `OPENSSL_DIR`: OpenSSL installation directory (default: `/usr`)
 

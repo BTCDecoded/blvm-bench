@@ -1,4 +1,4 @@
-# bllvm-bench Makefile
+# blvm-bench Makefile
 # Standard make targets for easy usage
 
 .PHONY: help setup bench report clean all
@@ -6,7 +6,7 @@
 # Default target
 help:
 	@echo "╔══════════════════════════════════════════════════════════════╗"
-	@echo "║  bllvm-bench: Bitcoin Core vs Commons Benchmark Suite          ║"
+	@echo "║  blvm-bench: Bitcoin Core vs Commons Benchmark Suite          ║"
 	@echo "╚══════════════════════════════════════════════════════════╝"
 	@echo ""
 	@echo "Available targets:"

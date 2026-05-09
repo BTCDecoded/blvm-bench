@@ -349,7 +349,7 @@ All metrics should be collected into a JSON structure similar to benchmark resul
 ## Questions to Resolve
 
 1. **Scope**: Should we include all Commons crates or just core ones?
-   - Recommendation: Start with `bllvm-consensus` and `bllvm-node`, expand later
+   - Recommendation: Start with `blvm-consensus` and `blvm-node`, expand later
 
 2. **Frequency**: How often should metrics be collected?
    - Recommendation: Same as benchmarks (daily or on push)

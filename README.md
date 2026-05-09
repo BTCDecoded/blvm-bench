@@ -1,4 +1,4 @@
-# bllvm-bench
+# blvm-bench
 
 Bitcoin Commons benchmarking suite for comparing Bitcoin Core and Bitcoin Commons performance.
 
@@ -6,7 +6,7 @@ Bitcoin Commons benchmarking suite for comparing Bitcoin Core and Bitcoin Common
 
 ```bash
 # Clone and setup
-git clone <repo> && cd bllvm-bench
+git clone https://github.com/BTCDecoded/blvm-bench.git && cd blvm-bench
 make all
 
 # Or step by step:

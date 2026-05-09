@@ -22,7 +22,7 @@ The benchmarks workflow has been improved to use the same Core detection pattern
 
 - **Self-hosted runner** with:
   - Bitcoin Core built with `bench_bitcoin`
-  - bllvm-consensus and bllvm-node cloned and built
+  - blvm-consensus and blvm-node cloned and built
   - Rust toolchain installed
   - All dependencies available
 
@@ -46,7 +46,7 @@ The benchmarks workflow has been improved to use the same Core detection pattern
 
 2. Configure:
    ```bash
-   ./config.sh --url https://github.com/BTCDecoded/bllvm-bench --token <TOKEN>
+   ./config.sh --url https://github.com/BTCDecoded/blvm-bench --token <TOKEN>
    ```
 
 3. Install as service:
@@ -57,7 +57,7 @@ The benchmarks workflow has been improved to use the same Core detection pattern
 
 4. Ensure paths are discoverable:
    - Bitcoin Core in `~/src/bitcoin` or set in `config/config.toml`
-   - bllvm-consensus in `~/src/bllvm-consensus` or set in `config/config.toml`
+   - blvm-consensus in `~/src/blvm-consensus` or set in `config/config.toml`
 
 ### Manual Workflow
 
@@ -70,7 +70,7 @@ Use `benchmarks-manual.yml` to run specific suites manually:
 
 ## Differential Tests Workflow
 
-Automated differential testing that compares BLLVM validation against Bitcoin Core to catch consensus divergences.
+Automated differential testing that compares BLVM validation against Bitcoin Core to catch consensus divergences.
 
 ### Triggers
 
@@ -83,7 +83,7 @@ Automated differential testing that compares BLLVM validation against Bitcoin Co
 
 1. Checks for Bitcoin Core availability (gracefully skips if not found)
 2. Runs differential tests with `--features differential`
-3. Compares BLLVM vs Core validation results
+3. Compares BLVM vs Core validation results
 4. Reports any consensus divergences
 5. Uploads test results as artifacts
 
@@ -91,7 +91,7 @@ Automated differential testing that compares BLLVM validation against Bitcoin Co
 
 - **Self-hosted runner** with:
   - Bitcoin Core binaries (optional - tests gracefully skip if not found)
-  - bllvm-consensus, bllvm-node, bllvm-protocol cloned
+  - blvm-consensus, blvm-node, blvm-protocol cloned
   - Rust toolchain installed
 
 ### Core Detection
@@ -103,7 +103,7 @@ The workflow checks for Core in multiple locations:
 4. `~/src/bitcoin/` (alternative location)
 5. `~/bitcoin-core/` (alternative location)
 
-If Core is not found, tests will skip Core comparisons but still run BLLVM-only validation tests.
+If Core is not found, tests will skip Core comparisons but still run BLVM-only validation tests.
 
 ### Test Results
 

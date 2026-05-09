@@ -1,6 +1,6 @@
 # Troubleshooting Guide
 
-Common issues and solutions for `bllvm-bench`.
+Common issues and solutions for `blvm-bench`.
 
 ## Dependencies Not Found
 
@@ -45,23 +45,23 @@ cd $CORE_PATH
 make bench_bitcoin
 ```
 
-### bllvm-consensus not found
+### blvm-consensus not found
 
 **Symptoms:**
 ```
-❌ bllvm-consensus: Not found
+❌ blvm-consensus: Not found
 ```
 
 **Solutions:**
-1. Clone bllvm-consensus:
+1. Clone blvm-consensus:
    ```bash
-   git clone https://github.com/BTCDecoded/bllvm-consensus.git ~/src/bllvm-consensus
+   git clone https://github.com/BTCDecoded/blvm-consensus.git ~/src/blvm-consensus
    ```
 
 2. Or set path in `config/config.toml`:
    ```toml
    [paths]
-   commons_consensus_path = "/path/to/bllvm-consensus"
+   commons_consensus_path = "/path/to/blvm-consensus"
    ```
 
 3. Or use auto-setup:
@@ -124,7 +124,7 @@ make bench
 
 **Likely Causes:**
 1. **Compilation Errors**: `cargo bench` is failing to compile the benchmarks
-2. **Missing Dependencies**: Path dependencies (bllvm-consensus, bllvm-node) not found
+2. **Missing Dependencies**: Path dependencies (blvm-consensus, blvm-node) not found
 3. **Wrong Benchmark Names**: Scripts trying non-existent benchmarks
 4. **Feature Flags**: `--features production` causing compilation issues
 
@@ -136,14 +136,14 @@ make bench
 
 2. **Run a benchmark manually**:
    ```bash
-   cd /path/to/bllvm-bench
+   cd /path/to/blvm-bench
    cargo bench --bench block_validation_realistic
    ```
 
 3. **Check if dependencies exist**:
    ```bash
-   ls -la ../bllvm-consensus/Cargo.toml
-   ls -la ../bllvm-node/Cargo.toml
+   ls -la ../blvm-consensus/Cargo.toml
+   ls -la ../blvm-node/Cargo.toml
    ```
 
 4. **List available benchmarks**:
@@ -217,7 +217,7 @@ Error: No runners found
 1. Set paths in `config/config.toml` on the runner
 2. Or ensure standard paths exist:
    - `~/src/bitcoin`
-   - `~/src/bllvm-consensus`
+   - `~/src/blvm-consensus`
 
 ## GitHub Pages Issues
 

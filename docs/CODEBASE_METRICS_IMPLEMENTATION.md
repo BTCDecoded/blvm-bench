@@ -196,8 +196,8 @@ Add to `.github/workflows/benchmarks.yml`:
     "sloc": 650000,
     "files": 644,
     "by_crate": {
-      "bllvm-consensus": { "loc": 450000, "files": 180 },
-      "bllvm-node": { "loc": 250000, "files": 150 },
+      "blvm-consensus": { "loc": 450000, "files": 180 },
+      "blvm-node": { "loc": 250000, "files": 150 },
       ...
     }
   },
@@ -236,7 +236,7 @@ Add to `.github/workflows/benchmarks.yml`:
 
 ## Questions Resolved
 
-- ✅ **Scope**: Focus on `bllvm-consensus` and `bllvm-node` for Commons
+- ✅ **Scope**: Focus on `blvm-consensus` and `blvm-node` for Commons
 - ✅ **Frequency**: Same as benchmarks (daily or on push)
 - ✅ **Storage**: Integrated into consolidated JSON, separate section
 - ✅ **Tooling**: Install lightweight tools in workflow

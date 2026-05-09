@@ -36,8 +36,8 @@ source "$SCRIPT_DIR/../../shared/common.sh"
 # Configuration
 NUM_BLOCKS=1000  # Number of blocks to validate
 CORE_DIR="${CORE_PATH:-$HOME/bitcoin-core}"
-CONSENSUS_DIR="${COMMONS_CONSENSUS_PATH:-$HOME/bllvm-consensus}"
-NODE_DIR="${COMMONS_NODE_PATH:-$HOME/bllvm-node}"
+CONSENSUS_DIR="${COMMONS_CONSENSUS_PATH:-$HOME/blvm-consensus}"
+NODE_DIR="${COMMONS_NODE_PATH:-$HOME/blvm-node}"
 BENCH_BITCOIN="$CORE_DIR/build/bin/bench_bitcoin"
 
 # Bitcoin Core: Sequential Validation
@@ -118,7 +118,7 @@ COMMONS_BLOCKS_PER_SEC=0
 # Check if we need to create a benchmark for parallel validation
 # For now, we'll create a simple Rust benchmark that uses ParallelBlockValidator
 
-BENCH_DIR="${BLVM_BENCH_ROOT:-$PROJECT_ROOT/commons/bllvm-bench}"
+BENCH_DIR="${BLVM_BENCH_ROOT:-$PROJECT_ROOT/commons/blvm-bench}"
 
 if [ -d "$BENCH_DIR" ] && [ -f "$BENCH_DIR/Cargo.toml" ]; then
     cd "$BENCH_DIR"
@@ -150,7 +150,7 @@ if [ -d "$BENCH_DIR" ] && [ -f "$BENCH_DIR/Cargo.toml" ]; then
         fi
     fi
 else
-    echo "❌ bllvm-bench directory not found"
+    echo "❌ blvm-bench directory not found"
     echo "  BLVM_BENCH_ROOT: ${BLVM_BENCH_ROOT:-not set}"
     echo "  PROJECT_ROOT: $PROJECT_ROOT"
     echo "  Tried: $BENCH_DIR"

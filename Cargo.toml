@@ -89,6 +89,14 @@ libmimalloc-sys = { version = "0.1", features = ["extended"], optional = true }
 # Disk-backed UTXO set for checkpoint builds on memory-constrained hosts
 rocksdb = { version = "0.24.0", optional = true }
 
+# Local monorepo: sibling paths override the version pins above.
+[patch.crates-io]
+blvm-consensus = { path = "../blvm-consensus" }
+blvm-protocol = { path = "../blvm-protocol" }
+blvm-node = { path = "../blvm-node" }
+blvm-primitives = { path = "../blvm-primitives" }
+blvm-spec-lock = { path = "../blvm-spec-lock" }
+
 [features]
 default = []
 # Chunk block cache + `chunk_index` / `missing_blocks` (shared by scan and differential tooling).
@@ -125,16 +133,6 @@ node-benches = ["dep:blvm-node"]
 [dev-dependencies]
 # Additional testing utilities if needed
 proptest = "1.5"
-
-# Local development: Use [patch.crates-io] to override with local paths
-# For production/CI, these patches are removed and crates.io versions are used
-[patch.crates-io]
-blvm-consensus = { path = "../blvm-consensus" }
-blvm-protocol = { path = "../blvm-protocol" }
-blvm-node = { path = "../blvm-node" }
-blvm-primitives = { path = "../blvm-primitives" }
-# `#[spec_locked]` must see monorepo `../blvm-spec` (PROTOCOL.md / ARCHITECTURE.md), not vendored stub.
-blvm-spec-lock = { path = "../blvm-spec-lock" }
 
 # Benchmark targets - Consensus layer
 [[bench]]
@@ -513,8 +511,8 @@ name = "analyze_failures"
 path = "src/bin/analyze_failures.rs"
 
 [[bin]]
-name = "bllvm-bench"
-path = "src/bin/bllvm-bench.rs"
+name = "blvm-bench"
+path = "src/bin/blvm-bench.rs"
 
 [profile.release]
 opt-level = 3

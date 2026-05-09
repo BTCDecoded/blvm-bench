@@ -1,6 +1,6 @@
 #!/bin/bash
 # Bitcoin Commons Block Validation Benchmark (Portable)
-# Uses bllvm-bench to benchmark actual block validation
+# Uses blvm-bench to benchmark actual block validation
 
 set -e
 
@@ -14,16 +14,16 @@ OUTPUT_FILE="$OUTPUT_DIR/commons-block-validation-bench-$(date +%Y%m%d-%H%M%S).j
 echo "=== Bitcoin Commons Block Validation Benchmark ==="
 echo ""
 
-# bllvm-bench is always in the same repo
+# blvm-bench is always in the same repo
 BENCH_DIR="$BLVM_BENCH_ROOT"
 
 if [ ! -d "$BENCH_DIR" ]; then
-    echo "❌ bllvm-bench directory not found at $BENCH_DIR"
+    echo "❌ blvm-bench directory not found at $BENCH_DIR"
     cat > "$OUTPUT_FILE" << EOF
 {
   "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-  "error": "bllvm-bench directory not found",
-  "note": "This script should be run from within bllvm-bench"
+  "error": "blvm-bench directory not found",
+  "note": "This script should be run from within blvm-bench"
 }
 EOF
     exit 1
@@ -217,11 +217,11 @@ cat > "$OUTPUT_FILE" << EOF
       "time_per_block_ms": ${CONNECT_BLOCK_TIME_MS},
       "time_per_block_ns": ${CONNECT_BLOCK_TIME_NS},
       "blocks_per_second": ${CONNECT_BLOCK_OPS_PER_SEC},
-      "implementation": "bllvm-consensus::block::connect_block with real P2WPKH signatures",
+      "implementation": "blvm-consensus::block::connect_block with real P2WPKH signatures",
       "note": "Actual block validation with 1000 transactions and real ECDSA signatures",
-      "benchmark_source": "bllvm-bench/benches/consensus/block_validation_realistic.rs"
+      "benchmark_source": "blvm-bench/benches/consensus/block_validation_realistic.rs"
     },
-    "measurement_method": "Criterion benchmark - bllvm-bench/benches/consensus/block_validation_realistic.rs"
+    "measurement_method": "Criterion benchmark - blvm-bench/benches/consensus/block_validation_realistic.rs"
   }
 }
 EOF

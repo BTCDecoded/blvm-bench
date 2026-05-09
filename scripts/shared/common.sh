@@ -1,5 +1,5 @@
 #!/bin/bash
-# Common functions and path setup for bllvm-bench scripts
+# Common functions and path setup for blvm-bench scripts
 # This file should be sourced by all benchmark scripts
 
 # Don't use set -e here - we want functions to be defined even if path discovery fails
@@ -9,7 +9,7 @@ set +e
 # Get script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Find bllvm-bench root (could be scripts/../.. or scripts/..)
+# Find blvm-bench root (could be scripts/../.. or scripts/..)
 # Don't override if already set (e.g., by run-benchmarks.sh)
 if [ -z "$BLVM_BENCH_ROOT" ]; then
     if [ -f "$SCRIPT_DIR/../discover-paths.sh" ]; then
@@ -61,16 +61,16 @@ if [ -z "$COMMONS_CONSENSUS_PATH" ] && [ -z "$CORE_PATH" ]; then
     echo "" >&2
     echo "   Trying manual discovery..." >&2
     # Last resort: try to find it from common locations
-    for path in "../bllvm-consensus" "../../bllvm-consensus" "$HOME/src/bllvm-consensus" "$HOME/bllvm-consensus" "$(dirname "$BLVM_BENCH_ROOT")/bllvm-consensus" "$(dirname "$(dirname "$BLVM_BENCH_ROOT")")/commons/bllvm-consensus"; do
-        if [ -d "$path" ] && [ -f "$path/Cargo.toml" ] && grep -q "bllvm-consensus" "$path/Cargo.toml" 2>/dev/null; then
+    for path in "../blvm-consensus" "../../blvm-consensus" "$HOME/src/blvm-consensus" "$HOME/blvm-consensus" "$(dirname "$BLVM_BENCH_ROOT")/blvm-consensus" "$(dirname "$(dirname "$BLVM_BENCH_ROOT")")/commons/blvm-consensus"; do
+        if [ -d "$path" ] && [ -f "$path/Cargo.toml" ] && grep -q "blvm-consensus" "$path/Cargo.toml" 2>/dev/null; then
             abs_path=$(cd "$path" 2>/dev/null && pwd || echo "")
             if [ -n "$abs_path" ]; then
                 COMMONS_CONSENSUS_PATH="$abs_path"
                 export COMMONS_CONSENSUS_PATH
                 echo "   ✅ Found: $COMMONS_CONSENSUS_PATH" >&2
-                # Also try to find bllvm-node
-                for node_path in "$(dirname "$abs_path")/bllvm-node" "$abs_path/../bllvm-node" "$HOME/bllvm-node"; do
-                    if [ -d "$node_path" ] && [ -f "$node_path/Cargo.toml" ] && grep -q "bllvm-node" "$node_path/Cargo.toml" 2>/dev/null; then
+                # Also try to find blvm-node
+                for node_path in "$(dirname "$abs_path")/blvm-node" "$abs_path/../blvm-node" "$HOME/blvm-node"; do
+                    if [ -d "$node_path" ] && [ -f "$node_path/Cargo.toml" ] && grep -q "blvm-node" "$node_path/Cargo.toml" 2>/dev/null; then
                         abs_node_path=$(cd "$node_path" 2>/dev/null && pwd || echo "")
                         if [ -n "$abs_node_path" ]; then
                             COMMONS_NODE_PATH="$abs_node_path"

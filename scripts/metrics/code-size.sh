@@ -86,7 +86,7 @@ else
     echo "⚠️  Bitcoin Core path not found, skipping Core metrics"
 fi
 
-# Collect Commons metrics (bllvm-consensus and bllvm-node)
+# Collect Commons metrics (blvm-consensus and blvm-node)
 COMMONS_TOTAL_LOC=0
 COMMONS_TOTAL_SLOC=0
 COMMONS_TOTAL_FILES=0
@@ -95,9 +95,9 @@ COMMONS_CRATES_JSON="{}"
 if [ -n "$COMMONS_CONSENSUS_PATH" ] && [ -d "$COMMONS_CONSENSUS_PATH" ]; then
     echo "Collecting Bitcoin Commons code size metrics..."
     
-    # bllvm-consensus
+    # blvm-consensus
     if [ -d "$COMMONS_CONSENSUS_PATH/src" ]; then
-        echo "  Analyzing bllvm-consensus..."
+        echo "  Analyzing blvm-consensus..."
         CONSENSUS_STATS=$(get_code_size "$COMMONS_CONSENSUS_PATH/src" json 2>/dev/null || echo "{}")
         CONSENSUS_LOC=$(echo "$CONSENSUS_STATS" | jq -r '.Rust.code // .total // 0' 2>/dev/null || echo "0")
         CONSENSUS_SLOC=$CONSENSUS_LOC
@@ -109,16 +109,16 @@ if [ -n "$COMMONS_CONSENSUS_PATH" ] && [ -d "$COMMONS_CONSENSUS_PATH" ]; then
         
         CONSENSUS_BREAKDOWN=$(get_module_breakdown "$COMMONS_CONSENSUS_PATH" "commons")
         COMMONS_CRATES_JSON=$(echo "$COMMONS_CRATES_JSON" | jq --argjson data "$CONSENSUS_BREAKDOWN" \
-            '. + {"bllvm-consensus": $data}' 2>/dev/null || echo "$COMMONS_CRATES_JSON")
+            '. + {"blvm-consensus": $data}' 2>/dev/null || echo "$COMMONS_CRATES_JSON")
         
-        echo "    bllvm-consensus: $CONSENSUS_LOC LOC, $CONSENSUS_FILES files"
+        echo "    blvm-consensus: $CONSENSUS_LOC LOC, $CONSENSUS_FILES files"
     fi
 fi
 
 if [ -n "$COMMONS_NODE_PATH" ] && [ -d "$COMMONS_NODE_PATH" ]; then
-    # bllvm-node
+    # blvm-node
     if [ -d "$COMMONS_NODE_PATH/src" ]; then
-        echo "  Analyzing bllvm-node..."
+        echo "  Analyzing blvm-node..."
         NODE_STATS=$(get_code_size "$COMMONS_NODE_PATH/src" json 2>/dev/null || echo "{}")
         NODE_LOC=$(echo "$NODE_STATS" | jq -r '.Rust.code // .total // 0' 2>/dev/null || echo "0")
         NODE_SLOC=$NODE_LOC
@@ -130,9 +130,9 @@ if [ -n "$COMMONS_NODE_PATH" ] && [ -d "$COMMONS_NODE_PATH" ]; then
         
         NODE_BREAKDOWN=$(get_module_breakdown "$COMMONS_NODE_PATH" "commons")
         COMMONS_CRATES_JSON=$(echo "$COMMONS_CRATES_JSON" | jq --argjson data "$NODE_BREAKDOWN" \
-            '. + {"bllvm-node": $data}' 2>/dev/null || echo "$COMMONS_CRATES_JSON")
+            '. + {"blvm-node": $data}' 2>/dev/null || echo "$COMMONS_CRATES_JSON")
         
-        echo "    bllvm-node: $NODE_LOC LOC, $NODE_FILES files"
+        echo "    blvm-node: $NODE_LOC LOC, $NODE_FILES files"
     fi
 fi
 

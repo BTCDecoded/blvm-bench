@@ -6,7 +6,7 @@
 - **Total**: 41 benchmark scripts
 - **Coverage**: Core vs Commons comparisons across major operations
 
-### Ported to bllvm-bench
+### Ported to blvm-bench
 - **Core benchmarks**: 17 scripts
 - **Commons benchmarks**: 21 scripts  
 - **Total**: 38 scripts (93% coverage)

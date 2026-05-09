@@ -21,7 +21,7 @@ echo ""
 BENCH_DIR="$BLVM_BENCH_ROOT"
 
 if [ ! -d "$BENCH_DIR" ]; then
-    echo "❌ bllvm-bench directory not found"
+    echo "❌ blvm-bench directory not found"
     exit 1
 fi
 

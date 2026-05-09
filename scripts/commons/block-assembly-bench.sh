@@ -31,11 +31,11 @@ echo "=== Bitcoin Commons Block Assembly Benchmark ==="
 echo ""
 
 if [ ! -d "$BENCH_DIR" ]; then
-    echo "❌ bllvm-bench directory not found"
+    echo "❌ blvm-bench directory not found"
     cat > "$OUTPUT_FILE" << EOF
 {
   "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-  "error": "bllvm-bench directory not found"
+  "error": "blvm-bench directory not found"
 }
 EOF
     exit 1

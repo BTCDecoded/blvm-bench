@@ -109,7 +109,7 @@ cat > "$OUTPUT_FILE" << EOF
 {
   "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
   "suite_directory": "$LATEST_SUITE",
-  "generated_by": "bllvm-bench consolidated JSON generator",
+  "generated_by": "blvm-bench consolidated JSON generator",
   "benchmarks": {},
   "summary": {
     "total_benchmarks": 0,

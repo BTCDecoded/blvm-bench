@@ -1,5 +1,5 @@
 #!/bin/bash
-# Path Discovery for bllvm-bench
+# Path Discovery for blvm-bench
 # Auto-discovers Bitcoin Core and Bitcoin Commons paths
 # Can be sourced (. discover-paths.sh) or executed (./discover-paths.sh)
 
@@ -9,7 +9,7 @@
 CONFIG_FILE="${BLVM_BENCH_CONFIG:-}"
 if [ -z "$CONFIG_FILE" ]; then
     # Try to find config in common locations
-    for config_path in "./config/config.toml" "$BLVM_BENCH_ROOT/config/config.toml" "$HOME/.bllvm-bench/config.toml"; do
+    for config_path in "./config/config.toml" "$BLVM_BENCH_ROOT/config/config.toml" "$HOME/.blvm-bench/config.toml"; do
         if [ -f "$config_path" ]; then
             CONFIG_FILE="$config_path"
             break
@@ -36,15 +36,15 @@ if [ -f "$CONFIG_FILE" ]; then
     fi
 fi
 
-# Get script directory (bllvm-bench root)
+# Get script directory (blvm-bench root)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BLVM_BENCH_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # If BLVM_BENCH_ROOT is already set and valid, use it
 if [ -z "$BLVM_BENCH_ROOT" ] || [ ! -d "$BLVM_BENCH_ROOT" ]; then
-    # Try to find bllvm-bench from current directory
+    # Try to find blvm-bench from current directory
     CURRENT_DIR="$(pwd)"
-    if [ -f "$CURRENT_DIR/Cargo.toml" ] && grep -q "bllvm-bench" "$CURRENT_DIR/Cargo.toml" 2>/dev/null; then
+    if [ -f "$CURRENT_DIR/Cargo.toml" ] && grep -q "blvm-bench" "$CURRENT_DIR/Cargo.toml" 2>/dev/null; then
         BLVM_BENCH_ROOT="$CURRENT_DIR"
     elif [ -d "$CURRENT_DIR/scripts" ] && [ -f "$CURRENT_DIR/scripts/discover-paths.sh" ]; then
         BLVM_BENCH_ROOT="$CURRENT_DIR"
@@ -89,33 +89,33 @@ fi
 if [ -z "$COMMONS_CONSENSUS_PATH" ] || [ -z "$COMMONS_NODE_PATH" ]; then
     # Common locations to search (relative to BLVM_BENCH_ROOT and absolute)
     SEARCH_PATHS=(
-        "$HOME/src/bllvm-consensus"
+        "$HOME/src/blvm-consensus"
         "$HOME/src/bitcoin-commons"
-        "../bllvm-consensus"
-        "../../bllvm-consensus"
-        "$BLVM_BENCH_ROOT/../bllvm-consensus"
-        "$BLVM_BENCH_ROOT/../../bllvm-consensus"
-        "$(dirname "$BLVM_BENCH_ROOT")/bllvm-consensus"
-        "$(dirname "$(dirname "$BLVM_BENCH_ROOT")")/commons/bllvm-consensus"
-        "$(dirname "$(dirname "$BLVM_BENCH_ROOT")")/bllvm-consensus"
+        "../blvm-consensus"
+        "../../blvm-consensus"
+        "$BLVM_BENCH_ROOT/../blvm-consensus"
+        "$BLVM_BENCH_ROOT/../../blvm-consensus"
+        "$(dirname "$BLVM_BENCH_ROOT")/blvm-consensus"
+        "$(dirname "$(dirname "$BLVM_BENCH_ROOT")")/commons/blvm-consensus"
+        "$(dirname "$(dirname "$BLVM_BENCH_ROOT")")/blvm-consensus"
     )
     
     for path in "${SEARCH_PATHS[@]}"; do
         # Resolve to absolute path
         if [ -d "$path" ]; then
             abs_path=$(cd "$path" 2>/dev/null && pwd || echo "")
-            if [ -n "$abs_path" ] && [ -f "$abs_path/Cargo.toml" ] && grep -q "bllvm-consensus" "$abs_path/Cargo.toml" 2>/dev/null; then
+            if [ -n "$abs_path" ] && [ -f "$abs_path/Cargo.toml" ] && grep -q "blvm-consensus" "$abs_path/Cargo.toml" 2>/dev/null; then
                 COMMONS_CONSENSUS_PATH="$abs_path"
-                # Try to find bllvm-node nearby
+                # Try to find blvm-node nearby
                 NODE_CANDIDATES=(
-                    "$(dirname "$abs_path")/bllvm-node"
-                    "$(dirname "$(dirname "$abs_path")")/bllvm-node"
-                    "$abs_path/../bllvm-node"
+                    "$(dirname "$abs_path")/blvm-node"
+                    "$(dirname "$(dirname "$abs_path")")/blvm-node"
+                    "$abs_path/../blvm-node"
                 )
                 for node_path in "${NODE_CANDIDATES[@]}"; do
                     if [ -d "$node_path" ]; then
                         abs_node_path=$(cd "$node_path" 2>/dev/null && pwd || echo "")
-                        if [ -n "$abs_node_path" ] && [ -f "$abs_node_path/Cargo.toml" ] && grep -q "bllvm-node" "$abs_node_path/Cargo.toml" 2>/dev/null; then
+                        if [ -n "$abs_node_path" ] && [ -f "$abs_node_path/Cargo.toml" ] && grep -q "blvm-node" "$abs_node_path/Cargo.toml" 2>/dev/null; then
                             COMMONS_NODE_PATH="$abs_node_path"
                             break
                         fi

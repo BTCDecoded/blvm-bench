@@ -46,9 +46,9 @@ else
     ERRORS=$((ERRORS + 1))
 fi
 
-# Check bllvm-consensus
+# Check blvm-consensus
 if [ -n "$COMMONS_CONSENSUS_PATH" ] && [ -d "$COMMONS_CONSENSUS_PATH" ]; then
-    echo "✅ bllvm-consensus: $COMMONS_CONSENSUS_PATH"
+    echo "✅ blvm-consensus: $COMMONS_CONSENSUS_PATH"
     if [ -f "$COMMONS_CONSENSUS_PATH/Cargo.toml" ]; then
         echo "   Cargo.toml: Found"
     else
@@ -56,15 +56,15 @@ if [ -n "$COMMONS_CONSENSUS_PATH" ] && [ -d "$COMMONS_CONSENSUS_PATH" ]; then
         ERRORS=$((ERRORS + 1))
     fi
 else
-    echo "❌ bllvm-consensus: Not found"
+    echo "❌ blvm-consensus: Not found"
     ERRORS=$((ERRORS + 1))
 fi
 
-# Check bllvm-node (optional)
+# Check blvm-node (optional)
 if [ -n "$COMMONS_NODE_PATH" ] && [ -d "$COMMONS_NODE_PATH" ]; then
-    echo "✅ bllvm-node: $COMMONS_NODE_PATH"
+    echo "✅ blvm-node: $COMMONS_NODE_PATH"
 else
-    echo "⚠️  bllvm-node: Not found (optional for some benchmarks)"
+    echo "⚠️  blvm-node: Not found (optional for some benchmarks)"
 fi
 
 echo ""

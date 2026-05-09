@@ -1,5 +1,5 @@
 #!/bin/bash
-# Helper script to port a benchmark from node-comparison to bllvm-bench
+# Helper script to port a benchmark from node-comparison to blvm-bench
 # Usage: ./port-benchmark.sh {core|commons} {benchmark-name}
 
 set -e
@@ -56,9 +56,9 @@ echo "Porting ${TYPE}-${BENCH_NAME}..."
     grep -v "^SCRIPT_DIR=" | \
     grep -v "^PROJECT_ROOT=" | \
     sed "s|\$PROJECT_ROOT/core|\$CORE_PATH|g" | \
-    sed "s|\$PROJECT_ROOT/commons/bllvm-bench|\$BLVM_BENCH_ROOT|g" | \
-    sed "s|\$PROJECT_ROOT/commons/bllvm-consensus|\$COMMONS_CONSENSUS_PATH|g" | \
-    sed "s|\$PROJECT_ROOT/commons/bllvm-node|\$COMMONS_NODE_PATH|g" | \
+    sed "s|\$PROJECT_ROOT/commons/blvm-bench|\$BLVM_BENCH_ROOT|g" | \
+    sed "s|\$PROJECT_ROOT/commons/blvm-consensus|\$COMMONS_CONSENSUS_PATH|g" | \
+    sed "s|\$PROJECT_ROOT/commons/blvm-node|\$COMMONS_NODE_PATH|g" | \
     sed "s|\$BENCH_DIR|\$BLVM_BENCH_ROOT|g" | \
     sed "s|OUTPUT_DIR=\"\${1:-\$(dirname \"\$0\")/\.\./results\}\"|# OUTPUT_DIR already set|" | \
     sed "s|OUTPUT_DIR=\$(cd \"\$OUTPUT_DIR\" 2>/dev/null && pwd|# OUTPUT_DIR already set|" | \

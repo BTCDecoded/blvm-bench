@@ -85,9 +85,9 @@ COMMONS_CRATES_TESTS="{}"
 if [ -n "$COMMONS_CONSENSUS_PATH" ] && [ -d "$COMMONS_CONSENSUS_PATH" ]; then
     echo "Collecting Bitcoin Commons test metrics..."
     
-    # bllvm-consensus
+    # blvm-consensus
     if [ -d "$COMMONS_CONSENSUS_PATH" ]; then
-        echo "  Analyzing bllvm-consensus tests..."
+        echo "  Analyzing blvm-consensus tests..."
         
         # Test files in tests/ directory
         CONSENSUS_TEST_FILES=$(find "$COMMONS_CONSENSUS_PATH/tests" -name "*.rs" 2>/dev/null | wc -l)
@@ -98,7 +98,7 @@ if [ -n "$COMMONS_CONSENSUS_PATH" ] && [ -d "$COMMONS_CONSENSUS_PATH" ]; then
         CONSENSUS_TEST_LOC=$(find "$COMMONS_CONSENSUS_PATH/tests" -name "*.rs" 2>/dev/null | xargs wc -l 2>/dev/null | tail -1 | awk '{print $1}' || echo "0")
         
         # Production LOC
-        CONSENSUS_PROD_LOC=$(jq -r '.bitcoin_commons.by_crate."bllvm-consensus".loc // 0' "$OUTPUT_DIR/metrics-code-size-"*.json 2>/dev/null | head -1 || echo "0")
+        CONSENSUS_PROD_LOC=$(jq -r '.bitcoin_commons.by_crate."blvm-consensus".loc // 0' "$OUTPUT_DIR/metrics-code-size-"*.json 2>/dev/null | head -1 || echo "0")
         if [ "$CONSENSUS_PROD_LOC" = "0" ]; then
             CONSENSUS_PROD_LOC=$(find "$COMMONS_CONSENSUS_PATH/src" -name "*.rs" \
                 ! -exec grep -l '#\[cfg(test)\]' {} \; 2>/dev/null | xargs wc -l 2>/dev/null | tail -1 | awk '{print $1}' || echo "0")
@@ -121,23 +121,23 @@ if [ -n "$COMMONS_CONSENSUS_PATH" ] && [ -d "$COMMONS_CONSENSUS_PATH" ]; then
             '{"test_files": $files, "test_loc": $loc, "test_to_production_ratio": $ratio}' 2>/dev/null || echo "{}")
         
         COMMONS_CRATES_TESTS=$(echo "$COMMONS_CRATES_TESTS" | jq --argjson data "$CONSENSUS_TESTS_JSON" \
-            '. + {"bllvm-consensus": $data}' 2>/dev/null || echo "$COMMONS_CRATES_TESTS")
+            '. + {"blvm-consensus": $data}' 2>/dev/null || echo "$COMMONS_CRATES_TESTS")
         
-        echo "    bllvm-consensus: $CONSENSUS_TEST_FILES test files, $CONSENSUS_TEST_LOC LOC (ratio: $CONSENSUS_RATIO)"
+        echo "    blvm-consensus: $CONSENSUS_TEST_FILES test files, $CONSENSUS_TEST_LOC LOC (ratio: $CONSENSUS_RATIO)"
     fi
 fi
 
 if [ -n "$COMMONS_NODE_PATH" ] && [ -d "$COMMONS_NODE_PATH" ]; then
-    # bllvm-node
+    # blvm-node
     if [ -d "$COMMONS_NODE_PATH" ]; then
-        echo "  Analyzing bllvm-node tests..."
+        echo "  Analyzing blvm-node tests..."
         
         NODE_TEST_FILES=$(find "$COMMONS_NODE_PATH/tests" -name "*.rs" 2>/dev/null | wc -l)
         NODE_TEST_FILES=$((NODE_TEST_FILES + $(find "$COMMONS_NODE_PATH/src" -name "*.rs" -exec grep -l '#\[cfg(test)\]' {} \; 2>/dev/null | wc -l)))
         
         NODE_TEST_LOC=$(find "$COMMONS_NODE_PATH/tests" -name "*.rs" 2>/dev/null | xargs wc -l 2>/dev/null | tail -1 | awk '{print $1}' || echo "0")
         
-        NODE_PROD_LOC=$(jq -r '.bitcoin_commons.by_crate."bllvm-node".loc // 0' "$OUTPUT_DIR/metrics-code-size-"*.json 2>/dev/null | head -1 || echo "0")
+        NODE_PROD_LOC=$(jq -r '.bitcoin_commons.by_crate."blvm-node".loc // 0' "$OUTPUT_DIR/metrics-code-size-"*.json 2>/dev/null | head -1 || echo "0")
         if [ "$NODE_PROD_LOC" = "0" ]; then
             NODE_PROD_LOC=$(find "$COMMONS_NODE_PATH/src" -name "*.rs" \
                 ! -exec grep -l '#\[cfg(test)\]' {} \; 2>/dev/null | xargs wc -l 2>/dev/null | tail -1 | awk '{print $1}' || echo "0")
@@ -160,9 +160,9 @@ if [ -n "$COMMONS_NODE_PATH" ] && [ -d "$COMMONS_NODE_PATH" ]; then
             '{"test_files": $files, "test_loc": $loc, "test_to_production_ratio": $ratio}' 2>/dev/null || echo "{}")
         
         COMMONS_CRATES_TESTS=$(echo "$COMMONS_CRATES_TESTS" | jq --argjson data "$NODE_TESTS_JSON" \
-            '. + {"bllvm-node": $data}' 2>/dev/null || echo "$COMMONS_CRATES_TESTS")
+            '. + {"blvm-node": $data}' 2>/dev/null || echo "$COMMONS_CRATES_TESTS")
         
-        echo "    bllvm-node: $NODE_TEST_FILES test files, $NODE_TEST_LOC LOC (ratio: $NODE_RATIO)"
+        echo "    blvm-node: $NODE_TEST_FILES test files, $NODE_TEST_LOC LOC (ratio: $NODE_RATIO)"
     fi
 fi
 

@@ -1,8 +1,8 @@
-# Differential Testing in bllvm-bench
+# Differential Testing in blvm-bench
 
 ## Overview
 
-Differential testing compares BLLVM's validation results against Bitcoin Core's validation results to catch consensus divergences.
+Differential testing compares BLVM's validation results against Bitcoin Core's validation results to catch consensus divergences.
 
 For **BLVM vs `libbitcoinkernel`** block-by-block comparison (`block_kernel_diff`), chunk cache, checkpoints, and performance planning, see **`docs/DIFFERENTIAL_KERNEL_OPTIMIZATION_PLAN.md`**. Operational steps: **`docs/DIFFERENTIAL_KERNEL_RUNBOOK.md`**. Optional conservative thread caps: **`scripts/block_kernel_diff_wrapper.sh`**; Phase 0 metrics: **`docs/DIFFERENTIAL_KERNEL_PHASE0_METRICS.md`**. Checkpoint ladder: **`scripts/kernel-diff-orchestrator.sh checkpoints …`**.
 
@@ -11,7 +11,7 @@ For **BLVM vs `libbitcoinkernel`** block-by-block comparison (`block_kernel_diff
 - **Core Detection**: Automatically finds Bitcoin Core binaries
 - **Regtest Node Management**: Starts/stops regtest nodes for testing
 - **RPC Client**: Wrapper around Bitcoin Core RPC
-- **Differential Framework**: Compare BLLVM vs Core validation
+- **Differential Framework**: Compare BLVM vs Core validation
 - **BIP Tests**: Specific tests for BIP30, BIP34, BIP90
 
 ## Usage
@@ -104,7 +104,7 @@ tests/integration/
 
 1. **Start Regtest Node**: Creates isolated Bitcoin Core regtest node
 2. **Create Test Block**: Generates block with specific violation (e.g., BIP30)
-3. **Validate with BLLVM**: Runs BLLVM validation
+3. **Validate with BLVM**: Runs BLVM validation
 4. **Validate with Core**: Calls Core RPC to test validation
 5. **Compare Results**: Ensures both implementations agree
 
@@ -120,16 +120,16 @@ async fn test_bip30_differential() -> Result<()> {
     // Create block violating BIP30
     let block = create_bip30_violation_block(1);
 
-    // Validate with BLLVM
-    let bllvm_result = validate_bllvm_block(&block, 1, Network::Mainnet);
+    // Validate with BLVM
+    let blvm_result = validate_blvm_block(&block, 1, Network::Mainnet);
 
     // Compare with Core
     let comparison = compare_block_validation(
-        &block, 1, Network::Mainnet, bllvm_result, &rpc_client
+        &block, 1, Network::Mainnet, blvm_result, &rpc_client
     ).await?;
 
     // Both should reject
-    assert!(!comparison.matches || matches!(bllvm_result, ValidationResult::Invalid(_)));
+    assert!(!comparison.matches || matches!(blvm_result, ValidationResult::Invalid(_)));
     Ok(())
 }
 ```
@@ -219,8 +219,8 @@ HISTORICAL_BLOCK_START=0 HISTORICAL_BLOCK_END=1000 \
 1. Connects to mainnet Core node (or falls back to regtest for local testing)
 2. Iterates through blocks from `HISTORICAL_BLOCK_START` to `HISTORICAL_BLOCK_END`
 3. Fetches each block from Core via RPC
-4. Validates block with BLLVM (maintaining UTXO set state)
-5. Compares BLLVM result with Core's validation
+4. Validates block with BLVM (maintaining UTXO set state)
+5. Compares BLVM result with Core's validation
 6. Reports any divergences
 
 ### Output

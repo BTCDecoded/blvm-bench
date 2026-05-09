@@ -1,5 +1,5 @@
 #!/bin/bash
-# Port all remaining benchmarks from node-comparison to bllvm-bench
+# Port all remaining benchmarks from node-comparison to blvm-bench
 # This script systematically ports all benchmark scripts
 
 set -e
@@ -9,7 +9,7 @@ BLVM_BENCH_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 NODE_COMPARISON_ROOT="${NODE_COMPARISON_ROOT:-$BLVM_BENCH_ROOT/../../..}"
 
 echo "╔══════════════════════════════════════════════════════════════╗"
-echo "║  Porting All Benchmarks to bllvm-bench                        ║"
+echo "║  Porting All Benchmarks to blvm-bench                        ║"
 echo "╚══════════════════════════════════════════════════════════╝"
 echo ""
 
@@ -57,9 +57,9 @@ port_benchmark() {
         grep -v "^BENCH_DIR=" | \
         grep -v "^CORE_DIR=" | \
         sed "s|\$PROJECT_ROOT/core|\$CORE_PATH|g" | \
-        sed "s|\$PROJECT_ROOT/commons/bllvm-bench|\$BLVM_BENCH_ROOT|g" | \
-        sed "s|\$PROJECT_ROOT/commons/bllvm-consensus|\$COMMONS_CONSENSUS_PATH|g" | \
-        sed "s|\$PROJECT_ROOT/commons/bllvm-node|\$COMMONS_NODE_PATH|g" | \
+        sed "s|\$PROJECT_ROOT/commons/blvm-bench|\$BLVM_BENCH_ROOT|g" | \
+        sed "s|\$PROJECT_ROOT/commons/blvm-consensus|\$COMMONS_CONSENSUS_PATH|g" | \
+        sed "s|\$PROJECT_ROOT/commons/blvm-node|\$COMMONS_NODE_PATH|g" | \
         sed "s|OUTPUT_DIR=\"\${1:-\$(dirname \"\$0\")/\.\./results\}\"|OUTPUT_DIR=\$(get_output_dir \"\${1:-\$RESULTS_DIR}\")|" | \
         sed "s|OUTPUT_DIR=\$(cd \"\$OUTPUT_DIR\" 2>/dev/null && pwd|# OUTPUT_DIR already set|" | \
         sed "s|OUTPUT_DIR=\$(cd \"\$OUTPUT_DIR\" && pwd|# OUTPUT_DIR already set|" | \

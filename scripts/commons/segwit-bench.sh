@@ -15,11 +15,11 @@ echo "=== Bitcoin Commons SegWit Operations Benchmark ==="
 echo ""
 
 if [ ! -d "$BENCH_DIR" ]; then
-    echo "❌ bllvm-bench directory not found at $BENCH_DIR"
+    echo "❌ blvm-bench directory not found at $BENCH_DIR"
     cat > "$OUTPUT_FILE" << EOF
 {
   "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-  "error": "bllvm-bench directory not found",
+  "error": "blvm-bench directory not found",
   "note": "Check Commons installation"
 }
 EOF

@@ -18,7 +18,7 @@ Total: ~40 benchmark scripts covering:
 - Memory efficiency
 - Node sync
 
-### Ported to bllvm-bench
+### Ported to blvm-bench
 - **Core benchmarks**: 17 scripts
 - **Commons benchmarks**: 21 scripts
 - **Total**: 38 scripts
@@ -135,7 +135,7 @@ Bitcoin Core's `bench_bitcoin` includes:
 
 If there are custom C++ benchmarks in `../bitcoin`:
 1. Identify which operations they benchmark
-2. Ensure we have equivalent Rust benchmarks in `bllvm-bench`
+2. Ensure we have equivalent Rust benchmarks in `blvm-bench`
 3. Port the comparison logic to our system
 
 ## Recommendations

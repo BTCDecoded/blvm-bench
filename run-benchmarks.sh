@@ -1,12 +1,12 @@
 #!/bin/bash
-# bllvm-bench Main Entry Point
+# blvm-bench Main Entry Point
 # Run all benchmarks and generate reports
 
 set -e
 
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# Ensure we're in the bllvm-bench root (where run-benchmarks.sh is located)
+# Ensure we're in the blvm-bench root (where run-benchmarks.sh is located)
 cd "$SCRIPT_DIR"
 # BLVM_BENCH_ROOT is the same as SCRIPT_DIR since run-benchmarks.sh is in the root
 BLVM_BENCH_ROOT="$SCRIPT_DIR"
@@ -21,7 +21,7 @@ fi
 
 # Display discovered paths
 echo "╔══════════════════════════════════════════════════════════════╗"
-echo "║  bllvm-bench: Bitcoin Core vs Commons Benchmark Suite          ║"
+echo "║  blvm-bench: Bitcoin Core vs Commons Benchmark Suite          ║"
 echo "╚══════════════════════════════════════════════════════════╝"
 echo ""
 echo "Discovered paths:"
@@ -51,7 +51,7 @@ if [ -z "$CORE_PATH" ] && [ -z "$COMMONS_CONSENSUS_PATH" ]; then
     echo "  1. Set paths in config/config.toml, or"
     echo "  2. Ensure Core/Commons are in standard locations:"
     echo "     - Core: ~/src/bitcoin, ~/src/bitcoin-core, or ../core"
-    echo "     - Commons: ~/src/bllvm-consensus or ../bllvm-consensus"
+    echo "     - Commons: ~/src/blvm-consensus or ../blvm-consensus"
     exit 1
 fi
 

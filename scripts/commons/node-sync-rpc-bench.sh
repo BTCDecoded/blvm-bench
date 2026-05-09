@@ -1,6 +1,6 @@
 #!/bin/bash
 # Bitcoin Commons Node Sync and RPC Benchmark
-# Extracts results from bllvm-bench node_sync_and_rpc Criterion benchmark
+# Extracts results from blvm-bench node_sync_and_rpc Criterion benchmark
 
 set -e
 
@@ -15,12 +15,12 @@ LOG_FILE="$OUTPUT_DIR/commons-node-sync-rpc-$(date +%Y%m%d-%H%M%S).log"
 
 echo "=== Bitcoin Commons Node Sync and RPC Benchmark ==="
 echo ""
-echo "Extracting results from bllvm-bench node_sync_and_rpc benchmark..."
+echo "Extracting results from blvm-bench node_sync_and_rpc benchmark..."
 echo ""
 
-# Check if bllvm-bench exists
+# Check if blvm-bench exists
 if [ ! -d "$BLVM_BENCH_DIR" ]; then
-    echo "❌ bllvm-bench directory not found: $BLVM_BENCH_DIR"
+    echo "❌ blvm-bench directory not found: $BLVM_BENCH_DIR"
     exit 1
 fi
 
@@ -133,7 +133,7 @@ RPC_COMMANDS_TESTED=(
 cat > "$OUTPUT_FILE" << EOF
 {
   "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-  "measurement_method": "Criterion benchmark - bllvm-bench/benches/integration/node_sync_and_rpc.rs",
+  "measurement_method": "Criterion benchmark - blvm-bench/benches/integration/node_sync_and_rpc.rs",
   "benchmark_name": "sync_1000_blocks_and_rpc",
   "node_sync": {
     "blocks_synced": $BLOCKS_SYNCED,

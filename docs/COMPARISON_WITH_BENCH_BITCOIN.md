@@ -1,8 +1,8 @@
-# Comparison: bllvm-bench vs Bitcoin Core bench_bitcoin
+# Comparison: blvm-bench vs Bitcoin Core bench_bitcoin
 
 ## Overview
 
-This document compares our benchmarking system (`bllvm-bench`) with Bitcoin Core's `bench_bitcoin` tool.
+This document compares our benchmarking system (`blvm-bench`) with Bitcoin Core's `bench_bitcoin` tool.
 
 ## bench_bitcoin (Bitcoin Core)
 
@@ -81,12 +81,12 @@ AddrManAdd, 1, 1000, 0.66, 57000000, 59000000, 57927463
 - ✅ Minimum time control (`-min-time=ms`)
 - ✅ List benchmarks (`-list`)
 
-## bllvm-bench (Our System)
+## blvm-bench (Our System)
 
 ### Framework
-- **Tool**: `bllvm-bench` (Rust + Shell scripts)
+- **Tool**: `blvm-bench` (Rust + Shell scripts)
 - **Framework**: Criterion (Rust) + bench_bitcoin (Core)
-- **Location**: `commons/bllvm-bench/`
+- **Location**: `commons/blvm-bench/`
 - **Benchmarks**: 38 benchmark scripts + 22 Rust/Criterion benchmarks
 
 ### Output Formats
@@ -199,7 +199,7 @@ block_validation,Commons,10.80,10800000,10800000,10750000,200000,10500000,111000
 3. **Direct nanobench integration**: Native JSON/CSV from framework
 4. **Low-level metrics**: CPU cycles, instructions (via nanobench, if hardware counters available)
 
-### Advantages of bllvm-bench
+### Advantages of blvm-bench
 1. **Comparison capability**: Core vs Commons side-by-side
 2. **Enhanced statistics**: More detailed statistical analysis (CI bounds, MAD)
 3. **Consolidated output**: All benchmarks in one JSON file
@@ -218,7 +218,7 @@ block_validation,Commons,10.80,10800000,10800000,10750000,200000,10500000,111000
 - Error: ✅ Median absolute percent error
 - CPU Metrics: ✅ Instructions, cycles (if available)
 
-### bllvm-bench (Criterion + our extraction)
+### blvm-bench (Criterion + our extraction)
 - Mean: ✅ Point estimate, CI, standard error
 - Median: ✅ Point estimate, CI, standard error
 - Standard Deviation: ✅ Explicit value
@@ -242,7 +242,7 @@ block_validation,Commons,10.80,10800000,10800000,10750000,200000,10500000,111000
 }
 ```
 
-### bllvm-bench JSON
+### blvm-bench JSON
 ```json
 {
   "benchmarks": [
@@ -275,7 +275,7 @@ block_validation,Commons,10.80,10800000,10800000,10750000,200000,10500000,111000
 - **Categories**: All Core operations (consensus, mempool, network, etc.)
 - **Scope**: Bitcoin Core only
 
-### bllvm-bench
+### blvm-bench
 - **Total**: 38 benchmark scripts + 22 Rust benchmarks
 - **Categories**: Core vs Commons comparisons
 - **Scope**: Dual implementation comparison
@@ -301,7 +301,7 @@ block_validation,Commons,10.80,10800000,10800000,10750000,200000,10500000,111000
 - Statistical analysis: ✅
 - Cache metrics: ⚠️ Limited
 
-### bllvm-bench Deep Commons Analysis
+### blvm-bench Deep Commons Analysis
 - CPU cycles: ✅ (via perf)
 - Instructions: ✅ (via perf)
 - IPC (Instructions Per Cycle): ✅ (calculated)
@@ -310,13 +310,13 @@ block_validation,Commons,10.80,10800000,10800000,10750000,200000,10500000,111000
 - Statistical analysis: ✅ (Criterion)
 - HTML reports: ✅
 
-**Verdict**: bllvm-bench provides **more comprehensive** low-level metrics than bench_bitcoin.
+**Verdict**: blvm-bench provides **more comprehensive** low-level metrics than bench_bitcoin.
 
 ## Conclusion
 
-**bllvm-bench** is **complementary** to `bench_bitcoin`:
+**blvm-bench** is **complementary** to `bench_bitcoin`:
 - `bench_bitcoin`: Optimized for Core-only benchmarking with mature tooling
-- `bllvm-bench`: Optimized for Core vs Commons comparison with enhanced statistics and deep analysis
+- `blvm-bench`: Optimized for Core vs Commons comparison with enhanced statistics and deep analysis
 
 Our system provides:
 - **Better statistical analysis** (CI bounds, MAD, std dev)

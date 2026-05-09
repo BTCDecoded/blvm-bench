@@ -1,4 +1,4 @@
-# bllvm-bench Configuration
+# blvm-bench Configuration
 # Copy this to config.toml and customize paths
 
 [paths]
@@ -6,9 +6,9 @@
 # core_path = "/path/to/bitcoin-core"
 
 # Bitcoin Commons paths (optional - will auto-discover if not set)
-# commons_consensus_path = "/path/to/bllvm-consensus"
-# commons_node_path = "/path/to/bllvm-node"
-# commons_protocol_path = "/path/to/bllvm-protocol"
+# commons_consensus_path = "/path/to/blvm-consensus"
+# commons_node_path = "/path/to/blvm-node"
+# commons_protocol_path = "/path/to/blvm-protocol"
 
 # Results directory (default: ./results)
 # results_dir = "./results"
