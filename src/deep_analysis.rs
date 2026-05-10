@@ -81,10 +81,7 @@ pub fn run_with_perf(benchmark_cmd: &[&str]) -> Result<DeepAnalysisMetrics, Stri
     for event in &perf_events {
         perf_cmd.arg("-e").arg(event);
     }
-    perf_cmd
-        .arg("-x,")
-        .arg("-o")
-        .arg(&perf_output_path);
+    perf_cmd.arg("-x,").arg("-o").arg(&perf_output_path);
 
     // Add the actual benchmark command
     for arg in benchmark_cmd {
@@ -141,7 +138,7 @@ fn parse_perf_csv(path: &str) -> Result<DeepAnalysisMetrics, String> {
     for line in reader.lines() {
         let line = line.map_err(|e| format!("Failed to read line: {}", e))?;
         let parts: Vec<&str> = line.split(',').collect();
-        if parts.len() < 1 {
+        if parts.is_empty() {
             continue;
         }
 

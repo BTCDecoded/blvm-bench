@@ -125,9 +125,7 @@ impl RemoteCoreRpcClient {
             );
         }
 
-        let pid = String::from_utf8_lossy(&output.stdout)
-            .trim()
-            .to_string();
+        let pid = String::from_utf8_lossy(&output.stdout).trim().to_string();
 
         if pid.is_empty() {
             anyhow::bail!("bitcoind process not found");
@@ -316,9 +314,8 @@ impl RemoteCoreRpcClient {
             return Ok(response);
         }
 
-        Err(last_error.unwrap_or_else(|| {
-            anyhow::anyhow!("RPC call failed after {} retries", MAX_RETRIES)
-        }))
+        Err(last_error
+            .unwrap_or_else(|| anyhow::anyhow!("RPC call failed after {} retries", MAX_RETRIES)))
     }
 
     /// Check if error is transient (should retry)
@@ -360,9 +357,7 @@ impl RemoteCoreRpcClient {
 
     /// Get block by hash (hex format)
     pub async fn get_block_hex(&self, hash: &str) -> Result<String> {
-        let response = self
-            .call("getblock", serde_json::json!([hash, 0]))
-            .await?;
+        let response = self.call("getblock", serde_json::json!([hash, 0])).await?;
         let hex = response
             .get("result")
             .and_then(|v| v.as_str())
@@ -408,7 +403,7 @@ impl RemoteCoreRpcClient {
         if tx_hexes.is_empty() {
             return Ok(serde_json::json!([]));
         }
-        let tx_array: Vec<&str> = tx_hexes.iter().copied().collect();
+        let tx_array: Vec<&str> = tx_hexes.to_vec();
         let response = self
             .call("testmempoolaccept", serde_json::json!([tx_array]))
             .await?;
@@ -432,12 +427,10 @@ impl RemoteCoreRpcClient {
         // Make individual calls in parallel (SSH multiplexing makes this efficient)
         let futures: Vec<_> = heights
             .iter()
-            .map(|&h| {
-                async move {
-                    match self.get_block_hash(h).await {
-                        Ok(hash) => (h, Ok(hash)),
-                        Err(e) => (h, Err(e)),
-                    }
+            .map(|&h| async move {
+                match self.get_block_hash(h).await {
+                    Ok(hash) => (h, Ok(hash)),
+                    Err(e) => (h, Err(e)),
                 }
             })
             .collect();
@@ -507,5 +500,11 @@ impl RemoteCoreRpcClient {
     pub async fn clear_pid_cache(&self) {
         let mut cache = self.cached_pid.write().await;
         *cache = None;
+    }
+}
+
+impl Default for RemoteCoreRpcClient {
+    fn default() -> Self {
+        Self::new()
     }
 }

@@ -1,5 +1,5 @@
 //! Chunk protection module - PREVENTS DELETION OF CHUNKS
-//! 
+//!
 //! CRITICAL: This module exists to prevent accidental deletion of chunks
 //! Chunks represent DAYS of work and MUST NEVER be deleted by code
 
@@ -25,7 +25,7 @@ pub fn is_protected_chunk_dir(path: &Path) -> bool {
 }
 
 /// Validate that we're not trying to delete chunks
-/// 
+///
 /// This function should be called before ANY operation that could delete files
 pub fn validate_no_chunk_deletion(operation: &str, path: &Path) -> Result<()> {
     if is_protected_chunk_dir(path) {
@@ -38,21 +38,21 @@ pub fn validate_no_chunk_deletion(operation: &str, path: &Path) -> Result<()> {
             path.display()
         );
     }
-    
+
     // Also protect chunk files under BLOCK_CACHE_DIR
-    if path.to_string_lossy().contains("chunk_") && path.to_string_lossy().ends_with(".bin.zst") {
-        if protected_chunk_roots()
+    if path.to_string_lossy().contains("chunk_")
+        && path.to_string_lossy().ends_with(".bin.zst")
+        && protected_chunk_roots()
             .iter()
             .any(|root| path.starts_with(root.as_path()))
-        {
-            anyhow::bail!(
-                "🚨🚨🚨 CRITICAL ERROR: Attempted to {} chunk file: {}\n\
+    {
+        anyhow::bail!(
+            "🚨🚨🚨 CRITICAL ERROR: Attempted to {} chunk file: {}\n\
                  🚨 CHUNK FILES MUST NEVER BE DELETED!\n\
                  🚨 This operation has been BLOCKED.",
-                operation,
-                path.display()
-            );
-        }
+            operation,
+            path.display()
+        );
     }
 
     Ok(())
@@ -61,27 +61,29 @@ pub fn validate_no_chunk_deletion(operation: &str, path: &Path) -> Result<()> {
 /// Make chunks read-only to prevent accidental deletion
 pub fn protect_chunks(chunks_dir: &Path) -> Result<()> {
     use std::fs;
-    
+
     if !chunks_dir.exists() {
         return Ok(());
     }
-    
+
     // Make all chunk files read-only
     for entry in fs::read_dir(chunks_dir)? {
         let entry = entry?;
         let path = entry.path();
-        
-        if path.file_name()
+
+        if path
+            .file_name()
             .and_then(|n| n.to_str())
             .map(|n| n.starts_with("chunk_") && n.ends_with(".bin.zst"))
-            .unwrap_or(false) {
+            .unwrap_or(false)
+        {
             let mut perms = fs::metadata(&path)?.permissions();
             perms.set_readonly(true);
             fs::set_permissions(&path, perms)
                 .with_context(|| format!("Failed to make chunk read-only: {}", path.display()))?;
         }
     }
-    
+
     Ok(())
 }
 
@@ -90,16 +92,19 @@ pub fn chunks_exist(chunks_dir: &Path) -> bool {
     if !chunks_dir.exists() {
         return false;
     }
-    
+
     std::fs::read_dir(chunks_dir)
         .map(|entries| {
             entries.into_iter().any(|entry| {
                 entry
                     .ok()
-                    .and_then(|e| e.file_name().to_str().map(|s| s.starts_with("chunk_") && s.ends_with(".bin.zst")))
+                    .and_then(|e| {
+                        e.file_name()
+                            .to_str()
+                            .map(|s| s.starts_with("chunk_") && s.ends_with(".bin.zst"))
+                    })
                     .unwrap_or(false)
             })
         })
         .unwrap_or(false)
 }
-
