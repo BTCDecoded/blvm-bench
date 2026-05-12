@@ -77,7 +77,7 @@ jobs:
           elif command -v dnf >/dev/null 2>&1; then
             sudo dnf install -y openssl-devel pkgconfig ccache tokei || echo "⚠️  tokei not available via dnf"
           elif command -v pacman >/dev/null 2>&1; then
-            sudo pacman -S --noconfirm openssl pkgconf ccache tokei || echo "⚠️  tokei not available via pacman"
+            pacman -Qq openssl pkgconf ccache tokei >/dev/null 2>&1 || sudo pacman -Sy --noconfirm openssl pkgconf ccache tokei || echo "⚠️  tokei not available via pacman"
           elif command -v apk >/dev/null 2>&1; then
             sudo apk add openssl-dev pkgconfig ccache || echo "⚠️  Some packages not available via apk"
           else
