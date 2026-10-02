@@ -68,7 +68,7 @@ enum SpamPresetArg {
     Conservative,
     Moderate,
     Aggressive,
-    StrictInscriptions,
+    StrictUnexecIf,
     Disabled,
 }
 
@@ -79,7 +79,7 @@ impl std::str::FromStr for SpamPresetArg {
             "conservative" => Ok(SpamPresetArg::Conservative),
             "moderate" => Ok(SpamPresetArg::Moderate),
             "aggressive" => Ok(SpamPresetArg::Aggressive),
-            "strict" | "strictinscriptions" => Ok(SpamPresetArg::StrictInscriptions),
+            "strict" | "strictinscriptions" | "strictunexecif" => Ok(SpamPresetArg::StrictUnexecIf),
             "disabled" | "none" | "off" => Ok(SpamPresetArg::Disabled),
             _ => Err(format!(
                 "Unknown preset: {}. Use conservative, moderate, aggressive, strict, or disabled.",
@@ -124,7 +124,7 @@ fn main() -> Result<()> {
                 SpamPresetArg::Conservative => SpamFilterPreset::Conservative,
                 SpamPresetArg::Moderate => SpamFilterPreset::Moderate,
                 SpamPresetArg::Aggressive => SpamFilterPreset::Aggressive,
-                SpamPresetArg::StrictInscriptions => SpamFilterPreset::StrictInscriptions,
+                SpamPresetArg::StrictUnexecIf => SpamFilterPreset::StrictUnexecIf,
                 SpamPresetArg::Disabled => unreachable!(),
             };
             Some(SpamFilter::with_preset(preset))

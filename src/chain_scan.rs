@@ -35,7 +35,15 @@ fn spam_confidence(detected_types: &[SpamType]) -> SpamConfidence {
     }
     let has_definite = detected_types
         .iter()
-        .any(|t| matches!(t, SpamType::Ordinals | SpamType::BRC20));
+        .any(|t| {
+            matches!(
+                t,
+                SpamType::UnexecIf
+                    | SpamType::NullDataOp13
+                    | SpamType::NullDataMagic
+                    | SpamType::DataLikeMs
+            )
+        });
     let has_large_witness = detected_types.iter().any(|t| *t == SpamType::LargeWitness);
     let has_other = detected_types.iter().any(|t| {
         matches!(
