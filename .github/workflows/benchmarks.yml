@@ -927,48 +927,14 @@ jobs:
             fi
           fi
 
-      - name: Run differential tests and generate JSON
-        id: run_differential
-        if: success()
-        run: |
-          echo "Running differential tests..."
-          export CORE_PATH="${{ needs.setup.outputs.core_path }}"
-          export BITCOIN_RPC_USER=test
-          export BITCOIN_RPC_PASSWORD=test
-          export BITCOIN_NETWORK=regtest
-          
-          # Ensure results directory exists
-          mkdir -p results
-          
-          # Run tests and generate JSON
-          cargo test --features differential --test integration -- --nocapture || true
-          
-          # Ensure JSON is written (test may not have run due to execution order)
-          # Try to write it explicitly if it doesn't exist
-          if [ ! -f "results/differential-test-results.json" ]; then
-            echo "⚠️  Differential test JSON not found after tests, attempting to generate..."
-            # Run the JSON writing test explicitly
-            cargo test --features differential --test integration z_write_differential_test_results -- --nocapture || true
-          fi
-          
-          # Check for JSON file
-          if [ -f "results/differential-test-results.json" ]; then
-            echo "✅ Differential test JSON found"
-            echo "differential_json=results/differential-test-results.json" >> $GITHUB_OUTPUT
-          else
-            echo "⚠️  Differential test JSON not found after all attempts"
-            echo "differential_json=" >> $GITHUB_OUTPUT
-          fi
-        continue-on-error: true
-
       - name: Create or Update Release
         if: success() && (steps.consolidate.outputs.json_file != '' || steps.consolidate.outputs.json_file_fast != '')
         uses: softprops/action-gh-release@v1
         with:
           tag_name: benchmarks-latest
-          name: Latest Benchmark & Differential Test Results
+          name: Latest Benchmark Results
           body: |
-            Latest benchmark and differential test results.
+            Latest benchmark results.
             
             Suite: ${{ needs.setup.outputs.suite }}
             Speed: ${{ needs.setup.outputs.speed }}
@@ -978,7 +944,6 @@ jobs:
             ${{ steps.consolidate.outputs.json_file_fast && '✅ Fast benchmarks' || '' }}
             ${{ steps.consolidate.outputs.json_file_medium && '✅ Medium benchmarks' || '' }}
             ${{ steps.consolidate.outputs.json_file_slow && '✅ Slow benchmarks' || '' }}
-            ${{ steps.run_differential.outputs.differential_json && '✅ Differential test results' || '' }}
           draft: false
           prerelease: false
         env:
@@ -991,7 +956,6 @@ jobs:
           gh release delete-asset benchmarks-latest benchmark-results-fast.json --yes || true
           gh release delete-asset benchmarks-latest benchmark-results-medium.json --yes || true
           gh release delete-asset benchmarks-latest benchmark-results-slow.json --yes || true
-          gh release delete-asset benchmarks-latest differential-test-results.json --yes || true
         env:
           GITHUB_TOKEN: ${{ secrets.REPO_ACCESS_TOKEN || secrets.GITHUB_TOKEN }}
 
@@ -1023,14 +987,6 @@ jobs:
             gh release upload benchmarks-latest "${{ steps.consolidate.outputs.json_file_slow }}" --clobber || echo "⚠️  Failed to upload slow benchmarks"
           else
             echo "⚠️  Slow benchmarks JSON not found, skipping upload"
-          fi
-          
-          # Differential test results
-          if [ -n "${{ steps.run_differential.outputs.differential_json }}" ] && [ -f "${{ steps.run_differential.outputs.differential_json }}" ]; then
-            echo "📤 Uploading differential test results: ${{ steps.run_differential.outputs.differential_json }}"
-            gh release upload benchmarks-latest "${{ steps.run_differential.outputs.differential_json }}" --clobber || echo "⚠️  Failed to upload differential test results"
-          else
-            echo "⚠️  Differential test JSON not found, skipping upload"
           fi
           
           echo "✅ Upload complete"
