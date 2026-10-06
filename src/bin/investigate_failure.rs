@@ -196,6 +196,7 @@ fn main() -> Result<()> {
         None,
         None,
         None,
+        None,
     ) {
         Ok(true) => {
             println!("✅ Script verification PASSED");

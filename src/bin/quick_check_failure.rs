@@ -127,6 +127,7 @@ fn main() -> Result<()> {
         None,
         None,
         None,
+        None,
     ) {
         Ok(true) => {
             println!("✅ PASSED - but test said it failed!");

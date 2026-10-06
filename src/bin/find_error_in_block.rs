@@ -198,6 +198,7 @@ fn main() -> Result<()> {
                 None,
                 None,
                 None,
+                None,
             ) {
                 Ok(true) => {}
                 Ok(false) => {
@@ -346,6 +347,7 @@ fn locate_schnorr_failures(
                 median_time_past,
                 network,
                 SigVersion::Base,
+                None,
                 None,
                 None,
                 None,

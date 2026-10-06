@@ -465,6 +465,7 @@ pub fn verify_block_like_step6(
                 None,
                 None,
                 None,
+                None,
             ) {
                 Ok(true) => true,
                 Ok(false) => false,
@@ -516,6 +517,7 @@ pub fn verify_block_like_step6(
                             SigVersion::Base,
                             None,
                             data.bip143.as_ref(),
+                            None,
                             None,
                             None,
                             None,
@@ -907,6 +909,7 @@ pub fn verify_scripts(
                     None, // precomputed_sighash_all
                     None, // sighash_cache
                     None, // precomputed_p2pkh_hash
+                    None,
                 );
                 match r {
                     Ok(true) => (true, tx_idx, input_idx, 0u8),

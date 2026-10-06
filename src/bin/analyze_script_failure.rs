@@ -161,6 +161,7 @@ async fn main() -> Result<()> {
             None,
             None,
             None,
+            None,
         ) {
             Ok(true) => {
                 println!("  ✅ BLVM verification: PASSED");

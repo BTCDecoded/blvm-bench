@@ -78,6 +78,7 @@ pub fn compare_script_verification(
         None,
         None,
         None,
+        None,
     )?;
 
     let matches = core_ok == blvm_result;

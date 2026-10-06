@@ -72,6 +72,8 @@ pub mod chain_scan;
 pub mod script_validation;
 #[cfg(feature = "differential")]
 pub mod sort_merge;
+#[cfg(feature = "differential")]
+pub mod synthetic_script_diff;
 
 #[cfg(feature = "bitcoinkernel")]
 pub mod bitcoinkernel_ffi;
