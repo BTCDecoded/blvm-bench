@@ -107,10 +107,7 @@ RUST_BACKTRACE=1 cargo test --test integration --features differential -- --noca
 ### Test Structure
 
 ```
-tests/integration/
-├── mod.rs              # Test module declarations
-├── helpers.rs          # Test helpers (block creation, etc.)
-└── bip_differential.rs # BIP-specific differential tests
+tests/integration.rs    # BIP differential tests and helpers
 ```
 
 ## How It Works
