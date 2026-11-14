@@ -1,0 +1,41 @@
+BLVM full-chain differential (beta gate) — public log
+host: thoth (this machine owns blvm-bench)
+started: 2026-11-14T16:09:18+00:00
+stopped: 2026-11-14T23:43:00+00:00 (Phase 1 first failure; Phase 2 not started)
+docs: blvm-bench/docs/FULL_CHAIN_DIFFERENTIAL.md was not in repo at e6cb937; followed docs.btcdecoded.org full-chain program + operator request (Phase 1 canonical-chain scripts, Phase 2 skipped after Phase 1 fail). Did not use branch stability/beta-gate. Did not retarget freeze SHAs onto later origin/main.
+
+Freeze (git rev-parse HEAD):
+  blvm-consensus  f63c32856a2da874296524f40b8cbd35518d8096
+  blvm-node       36bb40c7e9a3f805274fa7e1bda30d0a6c082560
+  blvm-protocol   0bc9307a2235831fff52548621301b6084a9e809
+  blvm-spec       afc5b491282ce2da12e5c177745711bcd5c118a0   (not 8abe637)
+  blvm-spec-lock  bddfae4ac8063f78bf654d7a2245c810d89f98d1
+  blvm            d7741e325bd8e82a389da5249e5f05da52b363f8
+  blvm-bench      e6cb937d7a404a798a4ac3055a2ed82ac4a533da  (this machine; not a freeze SHA)
+
+Binary: sort_merge_test (blvm-bench --release --features differential)
+  Did not build `blvm` (default features) or `blvm-minimal` (--no-default-features --features minimal).
+  Consensus engine: path-patched blvm-consensus f63c328 (production + benchmarking via bench).
+
+Tip recorded at start:
+  live mainnet tip (mempool.space): 975815
+  local Extra chunk cache chunks.meta total_blocks: 912723 (heights 0..=912722)
+  BLOCK_CACHE_DIR=/run/media/acolyte/Extra/blockchain
+  joined_sorted.bin: Extra sort_merge_data (156G), failures.log via writable symlink dir
+
+Phase 1: ./target/release/sort_merge_test step6
+  START_HEIGHT=0 END_HEIGHT=912723
+  last progress before stop: Block 879020/912723 (96.3%) - ✓2850403251 ✗5 (M:0 F:5 E:0)
+  first failure: height 867278 Script returned false: tx 1, input 0
+  failures.log (non-header):
+    867278 | Script returned false | tx 1, input 0
+    874534 | Script returned false | tx 6, input 0
+    876523 | Script returned false | tx 1, input 0
+    876523 | Script returned false | tx 3, input 0
+    876523 | Script returned false | tx 306, input 0
+  Gate Phase 1 requires Failed: 0 and M:0 F:0 E:0 — NOT MET. Stopped. Did not edit consensus/spec/spec-lock.
+
+Phase 2: not run
+  KERNEL_DIFF_STATUS: not started
+
+Gate: not marked Met.
