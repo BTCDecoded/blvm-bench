@@ -23,11 +23,19 @@ def rss_kib(pid: int) -> int:
     raise RuntimeError(f"VmRSS missing for {pid}")
 
 
+CHAIN_DIRS = {"heed3", "chainstate", "blocks", "ibd_engine"}
+
+
 def disk_bytes(path: Path) -> int:
     total = 0
     if not path.exists():
         return 0
-    for root, _dirs, files in os.walk(path):
+    if path.is_file():
+        return path.stat().st_size
+    if path.name in CHAIN_DIRS:
+        return 0
+    for root, dirs, files in os.walk(path):
+        dirs[:] = [name for name in dirs if name not in CHAIN_DIRS]
         for name in files:
             total += (Path(root) / name).stat().st_size
     return total
