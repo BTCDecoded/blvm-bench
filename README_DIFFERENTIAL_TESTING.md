@@ -13,7 +13,9 @@ Mainnet full-chain work is **intentionally split** into two runs (too slow to co
 | **1** | `sort_merge_test` step 6 | **Scripts** — BLVM verifies every input on the canonical chain |
 | **2** | `block_kernel_diff` | **Block accept/reject** — BLVM vs `libbitcoinkernel`, scripts skipped symmetrically below assume-valid |
 
-Together they cover the full `connect_block` path. **Read `docs/FULL_CHAIN_DIFFERENTIAL.md`** before interpreting logs or claiming coverage (especially: Phase 1 is **not** per-input `bitcoinconsensus`; Phase 2 skip-scripts is **not** a gap).
+Together they cover the full `connect_block` path.
+
+**Operator status (2026-11):** Phase 1 step 6 and Phase 2 `block_kernel_diff` completed through the Extra cache tip (~912722 / 912723). Beta **Full chain** on [Why BLVM?](https://btcdecoded.org/whyblvm/) is Cleared for that cache tip; not a live-tip CI attestation. **Read `docs/FULL_CHAIN_DIFFERENTIAL.md`** before interpreting logs or claiming coverage (especially: Phase 1 is **not** per-input `bitcoinconsensus`; Phase 2 skip-scripts is **not** a gap).
 
 Operator runbook (paths, smoke, parallel lanes): workspace **`docs/DIFFERENTIAL_FULL_CHAIN_RUN_PLAN.md`**.
 
