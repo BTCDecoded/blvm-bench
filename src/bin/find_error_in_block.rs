@@ -5,10 +5,8 @@ use blvm_bench::chunked_cache::ChunkedBlockIterator;
 use blvm_bench::sort_merge::merge_join::JoinedPrevout;
 use blvm_protocol::activation::{ForkActivationTable, IsForkActive};
 use blvm_protocol::bip113::get_median_time_past;
-use blvm_protocol::block::{
-    calculate_base_script_flags_for_block_network, tx_has_nonempty_input_witness,
-    tx_requires_witness_script_flags,
-};
+use blvm_bench::sort_merge::verify::step6_tx_script_flags;
+use blvm_protocol::block::calculate_base_script_flags_for_block_network;
 use blvm_protocol::script::{SigVersion, verify_script_with_context_full};
 use blvm_protocol::segwit::Witness;
 use blvm_protocol::serialization::block::{
@@ -84,7 +82,6 @@ fn main() -> Result<()> {
         }
     };
     let height_has_segwit = activation.is_fork_active(ForkId::SegWit, block_height);
-    let height_has_taproot = activation.is_fork_active(ForkId::Taproot, block_height);
 
     if std::env::var("STEP6_MODE").is_ok() {
         use blvm_bench::sort_merge::verify::verify_block_like_step6;
@@ -125,25 +122,7 @@ fn main() -> Result<()> {
         }
 
         let tx_witnesses = witnesses.get(tx_idx);
-        let has_real_witness =
-            tx_has_nonempty_input_witness(tx_witnesses.as_ref().map(|w| w.as_slice()));
-        let mut tx_flags = base_flags;
-        if height_has_segwit && tx_requires_witness_script_flags(tx, has_real_witness) {
-            tx_flags |= 0x800;
-        }
-        if height_has_taproot {
-            use blvm_protocol::constants::TAPROOT_SCRIPT_LENGTH;
-            for o in &tx.outputs {
-                let s = &o.script_pubkey;
-                if s.len() == TAPROOT_SCRIPT_LENGTH
-                    && s[0] == blvm_protocol::opcodes::OP_1
-                    && s[1] == blvm_protocol::opcodes::PUSH_32_BYTES
-                {
-                    tx_flags |= 0x8000;
-                    break;
-                }
-            }
-        }
+        let tx_flags = step6_tx_script_flags(base_flags, height_has_segwit);
 
         for (input_idx, input) in tx.inputs.iter().enumerate() {
             let Some(prevout) = prevout_map.get(&(tx_idx as u32, input_idx as u32)) else {
@@ -242,7 +221,6 @@ fn main() -> Result<()> {
                             network,
                             base_flags,
                             height_has_segwit,
-                            height_has_taproot,
                         )?;
                     }
                 } else if !batch.is_empty() {
@@ -278,33 +256,13 @@ fn locate_schnorr_failures(
     network: Network,
     base_flags: u32,
     height_has_segwit: bool,
-    height_has_taproot: bool,
 ) -> Result<()> {
-    use blvm_protocol::constants::TAPROOT_SCRIPT_LENGTH;
-
     for (tx_idx, tx) in block.transactions.iter().enumerate() {
         if is_coinbase(tx) {
             continue;
         }
         let tx_witnesses = witnesses.get(tx_idx);
-        let has_real_witness =
-            tx_has_nonempty_input_witness(tx_witnesses.as_ref().map(|w| w.as_slice()));
-        let mut tx_flags = base_flags;
-        if height_has_segwit && tx_requires_witness_script_flags(tx, has_real_witness) {
-            tx_flags |= 0x800;
-        }
-        if height_has_taproot {
-            for o in &tx.outputs {
-                let s = &o.script_pubkey;
-                if s.len() == TAPROOT_SCRIPT_LENGTH
-                    && s[0] == blvm_protocol::opcodes::OP_1
-                    && s[1] == blvm_protocol::opcodes::PUSH_32_BYTES
-                {
-                    tx_flags |= 0x8000;
-                    break;
-                }
-            }
-        }
+        let tx_flags = step6_tx_script_flags(base_flags, height_has_segwit);
 
         for (input_idx, input) in tx.inputs.iter().enumerate() {
             let Some(prevout) = prevout_map.get(&(tx_idx as u32, input_idx as u32)) else {

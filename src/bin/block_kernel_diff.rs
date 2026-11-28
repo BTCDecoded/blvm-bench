@@ -82,12 +82,11 @@
 //! - **`--core-blocks-dir`** (env `CORE_DIFF_BLOCKS_DIR`): separate dir for `blk*.dat`/`rev*.dat`.
 //!   Set to a large non-tmpfs location when `--core-datadir` is in `/tmp`; block files grow ~128 MiB
 //!   per 50k blocks and will exhaust a small ramdisk.
-//! - **`--disk-utxo-path`** (env `BLOCK_KERNEL_DIFF_DISK_UTXO_PATH`): RocksDB for BLVM's UTXO set.
-//!   Caps BLVM's RSS to ~512 MiB (RocksDB block cache) regardless of chain height. Without this,
-//!   in-memory UTXO grows to 1–4 GiB by height 300k. Set `DISK_UTXO_OVERLAY_CAP=200000` and
-//!   `DISK_UTXO_COMMIT_INTERVAL=200` for the tightest memory profile.
-//! - **`--mem-available-floor-mb 0`** (default): do **not** stop early from `MemAvailable` — add RAM
-//!   or swap/zram if the OOM killer hits; set the floor **>0** only if you prefer a graceful stop.
+//! - **`--disk-utxo-path`** (env `BLOCK_KERNEL_DIFF_DISK_UTXO_PATH`): heed3/LMDB for BLVM's UTXO
+//!   set (same engine as `blvm-node`). Overlay + `MDB_NOSYNC`, durable `force_sync` +
+//!   `madvise(DONTNEED)`. Without this, in-memory UTXO grows to several GiB by mid-chain.
+//! - **`--mem-available-floor-mb 1500`** (default): stop before the kernel OOM killer when
+//!   `MemAvailable` drops below this. Pass **0** only if you accept being SIGKILL'd.
 //! - **`--mem-available-recovery-passes`** (default **3** when using the restart script): before
 //!   exiting on a low `MemAvailable` reading, the binary runs `malloc_trim`, **`mi_collect`**, and a
 //!   durable **disk-UTXO overlay flush** (when `--disk-utxo-path` is set); if memory recovers, it
@@ -114,7 +113,15 @@ use blvm_protocol::bip113::MEDIAN_TIME_BLOCKS;
 use blvm_protocol::block::connect_block_with_chainwork as connect_block_assume_valid;
 use blvm_protocol::constants::{DIFFICULTY_ADJUSTMENT_INTERVAL, MAX_TARGET};
 use blvm_protocol::pow::{check_proof_of_work, get_next_work_required};
-use blvm_protocol::serialization::block::deserialize_block_with_witnesses;
+
+/// Chainwork ceiling passed into connect. Header proof-of-work is checked on
+/// its own; this value does not reject a block for accumulated work.
+fn diff_chainwork_ceiling() -> blvm_consensus::pow::U256 {
+    blvm_consensus::pow::U256::from_le_bytes([0xff; 32])
+}
+use blvm_protocol::serialization::block::{
+    deserialize_block_header, deserialize_block_with_witnesses,
+};
 use blvm_protocol::types::{BlockHeader, Network, ValidationResult};
 use clap::Parser;
 use serde::Serialize;
@@ -123,8 +130,21 @@ use std::collections::VecDeque;
 use std::fs::OpenOptions;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, RwLock};
 use std::sync::mpsc;
+
+static SHUTDOWN: AtomicBool = AtomicBool::new(false);
+
+fn install_shutdown_handler() {
+    extern "C" fn on_signal(_: libc::c_int) {
+        SHUTDOWN.store(true, Ordering::Relaxed);
+    }
+    unsafe {
+        libc::signal(libc::SIGINT, on_signal as libc::sighandler_t);
+        libc::signal(libc::SIGTERM, on_signal as libc::sighandler_t);
+    }
+}
 
 #[derive(Parser, Debug)]
 #[command(name = "block_kernel_diff")]
@@ -270,8 +290,8 @@ struct Args {
 
     /// Hard RSS limit in megabytes. When the process exceeds this, it writes a checkpoint (if
     /// `--checkpoint-every` is nonzero) and exits **0** with a resume hint. Default **0** = no limit.
-    /// For a 16 GB machine with a browser running, `6000` is a reasonable value.
-    #[arg(long, env = "BLOCK_KERNEL_DIFF_RSS_LIMIT_MB", default_value_t = 0)]
+    /// For a 16 GB machine with a browser running, **6000** is the default.
+    #[arg(long, env = "BLOCK_KERNEL_DIFF_RSS_LIMIT_MB", default_value_t = 6000)]
     rss_limit_mb: u64,
 
     /// How often to re-check RSS when `--rss-limit-mb` is set (**independent** of `--progress-every`).
@@ -282,13 +302,11 @@ struct Args {
 
     /// **System** memory guard (Linux `MemAvailable` from `/proc/meminfo`). When **non-zero**, exit
     /// gracefully (same checkpoint path as RSS limit) if **free-ish** RAM drops below this many MiB.
-    /// Default **0** = **disabled** so the run is not cut short when other apps eat RAM (prefer more
-    /// physical RAM or swap/zram). Enable only when you explicitly want “stop before global OOM”
-    /// instead of the kernel OOM killer.
+    /// Default **1500**. Pass **0** to disable (the kernel OOM killer will then win).
     #[arg(
         long,
         env = "BLOCK_KERNEL_DIFF_MEM_AVAILABLE_FLOOR_MB",
-        default_value_t = 0
+        default_value_t = 1500
     )]
     mem_available_floor_mb: u64,
 
@@ -373,63 +391,6 @@ fn block_hash_hex(header: &BlockHeader) -> String {
     hex::encode(h)
 }
 
-/// Load consecutive block headers from `first_height` for `count` blocks (oldest → newest).
-fn load_headers_range(
-    chunks_dir: &Path,
-    first_height: u64,
-    count: usize,
-) -> Result<Vec<BlockHeader>> {
-    if count == 0 {
-        return Ok(Vec::new());
-    }
-    let mut it = ChunkedBlockIterator::new(chunks_dir, Some(first_height), Some(count))
-        .context("chunk iterator for header range")?
-        .context("chunk cache missing metadata for header range")?;
-    let mut out = Vec::with_capacity(count);
-    for i in 0..count {
-        let raw = it
-            .next_block()
-            .context("read block in header range")?
-            .with_context(|| {
-                format!(
-                    "chunk iterator exhausted in header range (first_height={first_height}, i={i})"
-                )
-            })?;
-        let (block, _) = deserialize_block_with_witnesses(&raw).with_context(|| {
-            format!("deserialize block in header range at offset {i} from height {first_height}")
-        })?;
-        out.push(block.header);
-    }
-    Ok(out)
-}
-
-/// Parent headers for BIP113 median time-past at `height`: up to **MEDIAN_TIME_BLOCKS** ancestors
-/// with heights `height - n .. height - 1` (oldest → newest). Empty if `height == 0`.
-fn load_parent_header_window(chunks_dir: &Path, height: u64) -> Result<Vec<BlockHeader>> {
-    if height == 0 {
-        return Ok(Vec::new());
-    }
-    let n = std::cmp::min(height as usize, MEDIAN_TIME_BLOCKS);
-    let first = height - n as u64;
-    load_headers_range(chunks_dir, first, n)
-}
-
-/// Up to **DIFFICULTY_ADJUSTMENT_INTERVAL** parent headers ending at `height - 1` (for `nBits` / retarget).
-fn load_difficulty_ancestor_ring(
-    chunks_dir: &Path,
-    start_height: u64,
-) -> Result<VecDeque<BlockHeader>> {
-    if start_height == 0 {
-        return Ok(VecDeque::new());
-    }
-    // Load 2 full retarget periods so we always have enough lookback at period boundaries.
-    let cap = 2 * DIFFICULTY_ADJUSTMENT_INTERVAL as usize;
-    let n = std::cmp::min(start_height as usize, cap);
-    let first = start_height - n as u64;
-    let v = load_headers_range(chunks_dir, first, n)?;
-    Ok(v.into_iter().collect())
-}
-
 /// Build MTP window + difficulty ring for `--start == cmp_height` from raw 80-byte headers collected
 /// in one chunk pass (`lookback_start` = height of `raw[0]`). Avoids opening a fresh zstd stream
 /// twice more (each would re-decompress chunk 3 from offset 0 — looks like an “infinite restart”).
@@ -503,7 +464,7 @@ fn save_header_cache(
         for h in mtp_window {
             buf.extend_from_slice(&serialize_block_header(h));
         }
-        std::fs::write(&path, &buf)
+        atomic_write(&path, &buf)
     };
     match write() {
         Ok(()) => eprintln!(
@@ -684,13 +645,210 @@ fn push_mtp_window(window: &mut Vec<BlockHeader>, header: BlockHeader) {
     window.push(header);
 }
 
-/// Current resident-set size in megabytes (Linux only: reads `/proc/self/status`).
-/// Returns `None` on non-Linux or if the read fails (never panics).
+/// BIP113 MTP of the block at `height` from a dense timestamp vector (`times[h] == nTime`).
+fn mtp_at_height(times: &[u64], height: u64) -> Option<u64> {
+    let h = height as usize;
+    if times.is_empty() || h >= times.len() {
+        return None;
+    }
+    let start = h.saturating_sub(MEDIAN_TIME_BLOCKS - 1);
+    let n = h - start + 1;
+    let mut ts = [0u64; MEDIAN_TIME_BLOCKS];
+    ts[..n].copy_from_slice(&times[start..=h]);
+    ts[..n].sort_unstable();
+    Some(ts[n / 2])
+}
+
+fn load_header_times(path: &Path) -> Vec<u64> {
+    let Ok(bytes) = std::fs::read(path) else {
+        return Vec::new();
+    };
+    if bytes.len() % 8 != 0 {
+        return Vec::new();
+    }
+    bytes
+        .chunks_exact(8)
+        .map(|c| u64::from_le_bytes(c.try_into().unwrap()))
+        .collect()
+}
+
+fn atomic_write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let tmp = path.with_extension("tmp");
+    {
+        let mut file = std::fs::File::create(&tmp)?;
+        use std::io::Write;
+        file.write_all(bytes)?;
+        file.sync_all()?;
+    }
+    std::fs::rename(&tmp, path)
+}
+
+fn save_resume_headers(
+    height: u64,
+    cache_dir: Option<&Path>,
+    times_path: Option<&Path>,
+    times: &[u64],
+    diff_ring: &VecDeque<BlockHeader>,
+    mtp_window: &[BlockHeader],
+) {
+    if !blvm_bench::disk_utxo::overlay_resume_checkpoint_due(height) {
+        return;
+    }
+    if let Some(dir) = cache_dir {
+        save_header_cache(dir, height, diff_ring, mtp_window);
+    }
+    if let Some(path) = times_path {
+        save_header_times(path, times);
+    }
+}
+
+fn save_header_times(path: &Path, times: &[u64]) {
+    let mut bytes = Vec::with_capacity(times.len() * 8);
+    for t in times {
+        bytes.extend_from_slice(&t.to_le_bytes());
+    }
+    if let Err(e) = atomic_write(path, &bytes) {
+        eprintln!("   ⚠️  header_timestamps.bin write failed: {e}");
+    }
+}
+
+fn open_compare_iter_with_ring(
+    chunks_dir: &Path,
+    iter_start: u64,
+    end_height: Option<u64>,
+    times_cover_parents: bool,
+    times_len: u64,
+    header_times: &Arc<RwLock<Vec<u64>>>,
+    header_cache_dir: Option<&Path>,
+    ring_at: u64,
+) -> Result<(Vec<BlockHeader>, VecDeque<BlockHeader>, ChunkedBlockIterator)> {
+    let cap = 2 * DIFFICULTY_ADJUSTMENT_INTERVAL as usize;
+    let n = std::cmp::min(iter_start as usize, cap);
+    let ring_first = iter_start.saturating_sub(n as u64);
+    let first = if times_cover_parents {
+        ring_first
+    } else {
+        times_len.min(ring_first)
+    };
+    let max_from_first: Option<usize> = end_height.map(|e| e.saturating_sub(first) as usize);
+    let mut it = ChunkedBlockIterator::new(chunks_dir, Some(first), max_from_first)?
+        .context("chunk cache missing metadata or index; cannot build iterator")?;
+    let mut ring = VecDeque::with_capacity(n);
+    let mut h = first;
+    while h < iter_start {
+        let raw = it.next_block()?.with_context(|| {
+            format!("chunk iterator exhausted filling nBits ring at height {h}")
+        })?;
+        anyhow::ensure!(raw.len() >= 80, "nBits ring: block too short at height {h}");
+        let hdr = deserialize_block_header(&raw[..80])?;
+        if let Ok(mut g) = header_times.write() {
+            if g.len() as u64 == h {
+                g.push(hdr.timestamp);
+            }
+        }
+        if h >= ring_first {
+            ring.push_back(hdr);
+        }
+        h += 1;
+    }
+    let mtp_n = std::cmp::min(ring.len(), MEDIAN_TIME_BLOCKS);
+    let mtp: Vec<BlockHeader> = ring.iter().skip(ring.len() - mtp_n).cloned().collect();
+    eprintln!(
+        "   📋 diff_ring ({} hdrs) + mtp_window ({} hdrs) on the compare zstd stream (no second seek)",
+        ring.len(),
+        mtp_n
+    );
+    if let Some(d) = header_cache_dir {
+        save_header_cache(d, ring_at, &ring, &mtp);
+    }
+    Ok((mtp, ring, it))
+}
+
+fn connect_ctx(
+    recent: Option<&[BlockHeader]>,
+    header_timestamp: u64,
+    times: &Arc<std::sync::RwLock<Vec<u64>>>,
+) -> blvm_protocol::block::BlockValidationContext {
+    let mut ctx = blvm_protocol::block::block_validation_context_for_connect_ibd(
+        recent,
+        network_time_for_historical_chunk_replay(header_timestamp),
+        Network::Mainnet,
+    );
+    let times = Arc::clone(times);
+    ctx.sequence_prev_mtp = Some(Arc::new(move |h| {
+        let guard = times.read().ok()?;
+        mtp_at_height(&guard, h)
+    }));
+    ctx
+}
+
+/// Anonymous memory this process still owns, in megabytes, including pages the
+/// kernel has swapped out. VmRSS alone stayed near 8 GiB while ~98 GiB of dirty
+/// heap sat in swap, so the RSS cap never fired and the OOM killer did.
 fn get_rss_mb() -> Option<u64> {
+    let (anon, swap, vm) = mem_anon_swap_rss_mb()?;
+    match (anon, swap) {
+        (Some(a), Some(s)) => Some(a.saturating_add(s)),
+        (Some(a), None) => Some(a),
+        _ => vm,
+    }
+}
+
+/// `(RssAnon MiB, VmSwap MiB, VmRSS MiB)`.
+fn mem_anon_swap_rss_mb() -> Option<(Option<u64>, Option<u64>, Option<u64>)> {
+    let status = std::fs::read_to_string("/proc/self/status").ok()?;
+    let mut anon = None;
+    let mut swap = None;
+    let mut vm = None;
+    for line in status.lines() {
+        if let Some(rest) = line.strip_prefix("RssAnon:") {
+            let kb: u64 = rest.trim().strip_suffix("kB")?.trim().parse().ok()?;
+            anon = Some(kb / 1024);
+        } else if let Some(rest) = line.strip_prefix("VmSwap:") {
+            let kb: u64 = rest.trim().strip_suffix("kB")?.trim().parse().ok()?;
+            swap = Some(kb / 1024);
+        } else if let Some(rest) = line.strip_prefix("VmRSS:") {
+            let kb: u64 = rest.trim().strip_suffix("kB")?.trim().parse().ok()?;
+            vm = Some(kb / 1024);
+        }
+    }
+    Some((anon, swap, vm))
+}
+
+fn proc_io_counters() -> Option<(u64, u64)> {
+    let io = std::fs::read_to_string("/proc/self/io").ok()?;
+    let mut syscr = None;
+    let mut read_bytes = None;
+    for line in io.lines() {
+        if let Some(rest) = line.strip_prefix("syscr: ") {
+            syscr = rest.trim().parse().ok();
+        } else if let Some(rest) = line.strip_prefix("read_bytes: ") {
+            read_bytes = rest.trim().parse().ok();
+        }
+    }
+    Some((syscr?, read_bytes?))
+}
+
+fn proc_majflt() -> Option<u64> {
     let status = std::fs::read_to_string("/proc/self/status").ok()?;
     for line in status.lines() {
-        if let Some(rest) = line.strip_prefix("VmRSS:") {
-            let kb: u64 = rest.trim().strip_suffix("kB")?.trim().parse().ok()?;
+        // Prefer cumulative major faults from /proc/self/stat field 12 when present.
+        let _ = line;
+    }
+    let stat = std::fs::read_to_string("/proc/self/stat").ok()?;
+    // comm can contain spaces/parens; majflt is field 12 of the trailing numbers.
+    let after = stat.rsplit(')').next()?.trim();
+    let fields: Vec<&str> = after.split_whitespace().collect();
+    // After `)`, fields[0] is state; majflt is fields[9] (kernel docs: 12th field overall,
+    // 10th after pid+comm+state adjustment: state,ppid,...,majflt at index 9).
+    fields.get(9)?.parse().ok()
+}
+
+fn get_swap_free_mb() -> Option<u64> {
+    let info = std::fs::read_to_string("/proc/meminfo").ok()?;
+    for line in info.lines() {
+        if let Some(rest) = line.strip_prefix("SwapFree:") {
+            let kb: u64 = rest.trim().strip_suffix(" kB")?.parse().ok()?;
             return Some(kb / 1024);
         }
     }
@@ -764,14 +922,15 @@ fn try_mem_available_recovery(
         // Brief pause so the kernel can reclaim trimmed pages / drop cache.
         std::thread::sleep(std::time::Duration::from_millis(500));
         if let Some(av2) = get_mem_available_mb() {
-            if av2 >= ok_line {
+            let swap_free = get_swap_free_mb().unwrap_or(u64::MAX);
+            if av2 >= ok_line && swap_free >= 2048 {
                 eprintln!(
-                    "KERNEL_DIFF_MEM_RECOVERED avail={av2}MiB >= {ok_line}MiB after pass {pass} — continuing"
+                    "KERNEL_DIFF_MEM_RECOVERED avail={av2}MiB >= {ok_line}MiB swap_free={swap_free}MiB after pass {pass} — continuing"
                 );
                 return Ok(true);
             }
             eprintln!(
-                "KERNEL_DIFF_MEM_RECOVERY pass {pass} done: avail={av2}MiB still < {ok_line}MiB (floor={floor_mb})"
+                "KERNEL_DIFF_MEM_RECOVERY pass {pass} done: avail={av2}MiB target>={ok_line} swap_free={swap_free}MiB"
             );
         }
     }
@@ -780,9 +939,30 @@ fn try_mem_available_recovery(
 
 fn main() -> Result<()> {
     blvm_bench::kernel_diff_paths::load_kernel_diff_env();
+    install_shutdown_handler();
     let args = Args::parse();
 
     if args.blvm_assume_valid_height > 0 {
+        // Freeze connect_block skip is fail-closed: height, chainwork, hash-set, and pin.
+        // Phase 1 already covered scripts; seed a hash so skip actually fires. The hash is
+        // only compared when height == assume_valid_height; keep that height past the tip
+        // so this run never hits the match.
+        let mut cfg = blvm_consensus::config::ConsensusConfig::from_env();
+        cfg.block_validation.assume_valid_height = args.blvm_assume_valid_height;
+        let pin = std::env::var("BLVM_ASSUME_VALID_HASH").ok().and_then(|s| {
+            let s = s.trim().trim_start_matches("0x");
+            let raw = hex::decode(s).ok()?;
+            if raw.len() != 32 {
+                return None;
+            }
+            let mut out = [0u8; 32];
+            for i in 0..32 {
+                out[i] = raw[31 - i];
+            }
+            Some(out)
+        });
+        cfg.block_validation.assume_valid_hash = Some(pin.unwrap_or([0x11; 32]));
+        blvm_consensus::config::init_consensus_config(cfg);
         blvm_protocol::set_assume_valid_height(args.blvm_assume_valid_height);
         eprintln!(
             "   ⚡ BLVM assume-valid: skipping script/signature checks for heights < {}",
@@ -1099,25 +1279,7 @@ fn main() -> Result<()> {
         }
     }
     let tip = kernel.tip_height();
-    let next_core_h: u64 = (tip as i64 + 1).max(0) as u64;
-
-    // Iterator supplies a contiguous run from `--start`. BLVM may need extra blocks for catch-up
-    // to Core tip when `--blvm-checkpoint-height H` and tip > H; extend span so pre-roll does not
-    // exhaust the iterator before `--end`.
-    let max_blocks: Option<usize> = end_height.map(|e| {
-        if e <= args.start {
-            0
-        } else {
-            let mut span = (e - args.start) as usize;
-            if let Some(h) = args.blvm_checkpoint_height {
-                if tip >= 0 && (tip as u64) >= h {
-                    let catchup = next_core_h.saturating_sub(args.start) as usize;
-                    span = span.max(catchup);
-                }
-            }
-            span
-        }
-    });
+    let mut next_core_h: u64 = (tip as i64 + 1).max(0) as u64;
 
     let mut utxo_set = blvm_protocol::UtxoSet::default();
     // disk_utxo is Some when --disk-utxo-path is given; it replaces utxo_set for all BLVM UTXO ops.
@@ -1183,48 +1345,27 @@ fn main() -> Result<()> {
                     );
                 } else {
                     eprintln!(
-                        "   ⚠️  [disk-utxo] DB tip is {:?} (expected {h}); wiping and reimporting from utxo_{h}.bin …",
+                        "   ⚠️  [disk-utxo] DB tip is {:?} (CLI checkpoint {h}); keeping RocksDB and pre-rolling",
                         db_tip
-                    );
-                    // DB tip mismatch means a previous diverged or killed run left stale/wrong data.
-                    // Drop the DB handle, wipe, and reload from the clean snapshot.
-                    drop(du);
-                    let db_path_ref = db_path.clone();
-                    std::fs::remove_dir_all(&db_path_ref).with_context(|| {
-                        format!("wipe stale disk-utxo at {}", db_path_ref.display())
-                    })?;
-                    std::fs::create_dir_all(&db_path_ref).with_context(|| {
-                        format!("recreate disk-utxo dir {}", db_path_ref.display())
-                    })?;
-                    du = blvm_bench::disk_utxo::DiskUtxoSet::open(&db_path_ref).with_context(
-                        || format!("reopen disk-utxo after wipe at {}", db_path_ref.display()),
-                    )?;
-                    let rehydr_status = blvm_bench::disk_utxo::rehydrate_status_path(&db_path_ref);
-                    du.load_checkpoint_fixed_v1(&snap_path, Some(&rehydr_status), h)
-                        .with_context(|| format!("reload checkpoint utxo_{h}.bin after wipe"))?;
-                    if let Some(ref tp) = disk_tip_path {
-                        blvm_bench::disk_utxo::write_disk_tip_status_file(tp, h);
-                    }
-                    eprintln!(
-                        "   ✅ [disk-utxo] RocksDB reloaded at height {h} ({} entries)",
-                        du.len()
                     );
                 }
             }
-            let expect_start = h + 1;
+            let blvm_h = du.utxo_tip_height().unwrap_or(h);
+            let expect_start = blvm_h + 1;
             if args.start != expect_start {
-                anyhow::bail!(
-                    "with --blvm-checkpoint-height {h}, --start must be {expect_start} (next block after checkpoint)"
+                eprintln!(
+                    "   ℹ️  CLI --start {} vs disk-utxo next {expect_start}; iterator will start at {expect_start}",
+                    args.start
                 );
             }
-            if (tip as u64) > h {
+            if (tip as u64) > blvm_h {
                 eprintln!(
-                    "   ✅ [disk-utxo] BLVM at height {h}; Core tip {tip} — pre-rolling BLVM only through {tip}, then comparing from {} …",
+                    "   ✅ [disk-utxo] BLVM at height {blvm_h}; Core tip {tip} — pre-rolling BLVM only through {tip}, then comparing from {} …",
                     next_core_h
                 );
             } else {
                 eprintln!(
-                    "   ✅ [disk-utxo] BLVM at height {h}; Core tip {tip}; comparing from {expect_start}"
+                    "   ✅ [disk-utxo] BLVM at height {blvm_h}; Core tip {tip}; comparing from {expect_start}"
                 );
             }
         }
@@ -1301,68 +1442,164 @@ fn main() -> Result<()> {
         }
     }
 
-    if args.start > next_core_h {
-        anyhow::bail!(
-            "Core tip height is {tip} (next block Core expects: {next_core_h}); \
-             --start {} is past that. Use --start {next_core_h} or a lower tip datadir, \
-             or --blvm-checkpoint-height with a matching Core datadir.",
-            args.start
+    let blvm_next = disk_utxo
+        .as_ref()
+        .and_then(|d| d.utxo_tip_height())
+        .map(|t| t.saturating_add(1))
+        .unwrap_or(args.start);
+    // After OOM, Core's LevelDB can lag the durable BLVM UTXO. Walk the chunk iterator
+    // from the earlier tip: Core-only catch-up, then BLVM-only pre-roll, then compare.
+    let iter_start = blvm_next.min(next_core_h);
+    let compare_from = blvm_next.max(next_core_h);
+    let max_blocks: Option<usize> =
+        end_height.map(|e| e.saturating_sub(iter_start) as usize);
+
+    let header_times_vec = args
+        .disk_utxo_path
+        .as_ref()
+        .map(|p| load_header_times(&p.join("header_timestamps.bin")))
+        .unwrap_or_default();
+    // Do not open a second zstd stream to backfill timestamps. Any gap that
+    // overlaps the nBits lookback is filled on the compare iterator below.
+    let header_times = Arc::new(RwLock::new(header_times_vec));
+
+    if blvm_next > next_core_h {
+        eprintln!(
+            "   ⚠️  Core tip {tip} lags BLVM UTXO (next {blvm_next}); Core-only catch-up {next_core_h}..={}",
+            blvm_next.saturating_sub(1)
         );
     }
 
-    let mut iter = if let Some(mut it) = resumed_chunk_iter.take() {
-        it.extend_end_for_compare(args.start, max_blocks)
-            .context("extend chunk iterator after header prefetch")?;
-        eprintln!(
-            "   ✅ Continuing same zstd stream at height {} (skipped second full chunk seek for --start)",
-            it.current_height()
-        );
-        it
-    } else {
-        ChunkedBlockIterator::new(&chunks_dir, Some(args.start), max_blocks)?
-            .context("chunk cache missing metadata or index; cannot build iterator")?
-    };
-
     let checkpoint_mgr =
         CheckpointManager::with_checkpoint_subdir(&cache_root, &args.checkpoint_dir)?;
-    let mut height = args.start;
 
     // Oldest→newest parent headers for BIP113 (median time-past); updated only on BLVM `Valid`.
-    // Up to 2016 parent headers for mainnet `nBits` / retarget checks; updated only on BLVM `Valid`.
-    // Use the companion headers_H.bin if present — avoids seeking ~2016 blocks back in the chunk.
-    let (mut mtp_header_window, mut diff_ring) = if let Some((ring, mtp)) = args
-        .blvm_checkpoint_height
-        .and_then(|h_chk| load_header_cache(&cache_root.join(&args.checkpoint_dir), h_chk))
-    {
-        eprintln!(
-            "   📋 diff_ring ({} hdrs) + mtp_window ({} hdrs) from header cache",
-            ring.len(),
-            mtp.len()
-        );
-        (mtp, ring)
-    } else if let (Some(h_chk), Some((lb, raw))) =
-        (args.blvm_checkpoint_height, chunk_prefetch_headers)
-    {
-        anyhow::ensure!(
-            args.start == h_chk + 1,
-            "chunk header prefetch requires --start {} (checkpoint_height + 1), got {}",
-            h_chk + 1,
-            args.start
-        );
-        let (mtp, ring) = mtp_and_ring_from_prefetched_raw(lb, &raw, args.start)
-            .context("build MTP/diff ring from headless chunk prefetch")?;
-        eprintln!(
-            "   📋 diff_ring ({} hdrs) + mtp_window ({} hdrs) from headless prefetch — no extra chunk seek",
-            ring.len(),
-            mtp.len()
-        );
-        (mtp, ring)
+    // nBits ring is 2 retarget periods. Prefer headers_{tip}.bin next to disk-utxo so resume
+    // does not open a second zstd stream. On miss, open the compare iterator at ring_first
+    // and keep that stream through the compare loop (one skip of the USB chunk).
+    let header_cache_dir: Option<PathBuf> = args
+        .disk_utxo_path
+        .clone()
+        .or_else(|| Some(cache_root.join(&args.checkpoint_dir)));
+    let ring_at = blvm_next.saturating_sub(1);
+    let times_len = header_times
+        .read()
+        .map(|g| g.len() as u64)
+        .unwrap_or(0);
+    let times_cover_parents = times_len >= compare_from;
+
+    let mut mtp_header_window: Vec<BlockHeader>;
+    let mut diff_ring: VecDeque<BlockHeader>;
+    let mut iter: ChunkedBlockIterator;
+
+    if times_cover_parents {
+        if let Some((ring, mtp)) = header_cache_dir
+            .as_ref()
+            .and_then(|d| load_header_cache(d, ring_at))
+        {
+            eprintln!(
+                "   📋 diff_ring ({} hdrs) + mtp_window ({} hdrs) from headers_{ring_at}.bin (no chunk seek)",
+                ring.len(),
+                mtp.len()
+            );
+            mtp_header_window = mtp;
+            diff_ring = ring;
+            iter = if let Some(mut it) = resumed_chunk_iter.take() {
+                it.extend_end_for_compare(iter_start, max_blocks)
+                    .context("extend chunk iterator after header prefetch")?;
+                it
+            } else {
+                ChunkedBlockIterator::new(&chunks_dir, Some(iter_start), max_blocks)?
+                    .context("chunk cache missing metadata or index; cannot build iterator")?
+            };
+        } else if let (Some(h_chk), Some((lb, raw))) =
+            (args.blvm_checkpoint_height, chunk_prefetch_headers)
+        {
+            anyhow::ensure!(
+                args.start == h_chk + 1,
+                "chunk header prefetch requires --start {} (checkpoint_height + 1), got {}",
+                h_chk + 1,
+                args.start
+            );
+            let (mtp, ring) = mtp_and_ring_from_prefetched_raw(lb, &raw, args.start)
+                .context("build MTP/diff ring from headless chunk prefetch")?;
+            eprintln!(
+                "   📋 diff_ring ({} hdrs) + mtp_window ({} hdrs) from headless prefetch — no extra chunk seek",
+                ring.len(),
+                mtp.len()
+            );
+            mtp_header_window = mtp;
+            diff_ring = ring;
+            iter = if let Some(mut it) = resumed_chunk_iter.take() {
+                it.extend_end_for_compare(iter_start, max_blocks)
+                    .context("extend chunk iterator after header prefetch")?;
+                it
+            } else {
+                ChunkedBlockIterator::new(&chunks_dir, Some(iter_start), max_blocks)?
+                    .context("chunk cache missing metadata or index; cannot build iterator")?
+            };
+        } else {
+            let (mtp, ring, it) = open_compare_iter_with_ring(
+                &chunks_dir,
+                iter_start,
+                end_height,
+                times_cover_parents,
+                times_len,
+                &header_times,
+                header_cache_dir.as_deref(),
+                ring_at,
+            )?;
+            mtp_header_window = mtp;
+            diff_ring = ring;
+            iter = it;
+        }
     } else {
-        (
-            load_parent_header_window(&chunks_dir, height)?,
-            load_difficulty_ancestor_ring(&chunks_dir, height)?,
-        )
-    };
+        let (mtp, ring, it) = open_compare_iter_with_ring(
+            &chunks_dir,
+            iter_start,
+            end_height,
+            times_cover_parents,
+            times_len,
+            &header_times,
+            header_cache_dir.as_deref(),
+            ring_at,
+        )?;
+        mtp_header_window = mtp;
+        diff_ring = ring;
+        iter = it;
+    }
+
+    let mut height = iter_start;
+
+    use blvm_bench::bitcoinkernel_ffi::CoreBlockOutcome;
+    while height < blvm_next && height >= next_core_h {
+        let Some(raw) = iter.next_block()? else {
+            anyhow::bail!("chunk iterator exhausted during Core catch-up at height {height}");
+        };
+        match deserialize_block_with_witnesses(&raw) {
+            Ok((block, _)) => {
+                match kernel.process_serialized_block(&raw) {
+                    CoreBlockOutcome::Valid | CoreBlockOutcome::DuplicateNoCallback => {}
+                    other => {
+                        anyhow::bail!("Core catch-up failed at height {height}: {other:?}");
+                    }
+                }
+                push_mtp_window(&mut mtp_header_window, block.header.clone());
+                push_difficulty_ring(&mut diff_ring, block.header.clone());
+                if let Ok(mut g) = header_times.write() {
+                    if g.len() as u64 == height {
+                        g.push(block.header.timestamp);
+                    }
+                }
+            }
+            Err(e) => anyhow::bail!("deserialize failed during Core catch-up at height {height}: {e:#}"),
+        }
+        if height % 100 == 0 {
+            eprintln!("   (pre-roll Core only: height {height}; BLVM UTXO already through {})", blvm_next.saturating_sub(1));
+        }
+        height += 1;
+    }
+    next_core_h = (kernel.tip_height() as i64 + 1).max(0) as u64;
 
     while height < next_core_h {
         let Some(raw) = iter.next_block()? else {
@@ -1387,11 +1624,7 @@ fn main() -> Result<()> {
                 }
                 let recent =
                     (!mtp_header_window.is_empty()).then_some(mtp_header_window.as_slice());
-                let ctx = blvm_protocol::block::block_validation_context_for_connect_ibd(
-                    recent,
-                    network_time_for_historical_chunk_replay(block.header.timestamp),
-                    Network::Mainnet,
-                );
+                let ctx = connect_ctx(recent, block.header.timestamp, &header_times);
                 if let Some(ref mut du) = disk_utxo {
                     let input_ops = blvm_bench::disk_utxo::block_input_outpoints(&block);
                     let prefetched = du.prefetch(&input_ops)?;
@@ -1405,13 +1638,35 @@ fn main() -> Result<()> {
                         prefetched,
                         height,
                         &ctx,
-                        Some(blvm_consensus::pow::U256([u64::MAX; 4])),
+                        Some(diff_chainwork_ceiling()),
                     ) {
                         Ok((ValidationResult::Valid, post_set, _)) => {
-                            du.set_inflight_tip(height);
-                            du.apply_block_delta(&input_ops, &post_set, &prefetched_keys)?;
+                            du.apply_block_and_advance_tip(
+                                height,
+                                &input_ops,
+                                &post_set,
+                                &prefetched_keys,
+                            )?;
                             push_mtp_window(&mut mtp_header_window, block.header.clone());
                             push_difficulty_ring(&mut diff_ring, block.header.clone());
+                            if let Ok(mut g) = header_times.write() {
+                                if g.len() as u64 == height {
+                                    g.push(block.header.timestamp);
+                                }
+                            }
+                            if let Ok(g) = header_times.read() {
+                                save_resume_headers(
+                                    height,
+                                    header_cache_dir.as_deref(),
+                                    args.disk_utxo_path
+                                        .as_ref()
+                                        .map(|p| p.join("header_timestamps.bin"))
+                                        .as_deref(),
+                                    &g,
+                                    &diff_ring,
+                                    &mtp_header_window,
+                                );
+                            }
                         }
                         Ok((ValidationResult::Invalid(msg), _, _)) => {
                             anyhow::bail!("BLVM pre-roll failed at height {height}: {msg}");
@@ -1425,12 +1680,17 @@ fn main() -> Result<()> {
                         utxo_set,
                         height,
                         &ctx,
-                        Some(blvm_consensus::pow::U256([u64::MAX; 4])),
+                        Some(diff_chainwork_ceiling()),
                     ) {
                         Ok((ValidationResult::Valid, new_utxo, _)) => {
                             utxo_set = new_utxo;
                             push_mtp_window(&mut mtp_header_window, block.header.clone());
                             push_difficulty_ring(&mut diff_ring, block.header.clone());
+                            if let Ok(mut g) = header_times.write() {
+                                if g.len() as u64 == height {
+                                    g.push(block.header.timestamp);
+                                }
+                            }
                         }
                         Ok((ValidationResult::Invalid(msg), _, _)) => {
                             anyhow::bail!("BLVM pre-roll failed at height {height}: {msg}");
@@ -1443,8 +1703,44 @@ fn main() -> Result<()> {
                 anyhow::bail!("deserialize failed during BLVM pre-roll at height {height}: {e:#}")
             }
         }
-        eprintln!("   (pre-roll BLVM only: height {height}; Core already through tip {tip})");
+        if height % 100 == 0 {
+            #[cfg(feature = "low-mem-alloc")]
+            unsafe {
+                libmimalloc_sys::mi_collect(true);
+            }
+            let (anon_mb, swap_mb, _) = mem_anon_swap_rss_mb()
+                .map(|(a, s, r)| (a.unwrap_or(0), s.unwrap_or(0), r))
+                .unwrap_or((0, 0, None));
+            let st = disk_utxo
+                .as_mut()
+                .map(|du| du.take_prefetch_window_stats());
+            if let Some(st) = st {
+                eprintln!(
+                    "   (pre-roll BLVM only: height {height}; Core tip {tip}; anon={anon_mb}MB swap={swap_mb}MB hot={} spill_B={} spill_cap={} res={} cache={} cold_ms={:.0} body={} tomb_pg={} coin_pg={} heed_off={})",
+                    st.hot_len,
+                    st.spill_script_bytes,
+                    st.spill_cap,
+                    st.res,
+                    st.cache,
+                    st.cold_ms,
+                    st.body_reads,
+                    st.tomb_pages,
+                    st.coin_pages,
+                    st.heed_off as u8
+                );
+            } else {
+                eprintln!(
+                    "   (pre-roll BLVM only: height {height}; Core already through tip {tip}; anon={anon_mb}MB swap={swap_mb}MB)"
+                );
+            }
+            let _ = std::io::Write::flush(&mut std::io::stderr());
+        }
         height += 1;
+    }
+    if let Some(ref p) = args.disk_utxo_path {
+        if let Ok(g) = header_times.read() {
+            save_header_times(&p.join("header_timestamps.bin"), &g);
+        }
     }
 
     // 64 KiB write buffer for all JSONL outputs — batches many per-block writeln calls into
@@ -1496,6 +1792,7 @@ fn main() -> Result<()> {
     let mut compared: u64 = 0;
     let mut divergence_count: u64 = 0;
     let mut stopped_after_max_divergences = false;
+    let mut stopped_signal = false;
     let mut first_div_height: Option<u64> = None;
     let mut first_div_hash: Option<String> = None;
     let run_start = std::time::Instant::now();
@@ -1503,6 +1800,11 @@ fn main() -> Result<()> {
     let mut window_height = height;
     // Per-window timing accumulators: measure BLVM vs Core bottleneck.
     let mut window_t_blvm_ms: f64 = 0.0;
+    let mut window_t_prefetch_ms: f64 = 0.0;
+    let mut window_t_connect_ms: f64 = 0.0;
+    let mut window_t_apply_ms: f64 = 0.0;
+    let mut window_io = proc_io_counters().unwrap_or((0, 0));
+    let mut window_majflt = proc_majflt().unwrap_or(0);
     let mut window_t_core_wait_ms: f64 = 0.0;
 
     eprintln!(
@@ -1551,8 +1853,16 @@ fn main() -> Result<()> {
     let chunk_readahead: usize = std::env::var("KERNEL_DIFF_CHUNK_READAHEAD")
         .ok()
         .and_then(|s| s.parse().ok())
-        .unwrap_or(8)
+        .unwrap_or(32)
         .clamp(2, 64);
+    let utxo_lookahead: usize = std::env::var("KERNEL_DIFF_UTXO_LOOKAHEAD")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(64)
+        .clamp(1, 256);
+    eprintln!(
+        "   📋 chunk readahead={chunk_readahead} decode lookahead={utxo_lookahead} (per-block RAM prefetch)"
+    );
     let (block_tx, block_rx) =
         mpsc::sync_channel::<anyhow::Result<Option<Vec<u8>>>>(chunk_readahead);
     let reader_thread = std::thread::Builder::new()
@@ -1568,30 +1878,61 @@ fn main() -> Result<()> {
         })
         .context("spawn chunk reader thread")?;
 
+    struct AheadBlock {
+        raw: Arc<Vec<u8>>,
+        decoded: Result<
+            (
+                blvm_protocol::types::Block,
+                Vec<Vec<blvm_consensus::segwit::Witness>>,
+            ),
+            String,
+        >,
+    }
+    let mut ahead: VecDeque<AheadBlock> = VecDeque::new();
+
     loop {
         if let Some(end_ex) = end_height {
             if height >= end_ex {
                 break;
             }
         }
-        let raw = match block_rx
-            .recv()
-            .context("chunk reader thread exited unexpectedly")?
-            .context("chunk reader error")?
-        {
-            Some(raw) => raw,
-            None => break,
-        };
 
-        let raw = Arc::new(raw);
-        // Dispatch to Core before BLVM deserialize so Core parses wire bytes while BLVM works.
+        // Decode ahead so USB zstd stays off the connect thread. Do not prefetch
+        // the whole window here: that UtxoSet is dropped, and connect prefetches
+        // the same inputs again after earlier blocks in the window have applied.
+        if ahead.is_empty() {
+            while ahead.len() < utxo_lookahead {
+                if end_height.is_some_and(|e| height + ahead.len() as u64 >= e) {
+                    break;
+                }
+                let raw = match block_rx
+                    .recv()
+                    .context("chunk reader thread exited unexpectedly")?
+                    .context("chunk reader error")?
+                {
+                    Some(raw) => raw,
+                    None => break,
+                };
+                let decoded =
+                    deserialize_block_with_witnesses(&raw).map_err(|e| format!("{e:#}"));
+                ahead.push_back(AheadBlock {
+                    raw: Arc::new(raw),
+                    decoded,
+                });
+            }
+        }
+        let Some(item) = ahead.pop_front() else {
+            break;
+        };
+        let raw = item.raw;
+        // Dispatch to Core before BLVM connect so Core parses while we connect.
         core_raw_tx
             .send(Arc::clone(&raw))
             .context("Core validator thread exited unexpectedly")?;
 
         let t_blvm_start = std::time::Instant::now();
         let (block_hash, blvm_tag, blvm_detail) =
-            match deserialize_block_with_witnesses(raw.as_ref()) {
+            match item.decoded {
                 Ok((block, witnesses)) => {
                     let bh = block_hash_hex(&block.header);
                     let nbits_detail = {
@@ -1613,37 +1954,48 @@ fn main() -> Result<()> {
                         } else {
                             let recent = (!mtp_header_window.is_empty())
                                 .then_some(mtp_header_window.as_slice());
-                            let ctx =
-                                blvm_protocol::block::block_validation_context_for_connect_ibd(
-                                    recent,
-                                    network_time_for_historical_chunk_replay(
-                                        block.header.timestamp,
-                                    ),
-                                    Network::Mainnet,
-                                );
+                            let ctx = connect_ctx(
+                                recent,
+                                block.header.timestamp,
+                                &header_times,
+                            );
                             if let Some(ref mut du) = disk_utxo {
                                 let input_ops =
                                     blvm_bench::disk_utxo::block_input_outpoints(&block);
+                                let t_pf = std::time::Instant::now();
                                 let prefetched = du.prefetch(&input_ops)?;
+                                window_t_prefetch_ms +=
+                                    t_pf.elapsed().as_secs_f64() * 1000.0;
                                 let prefetched_keys: rustc_hash::FxHashSet<_> =
                                     prefetched.keys().copied().collect();
+                                let t_conn = std::time::Instant::now();
                                 match connect_block_assume_valid(
                                     &block,
                                     &witnesses,
                                     prefetched,
                                     height,
                                     &ctx,
-                                    Some(blvm_consensus::pow::U256([u64::MAX; 4])),
+                                    Some(diff_chainwork_ceiling()),
                                 ) {
                                     Ok((vr, post_set, _)) => {
-                                        du.set_inflight_tip(height);
-                                        du.apply_block_delta(
-                                            &input_ops,
-                                            &post_set,
-                                            &prefetched_keys,
-                                        )?;
+                                        window_t_connect_ms +=
+                                            t_conn.elapsed().as_secs_f64() * 1000.0;
                                         match vr {
                                             ValidationResult::Valid => {
+                                                let t_ap = std::time::Instant::now();
+                                                du.apply_block_and_advance_tip(
+                                                    height,
+                                                    &input_ops,
+                                                    &post_set,
+                                                    &prefetched_keys,
+                                                )?;
+                                                window_t_apply_ms +=
+                                                    t_ap.elapsed().as_secs_f64() * 1000.0;
+                                                if let Ok(mut g) = header_times.write() {
+                                                    if g.len() as u64 == height {
+                                                        g.push(block.header.timestamp);
+                                                    }
+                                                }
                                                 (bh, "valid".to_string(), String::new())
                                             }
                                             ValidationResult::Invalid(msg) => {
@@ -1651,11 +2003,15 @@ fn main() -> Result<()> {
                                             }
                                         }
                                     }
-                                    Err(e) => (
+                                    Err(e) => {
+                                        window_t_connect_ms +=
+                                            t_conn.elapsed().as_secs_f64() * 1000.0;
+                                        (
                                         bh,
                                         "invalid".to_string(),
                                         format!("connect_block error: {e:#}"),
-                                    ),
+                                        )
+                                    }
                                 }
                             } else {
                                 match connect_block_assume_valid(
@@ -1664,12 +2020,17 @@ fn main() -> Result<()> {
                                     utxo_set,
                                     height,
                                     &ctx,
-                                    Some(blvm_consensus::pow::U256([u64::MAX; 4])),
+                                    Some(diff_chainwork_ceiling()),
                                 ) {
                                     Ok((vr, new_utxo, _)) => {
                                         utxo_set = new_utxo;
                                         match vr {
                                             ValidationResult::Valid => {
+                                                if let Ok(mut g) = header_times.write() {
+                                                    if g.len() as u64 == height {
+                                                        g.push(block.header.timestamp);
+                                                    }
+                                                }
                                                 (bh, "valid".to_string(), String::new())
                                             }
                                             ValidationResult::Invalid(msg) => {
@@ -1694,12 +2055,27 @@ fn main() -> Result<()> {
                     // `bits` / MTP never drift after a disputed block.
                     push_mtp_window(&mut mtp_header_window, block.header.clone());
                     push_difficulty_ring(&mut diff_ring, block.header.clone());
+                    if row.1 == "valid" {
+                        if let Ok(g) = header_times.read() {
+                            save_resume_headers(
+                                height,
+                                header_cache_dir.as_deref(),
+                                args.disk_utxo_path
+                                    .as_ref()
+                                    .map(|p| p.join("header_timestamps.bin"))
+                                    .as_deref(),
+                                &g,
+                                &diff_ring,
+                                &mtp_header_window,
+                            );
+                        }
+                    }
                     row
                 }
                 Err(e) => (
                     "decode_error".to_string(),
                     "invalid".to_string(),
-                    format!("deserialize: {e:#}"),
+                    format!("deserialize: {e}"),
                 ),
             };
 
@@ -1830,9 +2206,55 @@ fn main() -> Result<()> {
             } else {
                 0.0
             };
+            let st = disk_utxo
+                .as_mut()
+                .map(|du| du.take_prefetch_window_stats())
+                .unwrap_or_default();
+            let avg_pf = if wb > 0.0 {
+                window_t_prefetch_ms / wb
+            } else {
+                0.0
+            };
+            let avg_conn = if wb > 0.0 {
+                window_t_connect_ms / wb
+            } else {
+                0.0
+            };
+            let avg_apply = if wb > 0.0 {
+                window_t_apply_ms / wb
+            } else {
+                0.0
+            };
+            let (anon_mb, swap_mb, _) = mem_anon_swap_rss_mb()
+                .map(|(a, s, r)| (a.unwrap_or(0), s.unwrap_or(0), r))
+                .unwrap_or((0, 0, None));
+            let io_now = proc_io_counters().unwrap_or(window_io);
+            let maj_now = proc_majflt().unwrap_or(window_majflt);
+            let d_syscr = io_now.0.saturating_sub(window_io.0);
+            let d_rbytes = io_now.1.saturating_sub(window_io.1);
+            let d_maj = maj_now.saturating_sub(window_majflt);
+            let heed = if st.heed_off { 1 } else { 0 };
             eprintln!(
-                "KERNEL_DIFF_PROGRESS height={height} compared={compared}/{end_str} divergences={divergence_count} bps={window_bps:.1} avg={total_bps:.1} elapsed={elapsed:.0}s rss={rss}MB t_blvm_ms={avg_blvm:.0} t_core_wait_ms={avg_core_wait:.0}"
+                "KERNEL_DIFF_PROGRESS height={height} compared={compared}/{end_str} divergences={divergence_count} bps={window_bps:.1} avg={total_bps:.1} elapsed={elapsed:.0}s rss={rss}MB anon={anon_mb}MB swap={swap_mb}MB t_blvm_ms={avg_blvm:.0} t_prefetch_ms={avg_pf:.0} t_connect_ms={avg_conn:.0} t_apply_ms={avg_apply:.0} t_core_wait_ms={avg_core_wait:.0} ov={} cache={} res={} db={} db_hit={} db_ms={:.0} cold_ms={:.0} body={} body_ms={:.0} tomb_pg={} coin_pg={} hot={} spill_B={} spill_cap={} runs={}/{} heed_off={heed} d_syscr={d_syscr} d_read_MB={:.1} d_majflt={d_maj}",
+                st.ov,
+                st.cache,
+                st.res,
+                st.db,
+                st.db_hit,
+                st.db_ms,
+                st.cold_ms / wb.max(1.0),
+                st.body_reads,
+                st.body_ms / wb.max(1.0),
+                st.tomb_pages,
+                st.coin_pages,
+                st.hot_len,
+                st.spill_script_bytes,
+                st.spill_cap,
+                st.tomb_runs,
+                st.coin_runs,
+                d_rbytes as f64 / (1024.0 * 1024.0),
             );
+            let _ = std::io::Write::flush(&mut std::io::stderr());
             // Return any freed glibc heap pages to the OS after each progress window.
             // The coins cache flush-and-refill cycle creates ~50-80MB of freed nodes per cycle.
             // Without this, glibc holds the freed pages and the heap's high-watermark grows
@@ -1843,7 +2265,12 @@ fn main() -> Result<()> {
             window_start = std::time::Instant::now();
             window_height = height + 1;
             window_t_blvm_ms = 0.0;
+            window_t_prefetch_ms = 0.0;
+            window_t_connect_ms = 0.0;
+            window_t_apply_ms = 0.0;
             window_t_core_wait_ms = 0.0;
+            window_io = io_now;
+            window_majflt = maj_now;
         }
 
         // Memory guards on `--rss-check-every` cadence (independent of `--progress-every`):
@@ -1940,8 +2367,34 @@ fn main() -> Result<()> {
                 if let Some(rss) = get_rss_mb() {
                     if rss > args.rss_limit_mb {
                         eprintln!(
-                            "KERNEL_DIFF_RSS_LIMIT rss={rss}MB exceeds --rss-limit-mb {}; stopping gracefully at height {height}",
+                            "KERNEL_DIFF_RSS_LIMIT rss={rss}MB exceeds --rss-limit-mb {}; trying overlay flush before exit",
                             args.rss_limit_mb
+                        );
+                        malloc_trim_best_effort();
+                        if let Some(du) = disk_utxo.as_mut() {
+                            let _ = du.join_bg_checkpoint();
+                            if let Err(e) = du.flush_overlay(true) {
+                                eprintln!("   [disk-utxo] RSS-limit flush_overlay error (non-fatal): {e:#}");
+                            }
+                        }
+                        #[cfg(feature = "low-mem-alloc")]
+                        unsafe {
+                            libmimalloc_sys::mi_collect(true);
+                        }
+                        let still_over = get_rss_mb().is_none_or(|rss2| {
+                            if rss2 <= args.rss_limit_mb {
+                                eprintln!(
+                                    "KERNEL_DIFF_RSS_RECOVERED rss={rss2}MB <= {} — continuing",
+                                    args.rss_limit_mb
+                                );
+                                false
+                            } else {
+                                true
+                            }
+                        });
+                        if still_over {
+                        eprintln!(
+                            "KERNEL_DIFF_RSS_LIMIT still over cap after flush; stopping gracefully at height {height}"
                         );
                         if let Some(every) = args.checkpoint_every {
                             if every > 0 && blvm_ok {
@@ -1975,7 +2428,6 @@ fn main() -> Result<()> {
                         eprintln!(
                             "KERNEL_DIFF_RESUME alt (if Core datadir still at tip {height}): omit wipe/import-from-deltas; add --blvm-prefer-utxo-snapshot, keep same CORE_DIFF_DATADIR"
                         );
-                        // Record Core's tip so the restart script can skip seed_headless.
                         write_kernel_diff_core_tip(&core_datadir, height);
                         let total_elapsed_rss = run_start.elapsed().as_secs_f64();
                         eprintln!(
@@ -1994,6 +2446,7 @@ fn main() -> Result<()> {
                             let _ = f.flush();
                         }
                         return Ok(());
+                        }
                     }
                 }
             }
@@ -2022,6 +2475,32 @@ fn main() -> Result<()> {
             }
         }
 
+        if SHUTDOWN.load(Ordering::Relaxed) {
+            eprintln!("KERNEL_DIFF_SIGNAL stop requested at height {height}");
+            if let Some(ref d) = header_cache_dir {
+                save_header_cache(d, height, &diff_ring, &mtp_header_window);
+            }
+            if let Some(ref p) = args.disk_utxo_path {
+                if let Ok(g) = header_times.read() {
+                    save_header_times(&p.join("header_timestamps.bin"), &g);
+                }
+            }
+            if let Some(ref mut du) = disk_utxo {
+                du.flush_overlay(true)?;
+                if let Some(ref tp) = disk_tip_path {
+                    blvm_bench::disk_utxo::write_disk_tip_status_file(tp, height);
+                }
+            }
+            if let Some(ref mut f) = jsonl_log {
+                let _ = f.flush();
+            }
+            if let Some(ref mut f) = sidecar {
+                let _ = f.flush();
+            }
+            stopped_signal = true;
+            break;
+        }
+
         height = height.saturating_add(1);
     }
 
@@ -2044,6 +2523,8 @@ fn main() -> Result<()> {
     );
     if stopped_after_max_divergences {
         eprintln!("KERNEL_DIFF_STATUS STOPPED_MAX_DIVERGENCES");
+    } else if stopped_signal {
+        eprintln!("KERNEL_DIFF_STATUS SIGNAL");
     } else if divergence_count > 0 {
         eprintln!("KERNEL_DIFF_STATUS DIVERGED");
     } else {
@@ -2068,4 +2549,60 @@ fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod resume_header_tests {
+    use super::*;
+
+    fn sample_header(timestamp: u64) -> BlockHeader {
+        BlockHeader {
+            version: 1,
+            prev_block_hash: [0x31; 32],
+            merkle_root: [0x32; 32],
+            timestamp,
+            bits: 0x1d00ffff,
+            nonce: 7,
+        }
+    }
+
+    #[test]
+    fn resume_headers_round_trip_and_ignore_a_torn_file() {
+        unsafe {
+            std::env::set_var("DISK_UTXO_OVERLAY_CHECKPOINT_EVERY", "2000");
+        }
+        let dir = std::env::temp_dir().join(format!(
+            "blvm-resume-headers-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let header = sample_header(1_700_000_000);
+        let mut ring = VecDeque::new();
+        ring.push_back(header.clone());
+        let times_path = dir.join("header_timestamps.bin");
+        save_resume_headers(4_000, Some(&dir), Some(&times_path), &[10, 11, 12, 13], &ring, &[header.clone()]);
+        let (loaded_ring, loaded_mtp) = load_header_cache(&dir, 4_000).expect("header cache");
+        assert_eq!(loaded_ring.len(), 1);
+        assert_eq!(loaded_ring[0].timestamp, 1_700_000_000);
+        assert_eq!(loaded_ring[0].bits, 0x1d00ffff);
+        assert_eq!(loaded_mtp.len(), 1);
+        assert_eq!(load_header_times(&times_path), vec![10, 11, 12, 13]);
+        assert!(!dir.join("headers_4000.tmp").exists());
+        assert!(!times_path.with_extension("tmp").exists());
+
+        save_resume_headers(4_001, Some(&dir), Some(&times_path), &[9], &ring, &[header]);
+        assert!(load_header_cache(&dir, 4_001).is_none());
+        assert_eq!(load_header_times(&times_path), vec![10, 11, 12, 13]);
+
+        std::fs::write(dir.join("headers_4002.bin"), b"HDR").unwrap();
+        assert!(load_header_cache(&dir, 4_002).is_none());
+        std::fs::write(&times_path, [1u8, 2, 3]).unwrap();
+        assert!(load_header_times(&times_path).is_empty());
+
+        unsafe {
+            std::env::remove_var("DISK_UTXO_OVERLAY_CHECKPOINT_EVERY");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

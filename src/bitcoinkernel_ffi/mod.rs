@@ -69,16 +69,24 @@ impl BlockCheckedSlot {
 
 unsafe extern "C" fn on_block_checked(
     user_data: *mut c_void,
-    _block: *mut c_void,
+    block: *mut c_void,
     state: *const c_void,
 ) {
+    // Kernel hands the callback an owned `shared_ptr<CBlock>` copy. Leaving it
+    // alive keeps the whole block body (~1–2 MiB) for the process lifetime.
+    // The validation state is borrowed; do not destroy it.
+    if !block.is_null() {
+        unsafe { btck_block_destroy(block) };
+    }
     if user_data.is_null() || state.is_null() {
         return;
     }
-    let slot = &*(user_data as *const BlockCheckedSlot);
-    let mode = btck_block_validation_state_get_validation_mode(state);
-    let result = btck_block_validation_state_get_block_validation_result(state);
-    *slot.inner.lock().expect("block_checked mutex") = Some(CheckedPayload { mode, result });
+    unsafe {
+        let slot = &*(user_data as *const BlockCheckedSlot);
+        let mode = btck_block_validation_state_get_validation_mode(state);
+        let result = btck_block_validation_state_get_block_validation_result(state);
+        *slot.inner.lock().expect("block_checked mutex") = Some(CheckedPayload { mode, result });
+    }
 }
 
 // `build.rs` emits `cargo:rustc-link-lib` for the *library* target only; binaries in this crate
@@ -152,12 +160,6 @@ unsafe extern "C" {
         block_headers: *const u8,
         n_headers: size_t,
     ) -> c_int;
-    fn btck_chainstate_manager_seed_headless_restore(
-        chainstate_manager: *mut c_void,
-        block_headers: *const u8,
-        n_headers: size_t,
-    ) -> c_int;
-
     fn btck_chainstate_manager_process_block(
         chainstate_manager: *mut c_void,
         block: *const c_void,
@@ -472,20 +474,10 @@ impl KernelSession {
     /// - Block index has been loaded from LevelDB (at least one `process_block` ran before shutdown).
     /// - `raw_headers` is the same header window originally passed to [`seed_headless`].
     pub fn seed_headless_restore(&self, raw_headers: &[[u8; 80]]) -> Result<()> {
-        let flat: Vec<u8> = raw_headers.iter().flat_map(|h| h.iter().copied()).collect();
-        let rc = unsafe {
-            btck_chainstate_manager_seed_headless_restore(
-                self.chainman,
-                flat.as_ptr(),
-                raw_headers.len(),
-            )
-        };
-        if rc != 0 {
-            anyhow::bail!(
-                "btck_chainstate_manager_seed_headless_restore failed (rc={rc}); see Core logs"
-            );
-        }
-        Ok(())
+        let _ = (self, raw_headers);
+        anyhow::bail!(
+            "seed_headless_restore is not in this libbitcoinkernel; restart with wipe+import-from-deltas"
+        );
     }
 
     /// Active chain tip height, or `-1` if the chain is empty (Core convention).

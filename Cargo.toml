@@ -85,8 +85,13 @@ libc = { version = "0.2" }
 # Low-fragmentation allocator for UTXO-heavy binaries (saves ~2GB RSS vs glibc at 50M+ entries)
 mimalloc = { version = "0.1", optional = true }
 # Direct access to mi_collect() for forced heap decommit after large batch flushes
-libmimalloc-sys = { version = "0.1", features = ["extended"], optional = true }
-# Disk-backed UTXO set for checkpoint builds on memory-constrained hosts
+# `override` makes libc malloc/free (libbitcoinkernel, LevelDB) use this heap,
+# so mi_collect can return pages glibc would otherwise keep and swap.
+libmimalloc-sys = { version = "0.1", features = ["extended", "override"], optional = true }
+# Disk-backed UTXO set for checkpoint builds on memory-constrained hosts.
+# Runtime store is heed3/LMDB (same engine as blvm-node). RocksDB is only for
+# one-shot migrate of older `--disk-utxo-path` directories.
+heed3 = { version = "=0.22.1", optional = true, default-features = false }
 rocksdb = { version = "0.24.0", optional = true }
 
 # Local monorepo: sibling paths override the version pins above.
@@ -94,8 +99,8 @@ rocksdb = { version = "0.24.0", optional = true }
 blvm-consensus = { path = "../blvm-consensus" }
 blvm-protocol = { path = "../blvm-protocol" }
 blvm-node = { path = "../blvm-node" }
-blvm-primitives = { path = "../blvm-primitives" }
-blvm-secp256k1 = { path = "../blvm-secp256k1" }
+# Freeze-era consensus 0.1.82 needs crates.io secp 0.1.19 / primitives with Signet.
+# Sibling secp 0.1.7 and primitives 0.1.13 break the graph.
 blvm-spec-lock = { path = "../blvm-spec-lock" }
 
 [features]
@@ -122,10 +127,9 @@ scan = ["chunk-cache", "utxo-snapshot-tools"]
 # Use mimalloc as global allocator (chunk_utxo_checkpoints, etc.) — dramatically lowers RSS
 # for HashMap-heavy workloads with millions of small allocations.
 low-mem-alloc = ["dep:mimalloc", "dep:libmimalloc-sys"]
-# Disk-backed UTXO set via RocksDB — enables chunk_utxo_checkpoints to run on hosts with less RAM
-# than the full UTXO set requires (e.g. 16 GiB at heights > 550k). DB lives on SSD for fast
-# random I/O; chunk reads stay on HDD (`librocksdb-sys` builds RocksDB from source when linking).
-disk-utxo = ["dep:rocksdb"]
+# Disk-backed UTXO set via heed3/LMDB — same default engine as blvm-node. Optional RocksDB
+# is linked only to copy an existing kernel-diff RocksDB dir into LMDB on first open.
+disk-utxo = ["dep:heed3", "dep:rocksdb"]
 # UTXO commitments benchmarks (uses blvm-protocol)
 utxo-commitments = ["blvm-protocol/utxo-commitments"]
 # Benches that import `blvm_node` (storage, RPC integration, parallel validation, Dandelion/FIBRE).
