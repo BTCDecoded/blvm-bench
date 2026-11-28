@@ -17,7 +17,8 @@ use rayon::prelude::*;
 use blvm_protocol::activation::{ForkActivationTable, IsForkActive};
 use blvm_protocol::bip113::get_median_time_past;
 use blvm_protocol::block::calculate_base_script_flags_for_block_network;
-use blvm_protocol::block::{tx_has_nonempty_input_witness, tx_requires_witness_script_flags};
+use blvm_protocol::block::tx_has_nonempty_input_witness;
+use blvm_protocol::script::flags::SCRIPT_VERIFY_WITNESS;
 use blvm_protocol::script::{SigVersion, verify_script_with_context_full};
 use blvm_protocol::segwit::Witness;
 use blvm_protocol::serialization::block::{
@@ -38,6 +39,18 @@ use hex;
 /// Base script flags for `(height, network)` — matches `blvm-consensus` block connect / `script_cache`.
 pub fn get_script_flags(height: u64, network: Network) -> u32 {
     calculate_base_script_flags_for_block_network(height, network)
+}
+
+/// Per-tx flags for step 6. After SegWit, Core's `GetBlockScriptFlags` sets
+/// `SCRIPT_VERIFY_WITNESS` on **every** transaction in the block. Gating that bit on a
+/// nonempty witness or on `IsSegWitTransaction` (outputs) misses pay-to-anchor spends:
+/// empty `scriptSig`, no witness, OP_RETURN-only outputs, prevout `OP_1 PUSH2 4e73`.
+pub fn step6_tx_script_flags(base_flags: u32, height_has_segwit: bool) -> u32 {
+    if height_has_segwit {
+        base_flags | SCRIPT_VERIFY_WITNESS
+    } else {
+        base_flags
+    }
 }
 
 /// Prevout reader that streams sorted prevout data
@@ -559,7 +572,6 @@ fn build_loaded_block(
     };
     let activation = ForkActivationTable::from_network(network);
     let height_has_segwit = activation.is_fork_active(ForkId::SegWit, height);
-    let height_has_taproot = activation.is_fork_active(ForkId::Taproot, height);
 
     // Index prevouts by (tx_idx, input_idx)
     let mut prevout_map: HashMap<(u32, u32), &JoinedPrevout> =
@@ -642,26 +654,9 @@ fn build_loaded_block(
             continue;
         }
 
-        // Per-tx flags
-        let mut tx_flags = base_flags;
         let has_real_witness =
             tx_has_nonempty_input_witness(tx_witnesses.as_ref().map(|w| w.as_slice()));
-        if height_has_segwit && tx_requires_witness_script_flags(tx, has_real_witness) {
-            tx_flags |= 0x800;
-        }
-        if height_has_taproot {
-            use blvm_protocol::constants::TAPROOT_SCRIPT_LENGTH;
-            for o in &tx.outputs {
-                let s = &o.script_pubkey;
-                if s.len() == TAPROOT_SCRIPT_LENGTH
-                    && s[0] == blvm_protocol::opcodes::OP_1
-                    && s[1] == blvm_protocol::opcodes::PUSH_32_BYTES
-                {
-                    tx_flags |= 0x8000;
-                    break;
-                }
-            }
-        }
+        let tx_flags = step6_tx_script_flags(base_flags, height_has_segwit);
 
         // Pre-compute BIP143 hashes once per tx (shared across all inputs).
         // Without this, verify_script_with_context_full recomputes 3 double-SHA256s
@@ -1067,4 +1062,84 @@ pub fn verify_scripts(
     );
 
     Ok((verified_final, failed_final, divergences))
+}
+
+#[cfg(test)]
+mod p2a_flag_tests {
+    use super::*;
+    use blvm_protocol::opcodes::{OP_1, OP_RETURN};
+    use blvm_protocol::types::{OutPoint, Transaction, TransactionInput, TransactionOutput};
+
+    fn p2a_spend() -> Transaction {
+        Transaction {
+            version: 3,
+            inputs: vec![TransactionInput {
+                prevout: OutPoint {
+                    hash: [1; 32],
+                    index: 0,
+                },
+                script_sig: vec![].into(),
+                sequence: 0xffffffff,
+            }]
+            .into(),
+            outputs: vec![TransactionOutput {
+                value: 0,
+                script_pubkey: vec![OP_RETURN, 0x04, 0xfe, 0xed, 0xba, 0xbe].into(),
+            }]
+            .into(),
+            lock_time: 0,
+        }
+    }
+
+    #[test]
+    fn p2a_spend_is_not_a_segwit_output_tx() {
+        use blvm_protocol::segwit::is_segwit_transaction;
+        assert!(!is_segwit_transaction(&p2a_spend()));
+        assert!(!tx_has_nonempty_input_witness(None));
+    }
+
+    #[test]
+    fn post_segwit_step6_flags_include_witness_for_p2a_shape() {
+        let flags = step6_tx_script_flags(0, true);
+        assert_ne!(flags & SCRIPT_VERIFY_WITNESS, 0);
+        let pre = step6_tx_script_flags(0, false);
+        assert_eq!(pre & SCRIPT_VERIFY_WITNESS, 0);
+    }
+
+    #[test]
+    fn p2a_empty_spend_passes_with_witness_flag() {
+        let spk = vec![OP_1, 0x02, 0x4e, 0x73];
+        let tx = p2a_spend();
+        let values = [12091i64];
+        let prev = [spk.as_slice()];
+        let with = SCRIPT_VERIFY_WITNESS;
+        let empty_sig: blvm_protocol::types::ByteString = vec![].into();
+        let run = |flags: u32| {
+            verify_script_with_context_full(
+                &empty_sig,
+                &spk,
+                None,
+                flags,
+                &tx,
+                0,
+                &values,
+                &prev,
+                Some(867_278),
+                None,
+                Network::Mainnet,
+                SigVersion::Base,
+                #[cfg(feature = "production")]
+                None,
+                #[cfg(not(feature = "production"))]
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+        };
+        assert_eq!(run(with), Ok(true));
+        assert_eq!(run(0), Ok(false));
+    }
 }

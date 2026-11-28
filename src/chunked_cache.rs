@@ -644,11 +644,9 @@ impl ChunkedBlockIterator {
                 entry.chunk_number, height
             );
 
-            // Drop any existing page-cache pages for the chunk file before the zstd subprocess
-            // opens it.  Sequential read of a 60 GB file fills ~5 GiB of OS page cache and drives
-            // MemAvailable below the safety floor.  posix_fadvise(DONTNEED) keeps page-cache usage
-            // near-zero for data we've already consumed.
-            fadvise_dontneed(&chunk_file);
+            // Do not MADV_DONTNEED the file we are about to read: resume seeks the same
+            // chunk three times (MTP, nBits ring, compare). Evicting first forces each
+            // pass to pull ~90GB off USB again.
 
             let mut zstd_proc = spawn_zstd_decompress_stdout(&chunk_file, true)?;
             let stdout = zstd_proc
